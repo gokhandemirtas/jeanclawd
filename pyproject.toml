@@ -12,3 +12,6 @@ dependencies = [
     "rich>=15.0.0",
     "ruff>=0.15.12",
 ]
+
+[project.optional-dependencies]
+llamacpp = ["llama-cpp-python>=0.3.0"]

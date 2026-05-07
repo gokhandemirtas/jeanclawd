@@ -1,16 +1,13 @@
 import time
 from dotenv import load_dotenv
-import lmstudio as lms
 from pydantic import BaseModel
 from typing import Literal
+
 from agents.intent_classifier.prompt import INTENT_PROMPT
+from providers import get_provider
 from utils import logger
 
-import os
-
 load_dotenv()
-model_key = os.environ["MODEL_GENERALIST"]
-
 
 IntentLiteral = Literal[
     "HOME_CONTROL",
@@ -33,22 +30,17 @@ class IntentResponse(BaseModel):
 
 
 def test():
-    logger.info(f"Start using {model_key}")
+    provider = get_provider()
+    logger.info(f"Start")
     start = time.time()
 
-    model = lms.llm(
-        model_key,
-        config={
-            "gpu_offload": "max",
-            "temperature": 0,
-            "max_tokens": -1,
-        },
-    )
-    chat = lms.Chat(INTENT_PROMPT)
-    chat.add_user_message(input("Ask me anything"))
+    user_input = input("Ask me anything: ")
+    messages = [
+        {"role": "system", "content": INTENT_PROMPT},
+        {"role": "user", "content": user_input},
+    ]
 
-    for fragment in model.respond_stream(chat, response_format=IntentResponse):
-        logger.stream(fragment.content)
+    response = provider.complete(messages, IntentResponse)
+    logger.info(response)
     logger.newline()
-    elapsed = time.time() - start
-    logger.timing(elapsed)
+    logger.timing(time.time() - start)
