@@ -1,0 +1,146 @@
+"""Background thread that logs VRAM and system memory usage every N seconds."""
+
+import os
+import sys
+import threading
+from functools import lru_cache
+
+import psutil
+
+
+def detect_memory_gb() -> float:
+  """Return the most relevant memory pool in GB for this backend.
+
+  Priority: NVIDIA VRAM → Apple unified RAM → system RAM.
+  Falls back to 8.0 GB on any detection failure.
+  """
+  # NVIDIA VRAM (Linux / llamacpp + CUDA)
+  try:
+    from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlInit
+    nvmlInit()
+    info = nvmlDeviceGetMemoryInfo(nvmlDeviceGetHandleByIndex(0))
+    return info.total / 1024 ** 3
+  except Exception:
+    pass
+
+  # Apple Silicon unified memory (MLX) or CPU-only — total RAM is the pool
+  try:
+    return psutil.virtual_memory().total / 1024 ** 3
+  except Exception:
+    return 8.0
+
+
+# MIN and MAX are exposed so callers can show them in debug output.
+CHAT_HISTORY_MIN = 4
+CHAT_HISTORY_MAX = 20
+
+
+@lru_cache(maxsize=1)
+def compute_chat_history_limit() -> int:
+  """Return how many history messages to pass to the chat model.
+
+  Scales between CHAT_HISTORY_MIN and CHAT_HISTORY_MAX using two signals:
+  - Available memory: more memory → larger model → better long-range coherence
+  - MODEL_CTX: hard upper bound on how many tokens fit alongside system prompt + response
+
+  Computed once per process (lru_cache) since hardware doesn't change at runtime.
+  """
+  memory_gb = detect_memory_gb()
+  ctx = int(os.environ.get("MODEL_CTX", 8192))
+
+  # Context cap: reserve ~2000 tokens for system prompt + user query + response headroom.
+  # Rough estimate: 150 tokens per history message.
+  ctx_cap = max(CHAT_HISTORY_MIN, (ctx - 2000) // 150)
+
+  # Memory cap: 0.7 msgs/GB is a rough heuristic calibrated so that:
+  #   8 GB  →  6 msgs  (3B model on M1 base / RTX 3060)
+  #   16 GB → 11 msgs  (7B model on M2 Pro / RTX 4080)
+  #   24 GB → 17 msgs  (13B model on M2 Max / RTX 3090)
+  mem_cap = round(memory_gb * 0.7)
+
+  return max(CHAT_HISTORY_MIN, min(CHAT_HISTORY_MAX, ctx_cap, mem_cap))
+
+
+def _monitor_loop(interval: float, stop_event: threading.Event):
+  """Periodically log GPU VRAM and system RAM usage."""
+  from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlInit
+  nvmlInit()
+  gpu_handle = nvmlDeviceGetHandleByIndex(0)
+  process = psutil.Process(os.getpid())
+
+  while not stop_event.wait(interval):
+    # GPU VRAM
+    gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
+    gpu_used = gpu_info.used / 1024**2
+    gpu_total = gpu_info.total / 1024**2
+
+    # System RAM (process-level)
+    mem_info = process.memory_info()
+    rss = mem_info.rss / 1024**2
+
+    # System RAM (overall)
+    sys_mem = psutil.virtual_memory()
+    sys_used = sys_mem.used / 1024**2
+    sys_total = sys_mem.total / 1024**2
+
+    line = (
+      f"[monitor] VRAM: {gpu_used:.0f}/{gpu_total:.0f}MB | "
+      f"RAM (process): {rss:.0f}MB | "
+      f"RAM (system): {sys_used:.0f}/{sys_total:.0f}MB"
+    )
+    print(f"\r{line:<80}", end="", flush=True, file=sys.stderr)
+
+
+_stop_event: threading.Event | None = None
+_thread: threading.Thread | None = None
+
+
+def start_monitor(interval: float = 1.0):
+  """Start the background resource monitor.
+
+  Args:
+      interval: Seconds between reports (default: 1.0)
+  """
+  global _stop_event, _thread
+  if _thread is not None and _thread.is_alive():
+    logger.warning("Resource monitor already running")
+    return
+
+  _stop_event = threading.Event()
+  _thread = threading.Thread(
+    target=_monitor_loop,
+    args=(interval, _stop_event),
+    daemon=True,
+    name="resource-monitor",
+  )
+  _thread.start()
+  from utils.log import logger
+  logger.info(f"Resource monitor started (interval={interval}s)")
+
+
+def stop_monitor():
+  """Stop the background resource monitor."""
+  global _stop_event, _thread
+  if _stop_event is not None:
+    _stop_event.set()
+  if _thread is not None:
+    _thread.join(timeout=5)
+    _thread = None
+  _stop_event = None
+  from utils.log import logger
+  logger.info("Resource monitor stopped")
+
+
+if __name__ == "__main__":
+  import signal
+  import sys
+
+  interval = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
+  start_monitor(interval)
+
+  try:
+    signal.pause()
+  except KeyboardInterrupt:
+    pass
+  finally:
+    stop_monitor()
