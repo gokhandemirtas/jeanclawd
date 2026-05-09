@@ -4,17 +4,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from dotenv import load_dotenv
-import lmstudio as lms
-from pydantic import BaseModel
-
 import os
-
-from agents.intent_classifier.intent_classifier import IntentResponse, model_key
-from agents.intent_classifier.prompt import INTENT_PROMPT
-from utils import logger
-
+from dotenv import load_dotenv
 load_dotenv()
+
+import lmstudio as lms
+
+from agents.intent_classifier.intent_classifier import IntentResponse
+from agents.intent_classifier.prompt import INTENT_PROMPT
+
+model_key: str = os.getenv("MODEL_GENERALIST", "")
+from utils import logger
 
 TEST_CASES = [
 	# HOME_CONTROL
@@ -75,19 +75,12 @@ TEST_CASES = [
 	("I don't like chimps", "CHAT"),
 	("drive me to the airport", "CHAT"),
 	("you were wrong about that", "CHAT"),
+	("are we all going to die", "CHAT"),
+	("will humanity survive", "CHAT"),
+	("open the door", "CHAT"),
+	("make me a coffee", "CHAT"),
+	("I am ozymandias", "CHAT"),
 ]
-
-JUDGE_PROMPT = """You are evaluating an intent classifier for a home assistant app.
-
-Given a user query, the expected intent, and the actual classified intent, decide if the classification is correct.
-
-Be strict: only pass=true if the actual intent clearly matches the expected intent. Do not accept wrong categories even if they seem loosely related."""
-
-
-class JudgeVerdict(BaseModel):
-	passed: bool
-	reasoning: str
-
 
 def classify(model: lms.LLM, query: str) -> str:
 	chat = lms.Chat(INTENT_PROMPT)
@@ -96,17 +89,6 @@ def classify(model: lms.LLM, query: str) -> str:
 	for fragment in model.respond_stream(chat, response_format=IntentResponse):
 		raw += fragment.content
 	return IntentResponse.model_validate_json(raw).intent
-
-
-def judge(model: lms.LLM, query: str, expected: str, actual: str) -> JudgeVerdict:
-	chat = lms.Chat(JUDGE_PROMPT)
-	chat.add_user_message(
-		f'Query: "{query}"\nExpected: {expected}\nActual: {actual}\n\nIs this correct?'
-	)
-	raw = ""
-	for fragment in model.respond_stream(chat, response_format=JudgeVerdict):
-		raw += fragment.content
-	return JudgeVerdict.model_validate_json(raw)
 
 
 def run():
@@ -121,14 +103,14 @@ def run():
 
 	for query, expected in TEST_CASES:
 		actual = classify(model, query)
-		verdict = judge(model, query, expected, actual)
+		ok = actual == expected
 
-		if verdict.passed:
+		if ok:
 			passed += 1
 		else:
 			failed += 1
 
-		logger.result(query, expected, actual, verdict.passed, verdict.reasoning)
+		logger.result(query, expected, actual, ok, "")
 
 	elapsed = time.time() - start
 	total = len(TEST_CASES)

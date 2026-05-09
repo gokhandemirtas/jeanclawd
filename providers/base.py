@@ -18,3 +18,8 @@ class InferenceProvider(ABC):
 	) -> BaseModel:
 		tokens = "".join(self.complete_stream(messages, response_format))
 		return response_format.model_validate_json(tokens)
+
+	@abstractmethod
+	def respond(self, messages: list[dict]) -> str:
+		"""Raw text completion without structured output."""
+		...

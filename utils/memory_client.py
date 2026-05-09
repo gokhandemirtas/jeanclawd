@@ -28,31 +28,10 @@ class _LangboxLlm:
     """
 
     def generate_response(self, messages, response_format=None, tools=None, tool_choice=None) -> str:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-        from agents.agent_factory import create_llm
         from json_repair import repair_json
+        from providers import get_provider
 
-        llm = create_llm(
-            model_name=os.environ["MODEL_GENERALIST"],
-            temperature=0.0,
-            max_tokens=256,
-            top_p=0.9,
-            top_k=40,
-            repeat_penalty=1.0,
-        )
-        lc_messages = []
-        for m in messages:
-            role = m.get("role", "user")
-            content = m.get("content", "")
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-            elif role == "assistant":
-                lc_messages.append(AIMessage(content=content))
-            else:
-                lc_messages.append(HumanMessage(content=content))
-
-        response = llm.invoke(lc_messages)
-        text = response.content.strip()
+        text = get_provider().respond(messages).strip()
 
         # Ensure the output is valid JSON before mem0 parses it
         if response_format and response_format.get("type") == "json_object":

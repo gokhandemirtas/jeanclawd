@@ -20,5 +20,5 @@ def transcribe(audio_path: str) -> str:
         Transcribed text string
     """
     model = _get_model()
-    result = model.transcribe(audio_path)
+    result = model.transcribe(audio_path, language="en")
     return result["text"].strip()

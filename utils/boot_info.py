@@ -6,13 +6,33 @@ import subprocess
 
 import aiohttp
 import psutil
+from rich.color import Color
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.style import Style
 from rich.table import Table
+from rich.text import Text
 
 _console = Console()
+
+
+def _gradient_print(
+	art: str, start_rgb: tuple[int, int, int], end_rgb: tuple[int, int, int]
+) -> None:
+	lines = art.split("\n")
+	max_width = max((len(line) for line in lines), default=1)
+	rich_text = Text()
+	for line in lines:
+		for i, char in enumerate(line):
+			t = i / max_width
+			r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * t)
+			g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * t)
+			b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * t)
+			rich_text.append(char, style=Style(color=Color.from_rgb(r, g, b)))
+		rich_text.append("\n")
+	_console.print(rich_text, end="")
 
 
 def _fmt_gb(b: int) -> str:
@@ -144,9 +164,12 @@ async def check_inference() -> tuple[bool, str]:
 
 
 _JEANCLAWD = r"""                                                                                   
-                                                                                                                                             
-                                                                                                              
-                                                                                                                                             
+
+                                              _ ___   _   _  _      ___ _    _   _ _ _ ___
+                                             | | __| /_\ | \| |    / __| |  /_\ | | | |   \
+                                           _ | | _| / _ \| .` |   | (__| |_/ _ \| |_| | |) |
+                                           \__/|___/_/ \_|_|\_|    \___|____/_/ \_|\___/|___/
+
                                         #++***                                                 %*#***                                        
                                     =-:=@@@@@                                                 @%@@@@%-:=+                                    
                                   =:.=@@@@                                                         @@@%:.:=                                  
@@ -210,7 +233,7 @@ def boot(
 	for name, total, free in _resources():
 		res_table.add_row(name, total, free)
 
-	_console.print(_JEANCLAWD, style="bold cyan", highlight=False)
+	_gradient_print(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
 	_console.print(Rule("[bold magenta]JeanClawd[/bold magenta]"))
 	_console.print(Panel(models_table, title="Models", border_style="dim"))
 	columns = [

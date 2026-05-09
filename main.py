@@ -10,9 +10,22 @@ from rich.console import Console
 from agents.greeting.greeting_agent import greet
 from agents.intent_classifier.intent_classifier import classify
 from agents.intent_router.intent_router import route
+from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
 from utils.boot_info import boot, check_inference
+
+try:
+	from prompt_toolkit import PromptSession
+	from prompt_toolkit.completion import WordCompleter
+
+	_completer = WordCompleter(
+		sorted(_COMMANDS.keys()) + ["/quit", "/exit", "/bye"],
+		sentence=True,
+	)
+	_prompt_session: PromptSession | None = PromptSession(completer=_completer)
+except ImportError:
+	_prompt_session = None
 
 load_dotenv()
 
@@ -89,13 +102,17 @@ async def main(
 
 	while True:
 		try:
-			user_input = (await asyncio.to_thread(console.input, "❯ ")).strip()
+			if _prompt_session is not None:
+				user_input = (await _prompt_session.prompt_async("❯ ")).strip()
+			else:
+				user_input = (await asyncio.to_thread(console.input, "❯ ")).strip()
 			if not user_input:
 				continue
 			if user_input.startswith("/"):
 				if user_input in ("/quit", "/exit", "/bye"):
 					console.print("\nGoodbye! Have a great day!")
 					break
+				await handle_command(user_input)
 				continue
 
 			streamed: list[str] = []
@@ -112,9 +129,10 @@ async def main(
 			_elapsed = time.time() - _start
 
 			if speak:
-				from tts.tts import speak as tts_speak
+				from tts.tts import speak as tts_speak, active_voice_id
+				from agents.persona import get_active_voice_id
 
-				await asyncio.to_thread(tts_speak, response)
+				await asyncio.to_thread(tts_speak, response, get_active_voice_id() or active_voice_id)
 
 			if streamed:
 				console.out("")

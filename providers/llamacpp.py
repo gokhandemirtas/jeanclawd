@@ -40,3 +40,12 @@ class LlamaCppProvider(InferenceProvider):
 			content = chunk["choices"][0]["delta"].get("content")
 			if content:
 				yield content
+
+	def respond(self, messages: list[dict]) -> str:
+		response = self._llm.create_chat_completion(
+			messages=messages,
+			temperature=self._temperature,
+			max_tokens=self._max_tokens,
+			stream=False,
+		)
+		return response["choices"][0]["message"]["content"]

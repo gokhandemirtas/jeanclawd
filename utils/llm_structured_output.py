@@ -1,7 +1,4 @@
-import os
 from typing import Type, TypeVar
-
-import lmstudio as lms
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
@@ -18,20 +15,10 @@ def generate_structured_output(
 	top_p: float = 0.9,
 	top_k: int = 40,
 ) -> T:
-	model = lms.llm(
-		model_name,
-		config={
-			"temperature": temperature,
-			"max_tokens": max_tokens,
-			"repeat_penalty": repeat_penalty,
-			"top_p": top_p,
-			"top_k": top_k,
-		},
-	)
-	chat = lms.Chat(system_prompt)
-	chat.add_user_message(user_prompt)
-	tokens = "".join(
-		fragment.content
-		for fragment in model.respond_stream(chat, response_format=pydantic_model)
-	)
-	return pydantic_model.model_validate_json(tokens)
+	from providers import get_provider
+
+	messages = [
+		{"role": "system", "content": system_prompt},
+		{"role": "user", "content": user_prompt},
+	]
+	return get_provider().complete(messages, pydantic_model)

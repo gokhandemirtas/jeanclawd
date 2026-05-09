@@ -105,16 +105,12 @@ async def cmd_analyze() -> None:
 
 async def cmd_ctx() -> None:
     import os
-    from utils.llm_structured_output_llamacpp import _get_or_load_llama, _model_path
 
-    model_name = os.environ.get("MODEL_GENERALIST")
+    import tiktoken
     n_ctx = int(os.environ.get("MODEL_CTX", 8192))
-    full_path = _model_path(model_name)
-    llama = _get_or_load_llama(model_name, full_path, -1, {})
-
     history_text = _format_history()
-    tokens = llama.tokenize(history_text.encode()) if history_text else []
-    used = len(tokens)
+    enc = tiktoken.get_encoding("cl100k_base")
+    used = len(enc.encode(history_text)) if history_text else 0
     pct = used / n_ctx * 100
 
     bar_width = 40

@@ -31,3 +31,13 @@ class LMStudioProvider(InferenceProvider):
 
 		for fragment in self._model.respond_stream(chat, response_format=response_format):
 			yield fragment.content
+
+	def respond(self, messages: list[dict]) -> str:
+		system = next((m["content"] for m in messages if m["role"] == "system"), "")
+		chat = lms.Chat(system)
+		for msg in messages:
+			if msg["role"] == "user":
+				chat.add_user_message(msg["content"])
+			elif msg["role"] == "assistant":
+				chat.add_assistant_message(msg["content"])
+		return "".join(f.content for f in self._model.respond_stream(chat))

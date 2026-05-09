@@ -133,7 +133,7 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 			queue.put_nowait({"stage": "done", "text": response})
 		except Exception as e:
 			logger.error(f"[api/query/ws] pipeline failed: {e}")
-			queue.put_nowait({"stage": "error", "error": str(e)})
+			queue.put_nowait({"stage": "error", "error": "Something went wrong. Please try again."})
 
 	async def pump_events() -> None:
 		while True:
@@ -191,7 +191,7 @@ async def handle_voice(request: web.Request) -> web.Response:
 		logger.warning("[api/voice] missing audio field in multipart request")
 		return web.json_response({"error": "audio field is required"}, status=400)
 
-	with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
+	with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 		audio_in = tmp.name
 		while chunk := await field.read_chunk(8192):
 			tmp.write(chunk)
@@ -244,7 +244,7 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
 		await ws.close()
 		return ws
 
-	with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
+	with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 		audio_in = tmp.name
 		tmp.write(msg.data)
 
