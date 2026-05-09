@@ -22,8 +22,8 @@ async def compact_conversations(for_date: date) -> str:
     """Summarise exchanges for the given date, save back to the document, and return the summary.
 
     If a previous summary exists, merges it with the full log into an updated summary.
-    Raises ValueError for missing/empty documents.
-    Raises RuntimeError if the LLM call fails (status is set to 'error' before raising).
+    Always resets compact_status to 'error' before re-raising so the endpoint is not
+    left stuck in the 'pending' state on any failure path.
     """
     doc = await Conversations.find_one(Conversations.date == for_date)
     if doc is None:

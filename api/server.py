@@ -387,6 +387,16 @@ async def handle_compact_ws(request: web.Request) -> web.WebSocketResponse:
 
 		asyncio.create_task(write_journal_entry(for_date))
 	except Exception as e:
+		# Reset status so the endpoint is not stuck at "pending" on any failure path.
+		# compact_conversations handles this internally for LLM errors, but early
+		# ValueErrors (e.g. race on doc state) bubble up without touching the DB.
+		try:
+			fresh = await Conversations.find_one(Conversations.date == for_date)
+			if fresh and fresh.compact_status == "pending":
+				fresh.compact_status = "error"
+				await fresh.save()
+		except Exception:
+			pass
 		if not ws.closed:
 			await ws.send_json({"status": "error", "error": str(e)})
 	finally:

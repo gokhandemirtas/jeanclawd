@@ -10,6 +10,7 @@ from rich.console import Console
 from agents.greeting.greeting_agent import greet
 from agents.intent_classifier.intent_classifier import classify
 from agents.intent_router.intent_router import route
+from skills.conversation.skill import resolve_query
 from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
@@ -122,10 +123,11 @@ async def main(
 				console.out(token, end="")
 
 			_start = time.time()
-			intent = await asyncio.to_thread(classify, user_input)
+			effective_query = await resolve_query(user_input)
+			intent = await asyncio.to_thread(classify, effective_query)
 			logger.debug(f"Intent: {intent}")
 
-			response = await route(intent, user_input, on_token=on_token)
+			response = await route(intent, effective_query, on_token=on_token)
 			_elapsed = time.time() - _start
 
 			if speak:

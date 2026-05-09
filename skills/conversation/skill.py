@@ -36,6 +36,39 @@ class _TopicResponse(BaseModel):
 # Tracks the active conversation topic so the intent classifier can resolve follow-ups.
 _current_topic: str | None = None
 
+_FOLLOWUP_WORDS = frozenset({
+  "it", "its", "that", "this", "them", "those", "they", "their",
+  "same", "one", "ones", "there", "here", "him", "her", "he", "she",
+})
+
+
+def _is_followup(text: str) -> bool:
+  words = text.lower().split()
+  return len(words) <= 5 or bool(_FOLLOWUP_WORDS & set(words))
+
+
+async def resolve_query(user_input: str) -> str:
+  """Rewrite a follow-up query into a standalone question using the current topic.
+
+  Returns the original query unchanged when no topic is active or the query
+  is clearly self-contained — so the happy path costs nothing.
+  """
+  if not _current_topic or not _is_followup(user_input):
+    return user_input
+  llm = _get_llm(temperature=0.1, max_tokens=60)
+  response = await llm.ainvoke([
+    SystemMessage(content=(
+      "Rewrite the user's follow-up as a complete, standalone question using the topic. "
+      "Return only the rewritten question — no explanation, no punctuation changes beyond what's needed."
+    )),
+    HumanMessage(content=f"Topic: {_current_topic}\nFollow-up: {user_input}"),
+  ])
+  rewritten = _strip_think(response.content).strip()
+  if rewritten and rewritten.lower() != user_input.lower():
+    logger.debug(f"[query] '{user_input}' → '{rewritten}'")
+    return rewritten
+  return user_input
+
 
 def get_current_topic() -> str | None:
   return _current_topic
