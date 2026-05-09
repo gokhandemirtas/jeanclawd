@@ -32,8 +32,7 @@ async def db_init() -> str | None:
     await init_beanie(database=client.langbox, document_models=collections)
     return f"Initiated MongoDB with: {[col.__name__ for col in collections]}"
   except Exception as error:
-    logger.error(error)
-    exit("Mongo DB failed to start")
+    raise RuntimeError("MongoDB failed to start") from error
 
 
 if __name__ == "__main__":

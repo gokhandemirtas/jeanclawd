@@ -5,10 +5,17 @@ from rich.rule import Rule
 from rich.text import Text
 
 _console = Console()
+_debug_enabled = False
+
+
+def set_debug(enabled: bool) -> None:
+	global _debug_enabled
+	_debug_enabled = enabled
 
 
 def debug(msg: str) -> None:
-	_console.print(f"[dim][DEBUG] {msg}[/dim]")
+	if _debug_enabled:
+		_console.print(f"[dim][DEBUG] {msg}[/dim]")
 
 
 def info(msg: str) -> None:
@@ -16,7 +23,8 @@ def info(msg: str) -> None:
 
 
 def warning(msg: str) -> None:
-	_console.print(f"[bold yellow][WARN][/bold yellow] {msg}")
+	if _debug_enabled:
+		_console.print(f"[bold yellow][WARN][/bold yellow] {msg}")
 
 
 def error(msg: str) -> None:
@@ -37,7 +45,8 @@ def newline() -> None:
 
 
 def timing(elapsed: float) -> None:
-	_console.print(f"[dim]{elapsed:.2f}s[/dim]")
+	if _debug_enabled:
+		_console.print(f"[dim]{elapsed:.2f}s[/dim]")
 
 
 def result(

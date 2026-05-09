@@ -4,6 +4,7 @@ import platform
 import shutil
 import subprocess
 
+import aiohttp
 import psutil
 from rich.columns import Columns
 from rich.console import Console
@@ -132,7 +133,60 @@ def _resources() -> list[tuple[str, str, str]]:
 	return rows
 
 
-def boot() -> None:
+async def check_inference() -> tuple[bool, str]:
+	host = os.getenv("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
+	try:
+		async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+			async with session.get(f"{host}/models") as resp:
+				return (resp.status == 200, host)
+	except Exception:
+		return (False, host)
+
+
+_JEANCLAWD = r"""                                                                                   
+                                                                                                                                             
+                                                                                                              
+                                                                                                                                             
+                                        #++***                                                 %*#***                                        
+                                    =-:=@@@@@                                                 @%@@@@%-:=+                                    
+                                  =:.=@@@@                                                         @@@%:.:=                                  
+                                +=::-*@@     %*#%                                           @##%     @%*:..=#                                
+                               *=-::=#@ *===*@@@                                             @@%=-=*  %*-:.==*                               
+                              +=::==#%*=:.:-*%                                                @@#-..:=#%*=-.-=+                              
+                            **+=:::-. =.::-**                                                   *-::..-.:=::-+**                             
+                            *#*=---.   :-=*                                                      *=--:.  .===****                            
+                           *#**+=-....::-+                  %=%#           @*%%                   *=:::...:=**##*                            
+                           *%#**+:::::-=#                  %@@@*%         *@@@%                    **=-::::-#*#%*%                           
+                           *#%%*==--==**               %#*++#@@#%%+==+++*%*%@@++*%#                  *+=---=-%%%*%                           
+                           ##%%#*=+*###           *+*****==%@%**%@@%#*%%@%%=#@@*+****#*#              %#*+=+*%%%%*                           
+                           #%%#*#=:-=%@#+      *++=%%%%@@@@%***+***++**+%===+**#%@@@%@@***#         *%%*=-:#@%#%%%                           
+                            %@%%*===*%*-+****   %@@@%%%#*+=--++*%*=*%%%**%*=-==++*#%%%@@@@#    ***++=*#%=--=+#%%%                            
+                             %%%*+#%*+=::==+**#%%%%%%%%#*+=:::=*+  :**=  =*+:::=+**#%%%%%%@ %#**===::+*=*%#**%%%                             
+                                %%#*=::::..:=**%%@@#**#%#+==-=:*=. :*%*..-*====+*#%%##%%@@%%#*+=:...::::-*%%%                                
+                                 @%%**=-::::.:=#+*@@@%%#*****-:*+:-:*%=-=+==--*****#%@@@@#*#*=::.:::-==**%%                                  
+                                    %%**+==--*:::+***%@##%*====*+-:-*%+--*+*==+***#%@%*#++:..:*:-==++*#%%                                    
+                                        #%#****=#*=.:.:.*:::*@%%#-=%%%%*-*%%%%-.:*-....:-+%*=%****%%                                         
+                                             %%%*+*==----.::+:**++..:::.:*=%=+=.::=:---=*=*%%%%                                              
+                                               @%%%%###+=*#*::+...::::-:::.--:*%*==****#%%@@                                                 
+                                                 @#%%%@%@%*#%*:......:.....:=##**%#%%%%%%                                                    
+                                                  @@%%%@#=:::*=-:::-::-::---+=:::=%@%%%%                                                     
+                                          *#%%%%%%%%@@@%%**==*::::::-=:::::-=*==*%%%@@@%@%%%%%%*#                                            
+                                     #*%%%#***++==+===*:=-:****===-=+*======#+@::=::*+=+=-+****##%%***                                       
+                             #*##**#%***=:..:=====:=:-*-:*:-*#%====*#%#*-===%%=-=+-=*:-::=++==:..:=***%*******                               
+                     ***#**#***=+*+=*#=+*******+==::=:=#*%-+@*%*+******+***#*%@==%##=-=::==+*****++==#*++**=***#*#*##*#                      
+          *%%####**#*+**+++=--+**%##*=*%*****+--==+#%#%##%%%%%%@%##%%%%###%@%%%@%##%%#%*+=--=+****%#*=**##*+=---====*#*+%%#*******           
+       %%*##=+=====+%*=*+***%%%%%%#**%%*%%%%%%%%%%@@                                   @@%%%%%%%@%#%@%+*#%%%%%%###***==%*+====**+%**%%       
+    %%#%@@@%@##%%%%%%%%%%%%%@@        @@@%%@                                                  %@@%@%@       @@@@%%%%%#@@%%%%%%*#@%@@@%%%%    
+   @@@@@@@@@@@@@@@@    @@@                                                                                         @@@   @@@@@@@@@@@ @@@@@@  
+                                                                                                                                       
+ 
+"""
+
+
+def boot(
+	connections: dict[str, tuple[bool, str]] | None = None,
+	flags: dict[str, bool] | None = None,
+) -> None:
 	models_table = Table(
 		box=None, show_header=True, header_style="bold", padding=(0, 2, 0, 0)
 	)
@@ -156,15 +210,32 @@ def boot() -> None:
 	for name, total, free in _resources():
 		res_table.add_row(name, total, free)
 
-	_console.print()
-	_console.print(Rule("[bold magenta]AIDA[/bold magenta]"))
+	_console.print(_JEANCLAWD, style="bold cyan", highlight=False)
+	_console.print(Rule("[bold magenta]JeanClawd[/bold magenta]"))
 	_console.print(Panel(models_table, title="Models", border_style="dim"))
-	_console.print(
-		Columns(
-			[
-				Panel(backend_table, title="Backend", border_style="dim"),
-				Panel(res_table, title="Resources", border_style="dim"),
-			]
-		)
-	)
+	columns = [
+		Panel(backend_table, title="Backend", border_style="dim"),
+		Panel(res_table, title="Resources", border_style="dim"),
+	]
+
+	if connections:
+		conn_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+		conn_table.add_column("Service", style="dim", min_width=14)
+		conn_table.add_column("Status", min_width=10)
+		conn_table.add_column("Detail")
+		for svc, (ok, detail) in connections.items():
+			status = "[green]online[/green]" if ok else "[red]offline[/red]"
+			conn_table.add_row(svc, status, f"[dim]{detail}[/dim]")
+		columns.append(Panel(conn_table, title="Connections", border_style="dim"))
+
+	if flags:
+		flags_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+		flags_table.add_column("Flag", style="dim", min_width=14)
+		flags_table.add_column("State")
+		for flag, enabled in flags.items():
+			state = "[green]on[/green]" if enabled else "[dim]off[/dim]"
+			flags_table.add_row(flag, state)
+		columns.append(Panel(flags_table, title="Flags", border_style="dim"))
+
+	_console.print(Columns(columns))
 	_console.print()

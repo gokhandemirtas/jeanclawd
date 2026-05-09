@@ -1,6 +1,5 @@
 import os
 import select
-import subprocess
 import termios
 import threading
 import time
@@ -8,17 +7,28 @@ import tty
 
 import numpy as np
 import scipy.io.wavfile
+import sounddevice as sd
 from rich.console import Console
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
-from utils.log import logger
+from utils import logger
 from pocket_tts import TTSModel
 
 _console = Console(stderr=True, force_terminal=True)
 
 voice_ids = ["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"]
 active_voice_id = "azelma"
+_tts_enabled = False
+
+
+def enable_tts(enabled: bool = True) -> None:
+    global _tts_enabled
+    _tts_enabled = enabled
+
+
+def is_tts_enabled() -> bool:
+    return _tts_enabled
 
 
 def _escape_listener(stop_event: threading.Event) -> None:
@@ -90,45 +100,28 @@ def speak(text: str, voice_id: str = active_voice_id):
     tts_model = TTSModel.load_model(temp=0.5, lsd_decode_steps=7, eos_threshold=-1.0)
     sample_rate = tts_model.sample_rate
 
-    fifo_path = "/tmp/tts_stream.pcm"
-    if os.path.exists(fifo_path):
-        os.remove(fifo_path)
-    os.mkfifo(fifo_path)
-
-    player_proc = subprocess.Popen(
-        ["aplay", "-f", "S16_LE", "-r", str(sample_rate), "-c", "1", fifo_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
     try:
         start_time = time.time()
         voice_state = tts_model.get_state_for_audio_prompt(voice_id)
         chunks = tts_model.generate_audio_stream(voice_state, text_to_generate=text)
 
-        with open(fifo_path, "wb") as fifo:
+        with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
             with Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True):
                 for chunk in chunks:
                     if stop_event.is_set():
                         break
-                    pcm = (chunk.numpy() * 32767).astype(np.int16)
-                    fifo.write(pcm.tobytes())
+                    stream.write(chunk.numpy().reshape(-1, 1))
 
         if stop_event.is_set():
-            player_proc.kill()
             logger.debug("TTS interrupted by user")
         else:
-            player_proc.wait()
             logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 
     except Exception as e:
-        logger.error(e)
-        player_proc.kill()
+        logger.error(str(e))
     finally:
         stop_event.set()
         listener.join(timeout=0.5)
-        if os.path.exists(fifo_path):
-            os.remove(fifo_path)
 
 
 if __name__ == "__main__":

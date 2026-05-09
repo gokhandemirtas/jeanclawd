@@ -28,14 +28,13 @@ import json
 import os
 import tempfile
 import threading
-
-from aiohttp import WSMsgType
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 
-from utils.log import logger
+from tts.pipeline import process_voice_job, process_voice_ws
+from utils import logger
 
 # ---------------------------------------------------------------------------
 # Voice job queue
@@ -174,115 +173,6 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 	return ws
 
 
-def _process_voice_job(
-	job_id: str,
-	audio_in: str,
-	loop: asyncio.AbstractEventLoop,
-	voice_id: str | None = None,
-) -> None:
-	"""Blocking pipeline: ffmpeg → Whisper → intent classifier → TTS. Runs in thread pool."""
-	import subprocess
-	import whisper
-	from tts.tts import active_voice_id, synthesise
-
-	cancel_event: threading.Event = _voice_jobs[job_id]["cancel_event"]
-	wav_in = audio_in.replace(".m4a", ".wav")
-	audio_out = None
-	try:
-		if cancel_event.is_set():
-			_voice_jobs[job_id].update({"status": "cancelled"})
-			return
-
-		# ffmpeg pre-convert
-		try:
-			subprocess.run(
-				[
-					"ffmpeg",
-					"-y",
-					"-nostdin",
-					"-analyzeduration",
-					"10M",
-					"-probesize",
-					"10M",
-					"-i",
-					audio_in,
-					"-ac",
-					"1",
-					"-acodec",
-					"pcm_s16le",
-					"-ar",
-					"16000",
-					wav_in,
-				],
-				check=True,
-				capture_output=True,
-			)
-		except subprocess.CalledProcessError as e:
-			logger.error(f"[api/voice] ffmpeg failed: {e.stderr.decode()}")
-			_voice_jobs[job_id].update(
-				{"status": "error", "error": "audio conversion failed"}
-			)
-			return
-
-		if cancel_event.is_set():
-			_voice_jobs[job_id].update({"status": "cancelled"})
-			return
-
-		# Whisper STT
-		model = whisper.load_model("base")
-		transcript = model.transcribe(wav_in)["text"].strip()
-		logger.debug(f"[api/voice] transcript='{transcript}'")
-		_voice_jobs[job_id]["transcription"] = transcript
-
-		if cancel_event.is_set():
-			_voice_jobs[job_id].update({"status": "cancelled"})
-			return
-
-		# Intent classifier (async — run via the event loop from this thread)
-		from agents.intent_classifier import run_intent_classifier
-
-		future = asyncio.run_coroutine_threadsafe(run_intent_classifier(transcript), loop)
-		response_text = future.result()
-		_voice_jobs[job_id]["text"] = response_text
-
-		if cancel_event.is_set():
-			_voice_jobs[job_id].update({"status": "cancelled"})
-			return
-
-		# TTS — cancel_event wires directly into the chunk loop
-		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
-			audio_out = tmp_out.name
-		synthesise(
-			response_text,
-			audio_out,
-			voice_id=voice_id or active_voice_id,
-			cancel_event=cancel_event,
-		)
-
-		if cancel_event.is_set():
-			_voice_jobs[job_id].update({"status": "cancelled"})
-			return
-
-		with open(audio_out, "rb") as f:
-			audio_b64 = base64.b64encode(f.read()).decode()
-
-		_voice_jobs[job_id].update(
-			{
-				"status": "done",
-				"transcription": transcript,
-				"text": response_text,
-				"audio": audio_b64,
-			}
-		)
-	except Exception as e:
-		logger.error(f"[api/voice] job {job_id} failed: {e}")
-		_voice_jobs[job_id].update({"status": "error", "error": str(e)})
-	finally:
-		for path in (audio_in, wav_in, audio_out):
-			if path and os.path.exists(path):
-				os.remove(path)
-
-
 async def handle_voice(request: web.Request) -> web.Response:
 	from tts.tts import active_voice_id, voice_ids
 	from agents.persona import get_active_voice_id
@@ -316,104 +206,10 @@ async def handle_voice(request: web.Request) -> web.Response:
 
 	loop = asyncio.get_running_loop()
 	loop.run_in_executor(
-		_voice_executor, _process_voice_job, job_id, audio_in, loop, voice_id
+		_voice_executor, process_voice_job, _voice_jobs[job_id], audio_in, loop, voice_id
 	)
 
 	return web.json_response({"job_id": job_id, "status": "pending"}, status=202)
-
-
-def _process_voice_ws(
-	audio_in: str,
-	loop: asyncio.AbstractEventLoop,
-	voice_id: str,
-	cancel_event: threading.Event,
-	send_event,
-	on_token,
-) -> None:
-	"""ffmpeg → Whisper → LLM → TTS pipeline for the WebSocket path.
-
-	Pushes JSON events via send_event as each stage completes.
-	Checks cancel_event between stages; synthesise() checks it inside the TTS loop.
-	"""
-	import subprocess
-	import whisper
-	from tts.tts import synthesise
-
-	wav_in = audio_in.replace(".m4a", ".wav")
-	audio_out = None
-	try:
-		if cancel_event.is_set():
-			return
-
-		try:
-			subprocess.run(
-				[
-					"ffmpeg",
-					"-y",
-					"-nostdin",
-					"-analyzeduration",
-					"10M",
-					"-probesize",
-					"10M",
-					"-i",
-					audio_in,
-					"-ac",
-					"1",
-					"-acodec",
-					"pcm_s16le",
-					"-ar",
-					"16000",
-					wav_in,
-				],
-				check=True,
-				capture_output=True,
-			)
-		except subprocess.CalledProcessError as e:
-			logger.error(f"[api/voice/ws] ffmpeg failed: {e.stderr.decode()}")
-			send_event({"stage": "error", "error": "audio conversion failed"})
-			return
-
-		if cancel_event.is_set():
-			return
-
-		model = whisper.load_model("base")
-		transcript = model.transcribe(wav_in)["text"].strip()
-		logger.debug(f"[api/voice/ws] transcript='{transcript}'")
-		send_event({"stage": "transcribed", "text": transcript})
-
-		if cancel_event.is_set():
-			return
-
-		from agents.intent_classifier import run_intent_classifier
-
-		future = asyncio.run_coroutine_threadsafe(
-			run_intent_classifier(transcript, on_token=on_token),
-			loop,
-		)
-		response_text = future.result()
-
-		if cancel_event.is_set():
-			return
-
-		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
-			audio_out = tmp_out.name
-		synthesise(response_text, audio_out, voice_id=voice_id, cancel_event=cancel_event)
-
-		if cancel_event.is_set():
-			return
-
-		with open(audio_out, "rb") as f:
-			audio_b64 = base64.b64encode(f.read()).decode()
-
-		send_event({"stage": "done", "text": response_text, "audio": audio_b64})
-
-	except Exception as e:
-		logger.error(f"[api/voice/ws] pipeline failed: {e}")
-		send_event({"stage": "error", "error": str(e)})
-	finally:
-		for path in (audio_in, wav_in, audio_out):
-			if path and os.path.exists(path):
-				os.remove(path)
 
 
 async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
@@ -465,7 +261,7 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
 
 	loop.run_in_executor(
 		_voice_executor,
-		_process_voice_ws,
+		process_voice_ws,
 		audio_in,
 		loop,
 		voice_id,
@@ -887,7 +683,6 @@ async def start_api_server(host: str = "0.0.0.0", port: int = 8000) -> web.AppRu
 	await runner.setup()
 	site = web.TCPSite(runner, host, port)
 	await site.start()
-	logger.info(f"API server listening on {host}:{port}")
 	return runner
 
 

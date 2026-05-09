@@ -46,5 +46,7 @@ def get_active_identity() -> str:
 
 
 def get_active_preamble() -> str:
+    from skills.registry import SKILLS
     p = PERSONAS[_active_persona_id]
-    return p["description"]
+    capabilities = "\n".join(f"- {skill.description}" for skill in SKILLS)
+    return f"{p['description']}\n\nYour capabilities:\n{capabilities}"

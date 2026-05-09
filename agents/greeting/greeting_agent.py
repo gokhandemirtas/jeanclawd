@@ -10,7 +10,7 @@ class GreetingResponse(BaseModel):
 	greeting: str
 
 
-def greet_and_collect() -> str:
+def greet() -> None:
 	provider = get_provider()
 	messages = [
 		{
@@ -27,5 +27,9 @@ def greet_and_collect() -> str:
 	logger.newline()
 	logger.info(response.greeting)
 	logger.newline()
+
+
+def greet_and_collect() -> str:
+	greet()
 	user_input = input("You: ").strip()
 	return user_input
