@@ -32,15 +32,29 @@ def _get_client():
 			host=os.environ.get("QDRANT_HOST", "localhost"),
 			port=int(os.environ.get("QDRANT_PORT", "6333")),
 		)
+		from utils.embedder import get_embedding_dim
+		dim = get_embedding_dim()
+
 		existing = {c.name for c in _client.get_collections().collections}
 		if COLLECTION not in existing:
-			from utils.embedder import EMBEDDING_DIM
-
 			_client.create_collection(
 				collection_name=COLLECTION,
-				vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
+				vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
 			)
-			logger.info(f"[journal_index] Created Qdrant collection '{COLLECTION}'")
+			logger.info(f"[journal_index] Created Qdrant collection '{COLLECTION}' (dim={dim})")
+		else:
+			info = _client.get_collection(COLLECTION)
+			stored_dim = info.config.params.vectors.size
+			if stored_dim != dim:
+				logger.warning(
+					f"[journal_index] Collection dim mismatch (stored={stored_dim}, model={dim}) — recreating"
+				)
+				_client.delete_collection(COLLECTION)
+				_client.create_collection(
+					collection_name=COLLECTION,
+					vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+				)
+				logger.info(f"[journal_index] Recreated '{COLLECTION}' with dim={dim}")
 
 	return _client
 

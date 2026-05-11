@@ -32,6 +32,53 @@ def _strip_think(text: str) -> str:
   return text.strip()
 
 
+_FINAL_CHANNEL_MARKER = "<|channel|>final<|message|>"
+
+
+class _ChannelFilter:
+  """Wraps an on_token callback and suppresses channel-routing tokens at stream time.
+
+  Channel-based models emit one or more analysis channels before a final channel:
+    <|channel|>analysis<|message|>...thinking...<|end|><|start|>assistant<|channel|>final<|message|>response
+  We buffer until we see the specific final-channel marker, then stream what follows.
+  Models with no channel tokens pass through immediately.
+  """
+
+  def __init__(self, on_token: Callable[[str], None]) -> None:
+    self._cb = on_token
+    self._buf = ""
+    self._flushing = False
+
+  def push(self, token: str) -> None:
+    if self._flushing:
+      clean = re.sub(r"<\|[^|]+\|>", "", token)
+      if clean:
+        self._cb(clean)
+      return
+
+    self._buf += token
+
+    if _FINAL_CHANNEL_MARKER in self._buf:
+      tail = self._buf.split(_FINAL_CHANNEL_MARKER, 1)[1]
+      tail = re.sub(r"<\|[^|]+\|>", "", tail)
+      self._buf = ""
+      self._flushing = True
+      if tail:
+        self._cb(tail)
+    elif "<|" not in self._buf:
+      # No special token fragments pending — non-channel model, emit directly
+      self._cb(self._buf)
+      self._buf = ""
+
+  def flush(self) -> None:
+    """Drain any buffered content at end of stream (fallback for models with no final channel)."""
+    if self._buf:
+      clean = _strip_think(self._buf)
+      if clean:
+        self._cb(clean)
+      self._buf = ""
+
+
 class _ConversationResponse(BaseModel):
   topic: str = Field(description="3-5 word label describing the subject of this exchange (e.g. 'weather in London', 'Tesla stock price')")
   answer: str = Field(description="Natural language response presenting the data to the user")
@@ -231,11 +278,13 @@ async def handle_conversation(
     llm = _get_llm(temperature=0.7, max_tokens=512 if voice_mode else 768)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]
     full_text = ""
+    _filter = _ChannelFilter(on_token)
     async for chunk in llm.astream(messages):
       token = chunk.content
       if token:
         full_text += token
-        on_token(token)
+        _filter.push(token)
+    _filter.flush()
     final = _strip_think(full_text)
     _history.append(HumanMessage(content=user_query))
     _history.append(AIMessage(content=final))
@@ -309,11 +358,13 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     llm = _get_llm(temperature=0.7, max_tokens=512 if voice_mode else 1024)
     messages = [SystemMessage(content=system), HumanMessage(content=user_prompt)]
     full_text = ""
+    _filter = _ChannelFilter(on_token)
     async for chunk in llm.astream(messages):
       token = chunk.content
       if token:
         full_text += token
-        on_token(token)
+        _filter.push(token)
+    _filter.flush()
     final = _strip_think(full_text)
     _history.append(HumanMessage(content=query))
     _history.append(AIMessage(content=final))

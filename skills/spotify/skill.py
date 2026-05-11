@@ -27,6 +27,7 @@ Actions:
 - VOLUME: change the volume (extract integer 0–100)
 - NOW_PLAYING: show what is currently playing
 - QUEUE: add a song to the queue
+- LIST_DEVICES: list available/connected Spotify devices
 
 For PLAY and QUEUE involving a single song, set `target` to the search query (e.g. "Bohemian Rhapsody Queen").
 If the user refers to a list of songs mentioned earlier in the conversation (e.g. "play them all", "play the playlist"), extract each song title + artist into `targets` as separate strings.
@@ -38,7 +39,7 @@ Leave optional fields as null if not applicable.
 
 
 class _SpotifyAction(BaseModel):
-    action: Literal["PLAY", "PAUSE", "RESUME", "SKIP", "PREVIOUS", "VOLUME", "NOW_PLAYING", "QUEUE"]
+    action: Literal["PLAY", "PAUSE", "RESUME", "SKIP", "PREVIOUS", "VOLUME", "NOW_PLAYING", "QUEUE", "LIST_DEVICES"]
     target: Optional[str] = Field(None, description="Search query for a single PLAY/QUEUE action")
     targets: Optional[list[str]] = Field(None, description="List of search queries when playing multiple songs (e.g. a playlist)")
     volume: Optional[int] = Field(None, description="Volume 0-100 for VOLUME action", ge=0, le=100)
@@ -87,6 +88,16 @@ async def handle_spotify(query: str) -> str:
                 return f"Couldn't find a device matching '{action.device}'. Available: {names}."
         else:
             device_id = await client.get_active_device_id()
+
+        if action.action == "LIST_DEVICES":
+            devices = await client.get_devices()
+            if not devices:
+                return "No Spotify devices found. Open Spotify on at least one device."
+            lines = []
+            for d in devices:
+                status = "active" if d["is_active"] else "inactive"
+                lines.append(f"- {d['name']} ({d['type']}, {status})")
+            return "Connected Spotify devices:\n" + "\n".join(lines)
 
         if action.action == "NOW_PLAYING":
             track = await client.now_playing()

@@ -12,6 +12,7 @@ so both this module and journal_index share a single loaded model.
 from __future__ import annotations
 
 import os
+import traceback
 from typing import Optional
 
 from utils.log import logger
@@ -33,52 +34,74 @@ class _LangboxLlm:
 		from json_repair import repair_json
 		from providers import get_provider
 
-		text = get_provider().respond(messages).strip()
+		raw = get_provider().respond(messages).strip()
+		logger.debug(f"[memory_client] raw LLM output: {raw!r}")
+
+		# Strip model thinking/channel tokens — take only the content after the last
+		# <|message|> marker so json_repair doesn't grab JSON from the reasoning section.
+		if "<|message|>" in raw:
+			raw = raw.rsplit("<|message|>", 1)[-1].strip()
+
+		text = raw
 
 		# Ensure the output is valid JSON before mem0 parses it
 		if response_format and response_format.get("type") == "json_object":
 			text = repair_json(text)
-			# mem0 expects {"memory": [{"text": "...", "event": "ADD|UPDATE|DELETE|NONE"}]}
-			# Local LLMs sometimes return malformed items (nested lists, bare strings).
-			# Normalise to dicts while preserving event values — forcing ADD on everything
-			# breaks mem0's dedup phase which relies on NONE/UPDATE/DELETE events.
+			# mem0 v2 LLMs return {"memory": [{"id": "0", "text": "...", "attributed_to": "user"}]}
+			# mem0 v1 used {"event": "ADD|UPDATE|DELETE|NONE"} instead.
+			# Normalise both formats to the v1 event-based schema mem0 still expects internally,
+			# keeping only user-attributed facts (assistant response facts add noise).
 			_VALID_EVENTS = {"ADD", "UPDATE", "DELETE", "NONE"}
 			try:
 				import json as _json
 
 				parsed = _json.loads(text)
+				if isinstance(parsed, list):
+					parsed = {"memory": parsed}
 				if isinstance(parsed, dict) and "memory" in parsed:
 					items = parsed["memory"]
 					if isinstance(items, list):
 						normalised = []
 						for item in items:
-							if isinstance(item, dict) and "text" in item:
-								# Already well-formed — preserve event as-is
-								normalised.append(item)
-							elif isinstance(item, list) and item:
-								# ["fact text", "EVENT"] or ["fact text"]
-								fact = str(item[0])
-								event = (
-									str(item[1]).upper()
-									if len(item) > 1 and str(item[1]).upper() in _VALID_EVENTS
-									else "ADD"
-								)
-								normalised.append({"text": fact, "event": event})
-							elif isinstance(item, str) and item:
-								# "EVENT: fact text" or bare fact string
-								upper = item.upper()
-								event = "ADD"
-								fact = item
-								for ev in _VALID_EVENTS:
-									if upper.startswith(f"{ev}:"):
-										event = ev
-										fact = item[len(ev) + 1 :].strip()
-										break
-								normalised.append({"text": fact, "event": event})
+							if not isinstance(item, dict):
+								if isinstance(item, str) and item:
+									upper = item.upper()
+									event, fact = "ADD", item
+									for ev in _VALID_EVENTS:
+										if upper.startswith(f"{ev}:"):
+											event, fact = ev, item[len(ev) + 1:].strip()
+											break
+									normalised.append({"text": fact, "event": event})
+								elif isinstance(item, list) and item:
+									fact = str(item[0])
+									event = (
+										str(item[1]).upper()
+										if len(item) > 1 and str(item[1]).upper() in _VALID_EVENTS
+										else "ADD"
+									)
+									normalised.append({"text": fact, "event": event})
+								continue
+
+							text_val = item.get("text", "")
+							if not text_val:
+								continue
+
+							# Skip assistant-attributed items — they add noise
+							if item.get("attributed_to", "user") == "assistant":
+								continue
+
+							if "event" in item:
+								# v1 format — pass through as-is
+								normalised.append({"text": text_val, "event": item["event"]})
+							else:
+								# v2 format (id + attributed_to, no event) — default to ADD
+								normalised.append({"text": text_val, "event": "ADD"})
+
 						parsed["memory"] = normalised
 						text = _json.dumps(parsed)
 			except Exception:
-				pass
+				logger.debug(f"[memory_client] normalisation failed: {traceback.format_exc()}")
+		logger.debug(f"[memory_client] normalised output: {text!r}")
 		return text
 
 
@@ -89,6 +112,12 @@ class _LangboxEmbedder:
 		from utils.embedder import embed
 
 		return embed(text)
+
+	@staticmethod
+	def _probe_dim() -> int:
+		from utils.embedder import get_embedding_dim
+
+		return get_embedding_dim()
 
 
 def _get_memory() -> "Memory":
@@ -119,12 +148,33 @@ def _get_memory() -> "Memory":
 					"host": os.environ.get("QDRANT_HOST", "localhost"),
 					"port": int(os.environ.get("QDRANT_PORT", "6333")),
 					"collection_name": "langbox_memories",
-					"embedding_model_dims": int(os.environ.get("EMBEDDING_DIM", "384")),
+					"embedding_model_dims": _LangboxEmbedder._probe_dim(),
 				},
 			},
 			"llm": {"provider": "openai", "config": {}},
 			"embedder": {"provider": "openai", "config": {}},
 		}
+
+		# Recreate the Qdrant collection if the stored dimension doesn't match the model
+		_dim = _LangboxEmbedder._probe_dim()
+		try:
+			from qdrant_client import QdrantClient
+
+			_qc = QdrantClient(
+				host=os.environ.get("QDRANT_HOST", "localhost"),
+				port=int(os.environ.get("QDRANT_PORT", "6333")),
+			)
+			existing = {c.name for c in _qc.get_collections().collections}
+			if "langbox_memories" in existing:
+				info = _qc.get_collection("langbox_memories")
+				stored_dim = info.config.params.vectors.size
+				if stored_dim != _dim:
+					logger.warning(
+						f"[memory_client] Dim mismatch (stored={stored_dim}, model={_dim}) — dropping langbox_memories (mem0 will recreate)"
+					)
+					_qc.delete_collection("langbox_memories")
+		except Exception:
+			logger.exception("[memory_client] Dim-check failed — proceeding anyway")
 
 		_memory = Memory.from_config(config)
 		# Ensure our instances are set even if the factory patch path was skipped

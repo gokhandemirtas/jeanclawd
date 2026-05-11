@@ -280,9 +280,8 @@ async def cmd_compact_memory() -> None:
 
 
 async def cmd_flush_memory() -> None:
-    """Delete all mem0 memories with a progress indicator."""
+    """Delete all mem0 memories by dropping the Qdrant collection (mem0 recreates it on next use)."""
     import os
-    from rich.progress import Progress, BarColumn, TaskProgressColumn, TextColumn
 
     try:
         from qdrant_client import QdrantClient
@@ -291,45 +290,20 @@ async def cmd_flush_memory() -> None:
         port = int(os.environ.get("QDRANT_PORT", "6333"))
         client = QdrantClient(host=host, port=port)
 
-        all_ids = []
-        offset = None
-        while True:
-            result, next_offset = client.scroll(
-                "langbox_memories",
-                limit=100,
-                offset=offset,
-                with_payload=False,
-                with_vectors=False,
-            )
-            all_ids.extend(p.id for p in result)
-            if next_offset is None:
-                break
-            offset = next_offset
-
-        if not all_ids:
-            logger.info("Nothing to delete.")
-            return
-
-        with Progress(
-            TextColumn("[/flush-memory]"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TextColumn("{task.completed}/{task.total} memories cleared"),
-            transient=True,
-        ) as progress:
-            task = progress.add_task("Deleting", total=len(all_ids))
-            batch_size = 50
-            for i in range(0, len(all_ids), batch_size):
-                batch = all_ids[i : i + batch_size]
-                client.delete(
-                    "langbox_memories",
-                    points_selector=batch,
-                )
-                progress.advance(task, len(batch))
+        existing = {c.name for c in client.get_collections().collections}
+        count = 0
+        if "langbox_memories" in existing:
+            info = client.get_collection("langbox_memories")
+            count = info.points_count or 0
+            client.delete_collection("langbox_memories")
 
         import utils.memory_client as _mc
         _mc._memory = None
-        logger.info(f"{len(all_ids)} memories deleted.")
+
+        if count:
+            logger.info(f"{count} memories deleted.")
+        else:
+            logger.info("No memories to delete.")
     except Exception as e:
         logger.error(f"flush-memory failed: {e}")
 
