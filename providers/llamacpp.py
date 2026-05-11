@@ -52,3 +52,6 @@ class LlamaCppProvider(InferenceProvider):
 
 	def embed(self, text: str) -> list[float]:
 		raise NotImplementedError("LlamaCppProvider does not support embeddings")
+
+	def context_length(self) -> int:
+		return self._llm.n_ctx()

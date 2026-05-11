@@ -92,6 +92,17 @@ class Note(Document):
     name = "Notes"
 
 
+class UserPreferences(Document):
+  active_persona_id: str = "jean"
+  active_voice_id: str = "azelma"
+  spotify_device_id: Optional[str] = None
+  spotify_device_name: Optional[str] = None
+  updated_at: datetime = datetime.now()
+
+  class Settings:
+    name = "UserPreferences"
+
+
 class VoiceSettings(Document):
   active_voice_id: str = "azelma"
 

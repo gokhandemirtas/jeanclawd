@@ -16,10 +16,11 @@ from db.schemas import (
   Reminders,
   ServiceCredentials,
   UserPersona,
+  UserPreferences,
   Weather,
 )
 
-collections = [Conversations, Credentials, HueConfiguration, Journal, Newsfeed, Note, Plans, Reminders, ServiceCredentials, UserPersona, Weather]
+collections = [Conversations, Credentials, HueConfiguration, Journal, Newsfeed, Note, Plans, Reminders, ServiceCredentials, UserPersona, UserPreferences, Weather]
 
 
 async def db_init() -> str | None:

@@ -7,6 +7,8 @@ from functools import lru_cache
 
 import psutil
 
+from utils.log import logger
+
 
 def detect_memory_gb() -> float:
   """Return the most relevant memory pool in GB for this backend.
@@ -41,12 +43,20 @@ def compute_chat_history_limit() -> int:
 
   Scales between CHAT_HISTORY_MIN and CHAT_HISTORY_MAX using two signals:
   - Available memory: more memory → larger model → better long-range coherence
-  - MODEL_CTX: hard upper bound on how many tokens fit alongside system prompt + response
+  - Actual model context length queried from the provider at startup
 
   Computed once per process (lru_cache) since hardware doesn't change at runtime.
   """
+  from providers import get_provider
+
   memory_gb = detect_memory_gb()
-  ctx = int(os.environ.get("MODEL_CTX", 8192))
+
+  try:
+    ctx = get_provider().context_length()
+    logger.debug(f"[resource_monitor] Model context length: {ctx} tokens")
+  except Exception:
+    ctx = int(os.environ.get("MODEL_CTX", 8192))
+    logger.warning(f"[resource_monitor] Could not query model context length, falling back to MODEL_CTX={ctx}")
 
   # Context cap: reserve ~2000 tokens for system prompt + user query + response headroom.
   # Rough estimate: 150 tokens per history message.
@@ -58,7 +68,9 @@ def compute_chat_history_limit() -> int:
   #   24 GB → 17 msgs  (13B model on M2 Max / RTX 3090)
   mem_cap = round(memory_gb * 0.7)
 
-  return max(CHAT_HISTORY_MIN, min(CHAT_HISTORY_MAX, ctx_cap, mem_cap))
+  limit = max(CHAT_HISTORY_MIN, min(CHAT_HISTORY_MAX, ctx_cap, mem_cap))
+  logger.debug(f"[resource_monitor] Chat history limit: {limit} (ctx_cap={ctx_cap}, mem_cap={mem_cap})")
+  return limit
 
 
 def _monitor_loop(interval: float, stop_event: threading.Event):

@@ -7,6 +7,7 @@ import time
 from dotenv import load_dotenv
 from rich.console import Console
 
+from agents.action_resolver.agent import resolve_action_query
 from agents.greeting.greeting_agent import greet
 from agents.intent_classifier.intent_classifier import classify
 from agents.intent_router.intent_router import route
@@ -124,6 +125,7 @@ async def main(
 
 			_start = time.time()
 			effective_query = await resolve_query(user_input)
+			effective_query = await resolve_action_query(effective_query)
 			intent = await asyncio.to_thread(classify, effective_query)
 			logger.debug(f"Intent: {intent}")
 

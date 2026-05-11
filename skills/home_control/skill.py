@@ -12,42 +12,38 @@ from utils.llm_structured_output import generate_structured_output
 
 HOME_CONTROL_PROMPT = """Extract light control intent. Return JSON only.
 
-Schema: {"type": "ALL"|"GROUP"|"LIGHT", "id": int|null, "on": bool|null}
+Schema: {"type": "ALL"|"GROUP"|"LIGHT", "on": bool|null}
 
 Rules:
-1. If no specific light or group is mentioned → type: "ALL", id: null, example "lights off"
-2. Room name (e.g. "office") → match to GROUP first, then LIGHT, example "living room lights on"
+1. If no specific light or group is mentioned → type: "ALL"
+2. If a room or specific light is mentioned → type: "GROUP" or "LIGHT"
 3. on/turn on = on: true; off/turn off = on: false
 4. toggle/switch = on: null (means toggle current state)
-5. Match names case-insensitive
-6. Return complete JSON matching schema
 
 Examples:
-{"type": "ALL", "id": null, "on": true}
-{"type": "GROUP", "id": 1, "on": false}
-{"type": "LIGHT", "id": 3, "on": true}
-{"type": "ALL", "id": null, "on": null}
-{"type": "GROUP", "id": 2, "on": null}"""
+{"type": "ALL", "on": true}
+{"type": "GROUP", "on": false}
+{"type": "LIGHT", "on": true}
+{"type": "ALL", "on": null}"""
 
 
 class HomeControlIntentResponse(BaseModel):
   type: str
-  id: Optional[int] = None
   on: Optional[bool] = None
 
 
-def _classify_intent(query: str, lights: str, groups: str) -> dict:
+def _classify_intent(query: str) -> dict:
   try:
     result = generate_structured_output(
       model_name=os.environ["MODEL_GENERALIST"],
       user_prompt=query,
-      system_prompt=f"""Groups: {groups}, Lights: {lights}, {HOME_CONTROL_PROMPT}""",
+      system_prompt=HOME_CONTROL_PROMPT,
       pydantic_model=HomeControlIntentResponse,
     )
     return result.model_dump()
   except Exception as e:
     logger.error(f"Failed to generate structured output. Error: {e}")
-    return {"type": "ALL", "id": None, "on": True}
+    return {"type": "ALL", "on": True}
 
 
 _LIST_KEYWORDS = {"list", "show", "what", "which", "available", "display"}
@@ -76,20 +72,39 @@ async def _execute_home_control(hue_client: HueBridgeClient, query: str, force_s
   if _is_list_query(query):
     return f"Groups: {groups_list}\nLights: {lights_list}"
 
-  intent = _classify_intent(query, lights_list, groups_list)
+  intent = _classify_intent(query)
   target_type = intent.get("type")
-  target_id = intent.get("id")
   turn_on = intent.get("on")
 
   logger.debug(f"Detected secondary intent: {intent}")
+
+  query_words = set(query.lower().split())
+
+  target_id: Optional[int] = None
+  if target_type == "GROUP":
+    for group in config.groups:
+      name_words = set(group.name.lower().split())
+      if query_words & name_words:
+        target_id = group.id
+        break
+  elif target_type == "LIGHT":
+    for light in config.lights:
+      name_words = set(light.name.lower().split())
+      if query_words & name_words:
+        target_id = light.id
+        break
 
   if turn_on is None:
     turn_on = not await hue_client.are_lights_on(target_type, target_id)
     logger.debug(f"Toggle resolved to: {'on' if turn_on else 'off'}")
 
-  if target_type == "GROUP" and target_id is not None:
+  if target_type == "GROUP":
+    if target_id is None:
+      return f"Couldn't identify which group to control. Available groups: {groups_list}"
     return await hue_client.control_group(target_id, turn_on)
-  elif target_type == "LIGHT" and target_id is not None:
+  elif target_type == "LIGHT":
+    if target_id is None:
+      return f"Couldn't identify which light to control. Available lights: {lights_list}"
     return await hue_client.control_light(target_id, turn_on)
   else:
     results = [await hue_client.control_group(group.id, turn_on) for group in config.groups]

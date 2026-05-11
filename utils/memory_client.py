@@ -34,15 +34,7 @@ class _LangboxLlm:
 		from json_repair import repair_json
 		from providers import get_provider
 
-		raw = get_provider().respond(messages).strip()
-		logger.debug(f"[memory_client] raw LLM output: {raw!r}")
-
-		# Strip model thinking/channel tokens — take only the content after the last
-		# <|message|> marker so json_repair doesn't grab JSON from the reasoning section.
-		if "<|message|>" in raw:
-			raw = raw.rsplit("<|message|>", 1)[-1].strip()
-
-		text = raw
+		text = get_provider().respond(messages).strip()
 
 		# Ensure the output is valid JSON before mem0 parses it
 		if response_format and response_format.get("type") == "json_object":
@@ -69,7 +61,7 @@ class _LangboxLlm:
 									event, fact = "ADD", item
 									for ev in _VALID_EVENTS:
 										if upper.startswith(f"{ev}:"):
-											event, fact = ev, item[len(ev) + 1:].strip()
+											event, fact = ev, item[len(ev) + 1 :].strip()
 											break
 									normalised.append({"text": fact, "event": event})
 								elif isinstance(item, list) and item:
@@ -203,6 +195,22 @@ def add_exchange(user_msg: str, assistant_msg: str, user_id: str = "default") ->
 		logger.exception("[memory_client] Failed to store exchange")
 
 
+def add_exchanges(exchanges: list[tuple[str, str]], user_id: str = "default") -> None:
+	"""Extract facts from a batch of exchanges and store them in Qdrant (one LLM call)."""
+	if not exchanges:
+		return
+	try:
+		mem = _get_memory()
+		messages = []
+		for user_msg, assistant_msg in exchanges:
+			messages.append({"role": "user", "content": user_msg})
+			messages.append({"role": "assistant", "content": assistant_msg})
+		mem.add(messages, user_id=user_id)
+		logger.debug(f"[memory_client] Stored {len(exchanges)} exchange(s) as a batch")
+	except Exception:
+		logger.exception("[memory_client] Failed to store exchange batch")
+
+
 def compact_memories(user_id: str = "default") -> tuple[int, int]:
 	"""LLM-squash duplicate/redundant memories and replace the store.
 
@@ -298,7 +306,7 @@ def compact_memories(user_id: str = "default") -> tuple[int, int]:
 				id=str(uuid.uuid4()),
 				vector=embed(fact),
 				payload={
-					"memory": fact,
+					"data": fact,
 					"user_id": user_id,
 					"hash": str(hash(fact)),
 					"created_at": now,

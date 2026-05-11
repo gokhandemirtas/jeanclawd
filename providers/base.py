@@ -28,3 +28,8 @@ class InferenceProvider(ABC):
 	def embed(self, text: str) -> list[float]:
 		"""Return an embedding vector for the given text."""
 		...
+
+	@abstractmethod
+	def context_length(self) -> int:
+		"""Return the actual context window size (tokens) for the loaded model."""
+		...
