@@ -23,3 +23,8 @@ class InferenceProvider(ABC):
 	def respond(self, messages: list[dict]) -> str:
 		"""Raw text completion without structured output."""
 		...
+
+	@abstractmethod
+	def embed(self, text: str) -> list[float]:
+		"""Return an embedding vector for the given text."""
+		...

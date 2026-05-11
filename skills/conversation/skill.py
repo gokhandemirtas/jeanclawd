@@ -15,8 +15,21 @@ from utils.llm_structured_output import generate_structured_output
 
 
 def _strip_think(text: str) -> str:
-  """Remove <think>...</think> reasoning blocks emitted by reasoning models."""
-  return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+  """Remove model-internal tags from raw LLM output.
+
+  Handles:
+  - <think>...</think> reasoning blocks (reasoning models)
+  - <|channel|>...<|message|>... routing tokens (channel-based models like gpt-oss)
+  - Stray <|token|> special tokens
+  """
+  # Channel-based models: extract text after the last <|message|> marker
+  if "<|message|>" in text:
+    text = text.rsplit("<|message|>", 1)[-1]
+  # Remove any remaining <|token|> special tokens
+  text = re.sub(r"<\|[^|]+\|>", "", text)
+  # Remove <think>...</think> blocks
+  text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+  return text.strip()
 
 
 class _ConversationResponse(BaseModel):
@@ -200,6 +213,7 @@ async def handle_conversation(
   user_query: str,
   handler_response: str,
   on_token: Callable[[str], None] | None = None,
+  voice_mode: bool = False,
 ) -> str:
   """Wrap a skill's raw output into natural language — stateless, no session memory.
 
@@ -210,9 +224,11 @@ async def handle_conversation(
   global _current_topic
 
   system_prompt = _data_prompt(handler_response)
+  if voice_mode:
+    system_prompt += "\n\nRespond in a single short paragraph — spoken aloud, so no lists or markdown."
 
   if on_token is not None:
-    llm = _get_llm(temperature=0.7, max_tokens=768)
+    llm = _get_llm(temperature=0.7, max_tokens=512 if voice_mode else 768)
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]
     full_text = ""
     async for chunk in llm.astream(messages):
@@ -231,7 +247,7 @@ async def handle_conversation(
     user_prompt=user_query,
     system_prompt=system_prompt,
     pydantic_model=_ConversationResponse,
-    max_tokens=768,
+    max_tokens=512 if voice_mode else 768,
   )
   final = _strip_think(result.answer)
   _current_topic = result.topic
@@ -260,7 +276,7 @@ async def _fetch_relevant_memories(query: str) -> str:
     return ""
 
 
-async def handle_chat(query: str, on_token: Callable[[str], None] | None = None) -> str:
+async def handle_chat(query: str, on_token: Callable[[str], None] | None = None, voice_mode: bool = False) -> str:
   """CHAT intent — responds with full conversation history for follow-up awareness.
 
   When on_token is provided (voice WebSocket path), streams tokens via ChatLlamaCpp.
@@ -269,11 +285,15 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None)
 
   from skills.conversation.reasoning_engine import reason_and_act, should_use_reasoning
 
+  _VOICE_CONSTRAINT = "\n\nYou are responding to a voice message. Reply in a single short paragraph — natural when spoken aloud, no lists or markdown."
+
   # Streaming path for voice WebSocket — bypass structured output and reasoning engine
   if on_token is not None:
     if len(_history) >= MAX_HISTORY - 2:
       await _compress_oldest()
     system = _chat_prompt()
+    if voice_mode:
+      system += _VOICE_CONSTRAINT
     persona = get_persona_context()
     if persona:
       system = system + "\n\n" + persona
@@ -286,7 +306,7 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None)
       history_lines.append(f"{role}: {msg.content}")
     user_prompt = ("## Conversation so far:\n" + "\n".join(history_lines) + f"\n\nUser: {query}"
                    if history_lines else query)
-    llm = _get_llm(temperature=0.7, max_tokens=1024)
+    llm = _get_llm(temperature=0.7, max_tokens=512 if voice_mode else 1024)
     messages = [SystemMessage(content=system), HumanMessage(content=user_prompt)]
     full_text = ""
     async for chunk in llm.astream(messages):
@@ -335,6 +355,8 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None)
   # Normal CHAT flow (simple conversation, no reasoning needed)
   logger.debug("[CHAT] Using standard conversation flow")
   system = _chat_prompt()
+  if voice_mode:
+    system += _VOICE_CONSTRAINT
   persona = get_persona_context()
   if persona:
     logger.debug(persona)
@@ -367,7 +389,7 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None)
     user_prompt=user_prompt,
     system_prompt=system,
     pydantic_model=_ChatResponse,
-    max_tokens=1024,
+    max_tokens=512 if voice_mode else 1024,
   )
   final = _strip_think(result.answer)
   _current_topic = result.topic

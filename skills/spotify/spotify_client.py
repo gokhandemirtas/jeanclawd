@@ -33,11 +33,18 @@ class SpotifyClient:
             async with session.post(f"{_API_BASE}{path}", json=json, params=params) as resp:
                 resp.raise_for_status()
 
-    async def get_active_device_id(self) -> Optional[str]:
+    async def get_devices(self) -> list[dict]:
+        """Returns list of {"id": ..., "name": ..., "type": ..., "is_active": ...}."""
         data = await self._get("/me/player/devices")
         if not data:
-            return None
-        devices = data.get("devices", [])
+            return []
+        return [
+            {"id": d["id"], "name": d["name"], "type": d["type"], "is_active": d["is_active"]}
+            for d in data.get("devices", [])
+        ]
+
+    async def get_active_device_id(self) -> Optional[str]:
+        devices = await self.get_devices()
         active = next((d for d in devices if d["is_active"]), None)
         if active:
             return active["id"]

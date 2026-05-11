@@ -16,7 +16,7 @@ from utils.log import logger
 _console = Console(stderr=True, force_terminal=True)
 _auth = SpotifyAuthProvider()
 
-_SPOTIFY_PROMPT = """You are a Spotify command parser. Extract the action and target from the user's query.
+_SPOTIFY_PROMPT = """You are a Spotify command parser. Extract the action, target(s), and device from the user's request.
 
 Actions:
 - PLAY: play a song, artist, album, or playlist
@@ -28,26 +28,46 @@ Actions:
 - NOW_PLAYING: show what is currently playing
 - QUEUE: add a song to the queue
 
-For PLAY and QUEUE, extract the search query (e.g. "Radiohead", "Bohemian Rhapsody").
+For PLAY and QUEUE involving a single song, set `target` to the search query (e.g. "Bohemian Rhapsody Queen").
+If the user refers to a list of songs mentioned earlier in the conversation (e.g. "play them all", "play the playlist"), extract each song title + artist into `targets` as separate strings.
+If the user says "first song", "second song", etc., resolve that to the specific song from the conversation context and set `target`.
 For VOLUME, extract the level as an integer 0–100.
+If the user specifies a device (e.g. "on my Mac", "on the TV", "on iPhone"), extract the device name.
 Leave optional fields as null if not applicable.
 """
 
 
 class _SpotifyAction(BaseModel):
     action: Literal["PLAY", "PAUSE", "RESUME", "SKIP", "PREVIOUS", "VOLUME", "NOW_PLAYING", "QUEUE"]
-    target: Optional[str] = Field(None, description="Search query for PLAY/QUEUE actions")
+    target: Optional[str] = Field(None, description="Search query for a single PLAY/QUEUE action")
+    targets: Optional[list[str]] = Field(None, description="List of search queries when playing multiple songs (e.g. a playlist)")
     volume: Optional[int] = Field(None, description="Volume 0-100 for VOLUME action", ge=0, le=100)
+    device: Optional[str] = Field(None, description="Device name to play on, if specified by the user")
+
+
+def _recent_history(n_messages: int = 8) -> str:
+    from skills.conversation.skill import _history
+    messages = list(_history)[-n_messages:]
+    if not messages:
+        return ""
+    lines = []
+    for msg in messages:
+        role = "User" if msg.__class__.__name__ == "HumanMessage" else "Assistant"
+        lines.append(f"{role}: {msg.content}")
+    return "\n".join(lines)
 
 
 async def handle_spotify(query: str) -> str:
+    context = _recent_history()
+    enriched = f"Recent conversation:\n{context}\n\nUser's request: {query}" if context else query
+
     with Live(Spinner("dots", text=Text("thinking...", style="dim")), console=_console, transient=True):
         action = generate_structured_output(
             model_name=os.environ["MODEL_GENERALIST"],
-            user_prompt=query,
+            user_prompt=enriched,
             system_prompt=_SPOTIFY_PROMPT,
             pydantic_model=_SpotifyAction,
-            max_tokens=100,
+            max_tokens=300,
         )
 
     logger.debug(f"Spotify action: {action}")
@@ -55,7 +75,18 @@ async def handle_spotify(query: str) -> str:
     try:
         token = await _auth.get_token()
         client = SpotifyClient(token)
-        device_id = await client.get_active_device_id()
+
+        if action.device:
+            devices = await client.get_devices()
+            needle = action.device.lower()
+            match = next((d for d in devices if needle in d["name"].lower()), None)
+            if match:
+                device_id = match["id"]
+            else:
+                names = ", ".join(d["name"] for d in devices) or "none found"
+                return f"Couldn't find a device matching '{action.device}'. Available: {names}."
+        else:
+            device_id = await client.get_active_device_id()
 
         if action.action == "NOW_PLAYING":
             track = await client.now_playing()
@@ -64,12 +95,14 @@ async def handle_spotify(query: str) -> str:
             return f"Now playing: {track['name']} by {track['artist']}."
 
         if action.action == "PLAY":
-            target = action.target or query
-            track = await client.search_track(target)
-            if not track:
-                return f"Couldn't find anything on Spotify for: {target}"
-            await client.play(device_id, [track["uri"]])
-            return f"Playing {track['name']} by {track['artist']}."
+            queries = action.targets or ([action.target] if action.target else [query])
+            tracks = [t for q in queries if (t := await client.search_track(q))]
+            if not tracks:
+                return f"Couldn't find anything on Spotify for: {', '.join(queries)}"
+            await client.play(device_id, [t["uri"] for t in tracks])
+            if len(tracks) == 1:
+                return f"Playing {tracks[0]['name']} by {tracks[0]['artist']}."
+            return f"Playing {len(tracks)} tracks, starting with {tracks[0]['name']} by {tracks[0]['artist']}."
 
         if action.action == "QUEUE":
             target = action.target or query

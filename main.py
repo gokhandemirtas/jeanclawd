@@ -130,6 +130,9 @@ async def main(
 			response = await route(intent, effective_query, on_token=on_token)
 			_elapsed = time.time() - _start
 
+			from skills.journal import append_to_journal
+			asyncio.create_task(append_to_journal(user_input, response))
+
 			if speak:
 				from tts.tts import speak as tts_speak, active_voice_id
 				from agents.persona import get_active_voice_id

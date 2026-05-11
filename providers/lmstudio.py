@@ -1,3 +1,4 @@
+import os
 from typing import Iterator, Type
 from pydantic import BaseModel
 import lmstudio as lms
@@ -15,6 +16,7 @@ class LMStudioProvider(InferenceProvider):
 				"max_tokens": max_tokens,
 			},
 		)
+		self._embedding_model = lms.embedding_model(os.environ["MODEL_EMBEDDING"])
 
 	def complete_stream(
 		self,
@@ -41,3 +43,6 @@ class LMStudioProvider(InferenceProvider):
 			elif msg["role"] == "assistant":
 				chat.add_assistant_message(msg["content"])
 		return "".join(f.content for f in self._model.respond_stream(chat))
+
+	def embed(self, text: str) -> list[float]:
+		return self._embedding_model.embed(text)

@@ -36,7 +36,7 @@ def process_voice_job(
 		from agents.intent_classifier import run_intent_classifier
 
 		response_text = asyncio.run_coroutine_threadsafe(
-			run_intent_classifier(transcript), loop
+			run_intent_classifier(transcript, voice_mode=True), loop
 		).result()
 		job["text"] = response_text
 
@@ -92,7 +92,7 @@ def process_voice_ws(
 		from agents.intent_classifier import run_intent_classifier
 
 		response_text = asyncio.run_coroutine_threadsafe(
-			run_intent_classifier(transcript, on_token=on_token), loop
+			run_intent_classifier(transcript, on_token=on_token, voice_mode=True), loop
 		).result()
 
 		if cancel_event.is_set():

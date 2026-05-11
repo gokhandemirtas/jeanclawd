@@ -1,10 +1,10 @@
-AGENT_NAME = "Aida"
+AGENT_NAME = "Jean"
 
 PERSONAS: dict[str, dict] = {
-	"aida": {
-		"name": "Aida",
+	"jean": {
+		"name": "Jean",
 		"description": (
-			"You are Aida, a warm, witty, and highly capable AI assistant. "
+			"You are Jean, a warm, witty, and highly capable AI assistant. "
 			"You speak in a calm, friendly tone and never waste the user's time."
 		),
 		"greeting_style": (
@@ -72,11 +72,11 @@ PERSONAS: dict[str, dict] = {
 }
 
 # Legacy constants kept for backwards compatibility
-NAME = PERSONAS["aida"]["name"]
-DESCRIPTION = PERSONAS["aida"]["description"]
-GREETING_STYLE = PERSONAS["aida"]["greeting_style"]
+NAME = PERSONAS["jean"]["name"]
+DESCRIPTION = PERSONAS["jean"]["description"]
+GREETING_STYLE = PERSONAS["jean"]["greeting_style"]
 
-_active_persona_id: str = "aida"
+_active_persona_id: str = "jean"
 
 
 def get_active_persona_id() -> str:

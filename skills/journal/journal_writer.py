@@ -15,55 +15,61 @@ Note anything interesting, surprising, or worth remembering. Write naturally —
 
 
 async def write_journal_entry(for_date: date) -> str:
-    """Write AIDA's first-person journal entry for the given date.
+	"""Write Jean's first-person journal entry for the given date.
 
-    Reads Conversations.compacted, calls the LLM, saves a Journal document,
-    then fires persona analysis in the background.
+	Reads Conversations.compacted, calls the LLM, saves a Journal document,
+	then fires persona analysis in the background.
 
-    Returns the journal summary string.
-    """
-    doc = await Conversations.find_one(Conversations.date == for_date)
-    if doc is None or not doc.compacted:
-        raise ValueError(f"No compacted summary available for {for_date}")
+	Returns the journal summary string.
+	"""
+	doc = await Conversations.find_one(Conversations.date == for_date)
+	if doc is None or not doc.compacted:
+		raise ValueError(f"No compacted summary available for {for_date}")
 
-    from utils.messages import HumanMessage, SystemMessage
-    from agents.agent_factory import create_llm
+	from utils.messages import HumanMessage, SystemMessage
+	from agents.agent_factory import create_llm
 
-    llm = create_llm(
-        model_name=os.environ.get("MODEL_GENERALIST"),
-        temperature=0.5,
-        max_tokens=512,
-        top_p=0.9,
-        top_k=40,
-        repeat_penalty=1,
-    )
-    response = await llm.ainvoke([
-        SystemMessage(content=_JOURNAL_PROMPT),
-        HumanMessage(content=f"Summary of today's conversations:\n{doc.compacted}"),
-    ])
-    narrative = response.content.strip()
+	llm = create_llm(
+		model_name=os.environ.get("MODEL_GENERALIST"),
+		temperature=0.5,
+		max_tokens=512,
+		top_p=0.9,
+		top_k=40,
+		repeat_penalty=1,
+	)
+	response = await llm.ainvoke(
+		[
+			SystemMessage(content=_JOURNAL_PROMPT),
+			HumanMessage(content=f"Summary of today's conversations:\n{doc.compacted}"),
+		]
+	)
+	narrative = response.content.strip()
 
-    existing = await Journal.find_one(Journal.datestamp == for_date)
-    if existing is None:
-        await Journal(datestamp=for_date, summary=narrative).insert()
-    else:
-        existing.summary = narrative
-        await existing.save()
+	existing = await Journal.find_one(Journal.datestamp == for_date)
+	if existing is None:
+		await Journal(datestamp=for_date, summary=narrative).insert()
+	else:
+		existing.summary = narrative
+		await existing.save()
 
-    logger.info(f"[journal] Written entry for {for_date}")
+	logger.info(f"[journal] Written entry for {for_date}")
 
-    # Index in Qdrant for semantic journal search (fire-and-forget)
-    import asyncio
-    asyncio.create_task(_index_journal(for_date, narrative))
+	# Index in Qdrant for semantic journal search (fire-and-forget)
+	import asyncio
 
-    return narrative
+	asyncio.create_task(_index_journal(for_date, narrative))
+
+	return narrative
 
 
 async def _index_journal(for_date, narrative: str) -> None:
-    import asyncio
-    try:
-        from utils.journal_index import index_journal_entry
-        await asyncio.to_thread(index_journal_entry, for_date, narrative)
-    except Exception:
-        from utils.log import logger
-        logger.exception("[journal] Failed to index journal entry")
+	import asyncio
+
+	try:
+		from utils.journal_index import index_journal_entry
+
+		await asyncio.to_thread(index_journal_entry, for_date, narrative)
+	except Exception:
+		from utils.log import logger
+
+		logger.exception("[journal] Failed to index journal entry")

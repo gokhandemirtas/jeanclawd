@@ -49,3 +49,6 @@ class LlamaCppProvider(InferenceProvider):
 			stream=False,
 		)
 		return response["choices"][0]["message"]["content"]
+
+	def embed(self, text: str) -> list[float]:
+		raise NotImplementedError("LlamaCppProvider does not support embeddings")

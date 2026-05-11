@@ -9,6 +9,8 @@ Available commands:
   /help           — list available commands
 """
 
+import asyncio
+
 from utils.log import logger
 
 from agents.persona import get_active_identity
@@ -36,7 +38,7 @@ def _format_history() -> str:
 
 async def cmd_save() -> None:
     if not _history:
-        print("[/save] Nothing to save — conversation history is empty.")
+        logger.info("Nothing to save — conversation history is empty.")
         return
 
     history_text = _format_history()
@@ -55,20 +57,20 @@ async def cmd_save() -> None:
         HumanMessage(content=history_text),
     ])
     summary = response.content.strip()
-    print(f"[/save] Summary:\n{summary}")
+    logger.info(f"Summary:\n{summary}")
 
 
 async def cmd_clear() -> None:
     _history.clear()
-    print("[/clear] Conversation history cleared.")
+    logger.info("Conversation history cleared.")
 
 
 async def cmd_history() -> None:
     text = _format_history()
     if not text:
-        print("[/history] No conversation history yet.")
+        logger.info("No conversation history yet.")
     else:
-        print(f"\n--- Session history ---\n{text}\n-----------------------")
+        logger.info(f"Session history\n{text}")
 
 
 async def cmd_planner(args: str) -> None:
@@ -76,12 +78,12 @@ async def cmd_planner(args: str) -> None:
 
     task = args.strip()
     if not task:
-        print("[/planner] Please provide a task. Usage: /planner <task>")
+        logger.info("Please provide a task. Usage: /planner <task>")
         return
 
-    print(f"[/planner] Running agent on: {task}\n")
+    logger.info(f"Running agent on: {task}")
     response = await run_planner(task)
-    print(response)
+    logger.info(response)
 
 
 async def cmd_analyze() -> None:
@@ -92,15 +94,15 @@ async def cmd_analyze() -> None:
     today = date.today()
     doc = await Conversations.find_one(Conversations.date == today)
     if not doc or not doc.exchanges:
-        print("[/analyze] No conversations from today to analyse.")
+        logger.info("No conversations from today to analyse.")
         return
 
     await analyze_persona_from_log(doc.exchanges)
     context = get_persona_context()
     if context:
-        print(f"[/analyze] Done ({len(doc.exchanges)} exchange(s) scanned).\n{context}")
+        logger.info(f"Done ({len(doc.exchanges)} exchange(s) scanned).\n{context}")
     else:
-        print(f"[/analyze] Done ({len(doc.exchanges)} exchange(s) scanned). No new personal facts found.")
+        logger.info(f"Done ({len(doc.exchanges)} exchange(s) scanned). No new personal facts found.")
 
 
 async def cmd_ctx() -> None:
@@ -117,8 +119,7 @@ async def cmd_ctx() -> None:
     filled = int(bar_width * used / n_ctx)
     bar = "█" * filled + "░" * (bar_width - filled)
 
-    print(f"\n[/ctx] Context usage: {used:,} / {n_ctx:,} tokens ({pct:.1f}%)")
-    print(f"       [{bar}]\n")
+    logger.info(f"Context usage: {used:,} / {n_ctx:,} tokens ({pct:.1f}%)\n[{bar}]")
 
 
 async def cmd_note(args: str) -> None:
@@ -138,7 +139,7 @@ async def cmd_note(args: str) -> None:
 
     recent = _format_history()
     if not recent and not args:
-        print("[/note] Nothing to note — no conversation history and no title provided.")
+        logger.info("Nothing to note — no conversation history and no title provided.")
         return
 
     topic = get_current_topic() or ""
@@ -176,7 +177,7 @@ async def cmd_note(args: str) -> None:
         content=extracted.content,
         category=extracted.category,
     )
-    print(f"[/note] {result}")
+    logger.info(result)
 
 
 async def cmd_memories(args: str) -> None:
@@ -193,25 +194,24 @@ async def cmd_memories(args: str) -> None:
         if query:
             results = search_memories(query, limit=10)
             if not results:
-                print(f"[/memories] No memories found for '{query}'.")
+                logger.info(f"No memories found for '{query}'.")
                 return
-            print(f"\n[/memories] Top memories for '{query}':")
-            for i, text in enumerate(results, 1):
-                print(f"  {i}. {text}")
+            lines = "\n".join(f"  {i}. {text}" for i, text in enumerate(results, 1))
+            logger.info(f"Top memories for '{query}':\n{lines}")
         else:
             mem = _get_memory()
             raw = mem.get_all(filters={"user_id": "default"}, top_k=1000)
             results = raw.get("results", raw) if isinstance(raw, dict) else raw
             if not results:
-                print("[/memories] No memories stored yet.")
+                logger.info("No memories stored yet.")
                 return
-            print(f"\n[/memories] {len(results)} stored memory/memories:")
-            for i, r in enumerate(results, 1):
-                text = r.get("memory") or r.get("text") if isinstance(r, dict) else str(r)
-                print(f"  {i}. {text}")
-        print()
+            lines = "\n".join(
+                f"  {i}. {r.get('memory') or r.get('text') if isinstance(r, dict) else str(r)}"
+                for i, r in enumerate(results, 1)
+            )
+            logger.info(f"{len(results)} stored memory/memories:\n{lines}")
     except Exception as e:
-        print(f"[/memories] Failed: {e}")
+        logger.error(f"memories failed: {e}")
 
 
 async def cmd_pluck_memory(args: str) -> None:
@@ -225,12 +225,12 @@ async def cmd_pluck_memory(args: str) -> None:
 
         arg = args.strip()
         if not arg.isdigit():
-            print("[/pluck-memory] Usage: /pluck-memory <number>")
+            logger.info("Usage: /pluck-memory <number>")
             return
 
         index = int(arg)
         if index < 1:
-            print("[/pluck-memory] Number must be 1 or greater.")
+            logger.info("Number must be 1 or greater.")
             return
 
         mem = _get_memory()
@@ -238,11 +238,11 @@ async def cmd_pluck_memory(args: str) -> None:
         results = raw.get("results", raw) if isinstance(raw, dict) else raw
 
         if not results:
-            print("[/pluck-memory] No memories stored.")
+            logger.info("No memories stored.")
             return
 
         if index > len(results):
-            print(f"[/pluck-memory] Only {len(results)} memories exist.")
+            logger.info(f"Only {len(results)} memories exist.")
             return
 
         entry = results[index - 1]
@@ -250,19 +250,18 @@ async def cmd_pluck_memory(args: str) -> None:
         text = entry.get("memory") or entry.get("text") if isinstance(entry, dict) else str(entry)
 
         if not memory_id:
-            print(f"[/pluck-memory] Could not find ID for memory #{index}.")
+            logger.error(f"Could not find ID for memory #{index}.")
             return
 
         mem.delete(memory_id)
-        print(f"[/pluck-memory] Deleted #{index}: {text}")
+        logger.info(f"Deleted #{index}: {text}")
     except Exception as e:
-        print(f"[/pluck-memory] Failed: {e}")
+        logger.error(f"pluck-memory failed: {e}")
 
 
 async def cmd_compact_memory() -> None:
     """Deduplicate and merge mem0 memories using the LLM, then replace the store."""
     from rich.console import Console
-    from rich.spinner import Spinner
 
     console = Console()
     try:
@@ -272,12 +271,12 @@ async def cmd_compact_memory() -> None:
             before, after = compact_memories()
 
         if before == 0:
-            print("[/compact-memory] No memories stored yet.")
+            logger.info("No memories stored yet.")
         else:
             removed = before - after
-            print(f"[/compact-memory] Done. {before} → {after} memories ({removed} removed).")
+            logger.info(f"Done. {before} → {after} memories ({removed} removed).")
     except Exception as e:
-        print(f"[/compact-memory] Failed: {e}")
+        logger.error(f"compact-memory failed: {e}")
 
 
 async def cmd_flush_memory() -> None:
@@ -292,7 +291,6 @@ async def cmd_flush_memory() -> None:
         port = int(os.environ.get("QDRANT_PORT", "6333"))
         client = QdrantClient(host=host, port=port)
 
-        # Collect all point IDs first so we know the total
         all_ids = []
         offset = None
         while True:
@@ -309,11 +307,11 @@ async def cmd_flush_memory() -> None:
             offset = next_offset
 
         if not all_ids:
-            print("[/flush-memory] Nothing to delete.")
+            logger.info("Nothing to delete.")
             return
 
         with Progress(
-            TextColumn("[[]/flush-memory]"),
+            TextColumn("[/flush-memory]"),
             BarColumn(),
             TaskProgressColumn(),
             TextColumn("{task.completed}/{task.total} memories cleared"),
@@ -329,21 +327,134 @@ async def cmd_flush_memory() -> None:
                 )
                 progress.advance(task, len(batch))
 
-        # Reset mem0 singleton so next call reconnects to the now-empty collection
         import utils.memory_client as _mc
         _mc._memory = None
-        print(f"[/flush-memory] {len(all_ids)} memories deleted.")
+        logger.info(f"{len(all_ids)} memories deleted.")
     except Exception as e:
-        print(f"[/flush-memory] Failed: {e}")
+        logger.error(f"flush-memory failed: {e}")
+
+
+async def cmd_model(args: str) -> None:
+    """Switch the active generalist model.
+
+    Usage:
+      /model          — interactive fuzzy picker from loaded LM Studio models
+      /model <name>   — switch directly by model id
+    """
+    import os
+
+    import aiohttp
+
+    host = os.getenv("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(f"{host}/models") as resp:
+                if resp.status != 200:
+                    logger.error(f"Failed to fetch models (HTTP {resp.status}).")
+                    return
+                data = await resp.json()
+    except Exception as e:
+        logger.error(f"Could not reach inference server: {e}")
+        return
+
+    models = [
+        m["id"] for m in data.get("data", [])
+        if "embed" not in m["id"].lower()
+    ]
+
+    if not models:
+        logger.info("No non-embedding models found.")
+        return
+
+    target = args.strip()
+    if target:
+        if target not in models:
+            available = "\n".join(f"  {m}" for m in models)
+            logger.info(f"'{target}' not in loaded models. Available:\n{available}")
+            return
+        selected = target
+    else:
+        try:
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
+
+            picker = PromptSession(
+                completer=FuzzyCompleter(WordCompleter(models, sentence=True))
+            )
+            logger.info(f"{len(models)} model(s) loaded. Tab to autocomplete, Enter to confirm, Ctrl-C to cancel.")
+            selected = (await picker.prompt_async("  model ❯ ")).strip()
+        except (ImportError, KeyboardInterrupt, EOFError):
+            logger.info("Cancelled.")
+            return
+
+        if not selected:
+            logger.info("No model selected.")
+            return
+        if selected not in models:
+            logger.error(f"'{selected}' not recognised.")
+            return
+
+    os.environ["MODEL_GENERALIST"] = selected
+
+    import providers
+    providers._provider = None
+
+    logger.info(f"Active model → {selected}")
+
+
+async def cmd_connect(args: str) -> None:
+    """Connect a service that requires an auth flow.
+
+    Usage:
+      /connect spotify   — OAuth2 browser flow (opens browser, catches redirect on :8888)
+      /connect hue       — Hue link-button flow (press the button on the bridge first)
+    """
+    service = args.strip().lower()
+
+    if service == "spotify":
+        from utils.auth.spotify import SpotifyAuthProvider
+        auth = SpotifyAuthProvider()
+        already = await auth.is_connected()
+        if already:
+            logger.info("Spotify is already connected. Reconnecting will overwrite the stored tokens.")
+        logger.info("Opening Spotify auth in browser — you can keep chatting while you complete the flow.")
+
+        async def _spotify():
+            result = await auth.connect()
+            logger.info(result)
+
+        asyncio.create_task(_spotify())
+
+    elif service == "hue":
+        from utils.auth.hue import HueAuthProvider
+        auth = HueAuthProvider()
+        already = await auth.is_connected()
+        if already:
+            logger.info("Hue is already paired. Reconnecting will overwrite the stored credentials.")
+        logger.info("Press the link button on your Hue bridge now — connecting in the background.")
+
+        async def _hue():
+            result = await auth.connect()
+            logger.info(result)
+
+        asyncio.create_task(_hue())
+
+    elif not service:
+        logger.info("Usage: /connect <service>  (spotify | hue)")
+    else:
+        logger.info(f"Unknown service '{service}'. Available: spotify, hue")
 
 
 async def cmd_help() -> None:
-    print(
-        "\nAvailable commands:\n"
+    logger.info(
+        "Available commands:\n"
         "  /save              — summarise and save the current session to the database\n"
         "  /clear             — wipe the in-memory conversation history\n"
         "  /history           — print session history to the terminal\n"
         "  /analyze           — extract personal facts from this session into your persona profile\n"
+        "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
+        "  /connect <service> — authenticate a service (spotify | hue)\n"
         "  /memories [q]      — list all mem0 memories, or search with a query\n"
         "  /compact-memory    — deduplicate and merge memories using the LLM\n"
         "  /pluck-memory <n>  — delete memory #n from the /memories list\n"
@@ -351,7 +462,7 @@ async def cmd_help() -> None:
         "  /ctx               — show context window usage for the current session\n"
         "  /note [title]      — save a note from the current conversation context\n"
         "  /planner <task>    — run an autonomous multi-step planning agent\n"
-        "  /help              — show this message\n"
+        "  /help              — show this message"
     )
 
 
@@ -360,6 +471,8 @@ _COMMANDS = {
     "/clear": cmd_clear,
     "/history": cmd_history,
     "/analyze": cmd_analyze,
+    "/model": cmd_model,
+    "/connect": cmd_connect,
     "/memories": cmd_memories,
     "/compact-memory": cmd_compact_memory,
     "/pluck-memory": cmd_pluck_memory,
@@ -384,7 +497,7 @@ async def handle_command(user_input: str) -> bool:
     args = parts[1] if len(parts) > 1 else ""
 
     if cmd not in _COMMANDS:
-        print(f"Unknown command '{cmd}'. Type /help for available commands.")
+        logger.info(f"Unknown command '{cmd}'. Type /help for available commands.")
         return True  # still consumed — don't pass to classifier
     try:
         fn = _COMMANDS[cmd]

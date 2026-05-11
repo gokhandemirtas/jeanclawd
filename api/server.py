@@ -274,7 +274,11 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
 		while True:
 			event = await queue.get()
 			if not ws.closed:
-				await ws.send_json(event)
+				try:
+					await ws.send_json(event)
+				except Exception:
+					cancel_event.set()
+					return
 			if event.get("stage") in ("done", "error"):
 				return
 
