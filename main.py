@@ -1,13 +1,14 @@
 import argparse
 import asyncio
+import logging
 import os
-import select
+import signal
 import sys
-import termios
 import time
-import tty
 
 from dotenv import load_dotenv
+
+logging.getLogger("lmstudio").setLevel(logging.CRITICAL)
 from rich.console import Console
 
 from agents.action_resolver.agent import resolve_action_query
@@ -37,40 +38,29 @@ load_dotenv()
 console = Console()
 
 
-async def _watch_for_esc(gen_task: "asyncio.Task[str]") -> None:
-    """Monitor stdin for an Escape keypress and cancel gen_task if detected."""
-    import threading
-
-    stop_event = threading.Event()
-
-    def _blocking_watch() -> None:
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)
-            while not stop_event.is_set():
-                readable, _, _ = select.select([sys.stdin], [], [], 0.05)
-                if readable:
-                    ch = os.read(fd, 1)
-                    if ch == b"\x1b":
-                        gen_task.cancel()
-                        return
-        except Exception:
-            pass
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    try:
-        await asyncio.to_thread(_blocking_watch)
-    except asyncio.CancelledError:
-        stop_event.set()
-        raise
-
-
 async def main(
 	debug: bool, emote: bool, speak: bool, track_camera: bool, server: bool
 ) -> None:
 	logger.set_debug(debug)
+
+	loop = asyncio.get_running_loop()
+	active_gen_task: asyncio.Task | None = None
+	last_sigint: float = 0.0
+
+	def _on_sigint() -> None:
+		nonlocal last_sigint, active_gen_task
+		now = time.time()
+		if active_gen_task is not None and not active_gen_task.done():
+			active_gen_task.cancel()
+		else:
+			if now - last_sigint < 1.5:
+				console.print("\nGoodbye! Have a great day!")
+				sys.exit(0)
+			else:
+				console.print("\n[dim]Press Ctrl+C again to exit.[/dim]")
+		last_sigint = now
+
+	loop.add_signal_handler(signal.SIGINT, _on_sigint)
 
 	if emote:
 		from skills.conversation.skill import enable_emote
@@ -172,21 +162,16 @@ async def main(
 				return await route(intent, effective_query, on_token=on_token)
 
 			_start = time.time()
-			gen_task: asyncio.Task[str] = asyncio.create_task(_generate())
-			esc_task = asyncio.create_task(_watch_for_esc(gen_task))
+			active_gen_task = asyncio.create_task(_generate())
 
 			cancelled = False
 			response = ""
 			try:
-				response = await gen_task
+				response = await active_gen_task
 			except asyncio.CancelledError:
 				cancelled = True
 			finally:
-				esc_task.cancel()
-				try:
-					await esc_task
-				except asyncio.CancelledError:
-					pass
+				active_gen_task = None
 
 			_elapsed = time.time() - _start
 
@@ -214,9 +199,6 @@ async def main(
 
 			logger.timing(_elapsed)
 
-		except KeyboardInterrupt:
-			console.print("\nGoodbye! Have a great day!")
-			break
 		except EOFError:
 			console.print("\nGoodbye! Have a great day!")
 			break
