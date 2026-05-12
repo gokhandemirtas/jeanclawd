@@ -156,11 +156,20 @@ async def main(
 
 			async def _generate() -> str:
 				nonlocal streamed
+				from skills.conversation.skill import consume_pending_intent, set_pending_intent
 				effective_query = await resolve_query(user_input)
 				effective_query = await resolve_action_query(effective_query)
-				intent = await asyncio.to_thread(classify, effective_query)
-				logger.debug(f"Intent: {intent}")
-				return await route(intent, effective_query, on_token=on_token)
+				pending = consume_pending_intent()
+				if pending:
+					intent = pending
+					logger.debug(f"Intent: {intent} (locked — answering clarifying question)")
+				else:
+					intent = await asyncio.to_thread(classify, effective_query)
+					logger.debug(f"Intent: {intent}")
+				response = await route(intent, effective_query, on_token=on_token)
+				if intent != "CHAT" and isinstance(response, str) and response.rstrip().endswith("?"):
+					set_pending_intent(intent)
+				return response
 
 			_start = time.time()
 			active_gen_task = asyncio.create_task(_generate())

@@ -96,6 +96,22 @@ class _TopicResponse(BaseModel):
 # Tracks the active conversation topic so the intent classifier can resolve follow-ups.
 _current_topic: str | None = None
 
+# When a non-CHAT skill asks a clarifying question, lock the next turn to that skill
+# so the user's answer routes back correctly instead of being reclassified from scratch.
+_pending_intent: str | None = None
+
+
+def set_pending_intent(intent: str) -> None:
+    global _pending_intent
+    _pending_intent = intent
+
+
+def consume_pending_intent() -> str | None:
+    global _pending_intent
+    val = _pending_intent
+    _pending_intent = None
+    return val
+
 _FOLLOWUP_WORDS = frozenset({
   "it", "its", "that", "this", "them", "those", "they", "their",
   "same", "one", "ones", "there", "here", "him", "her", "he", "she",
@@ -137,9 +153,10 @@ def get_current_topic() -> str | None:
 def reset_session() -> None:
   """Clear in-memory conversation state. Called after compaction so stale topic
   and history don't bleed into the next session."""
-  global _current_topic, _rolling_summary
+  global _current_topic, _rolling_summary, _pending_intent
   _current_topic = None
   _rolling_summary = None
+  _pending_intent = None
   _history.clear()
 
 
