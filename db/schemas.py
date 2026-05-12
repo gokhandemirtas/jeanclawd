@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Literal, Optional
 
 from beanie import Document
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 NoteCategory = Literal["read", "listen", "watch", "eat", "visit"]
 
@@ -81,6 +81,9 @@ class Journal(Document):
   datestamp: date
   summary: str
 
+  class Settings:
+    name = "Journal"
+
 
 class Note(Document):
   created_at: datetime
@@ -92,19 +95,14 @@ class Note(Document):
     name = "Notes"
 
 
-class UserPreferences(Document):
-  active_persona_id: str = "jean"
-  active_voice_id: str = "azelma"
-  spotify_device_id: Optional[str] = None
-  spotify_device_name: Optional[str] = None
-  updated_at: datetime = datetime.now()
-
-  class Settings:
-    name = "UserPreferences"
-
-
 class VoiceSettings(Document):
   active_voice_id: str = "azelma"
+
+
+class Preferences(BaseModel):
+  agentPersona: str = "jean"
+  agentVoiceId: str = "azelma"
+  favSpotifyDevice: Optional[str] = None
 
 
 class UserPersona(Document):
@@ -114,3 +112,4 @@ class UserPersona(Document):
   communication_style: Optional[str] = None  # formal | casual | technical | mixed
   likes: list[str] = []
   dislikes: list[str] = []
+  preferences: Preferences = Field(default_factory=Preferences)

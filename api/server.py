@@ -586,7 +586,8 @@ async def handle_get_persona(request: web.Request) -> web.Response:
 
 async def handle_set_persona(request: web.Request) -> web.Response:
 	from agents.persona import PERSONAS, set_active_persona
-	from tts.tts import active_voice_id
+	from tts.tts import active_voice_id, set_active_voice_id
+	from db.preferences import update_preferences
 
 	data = await request.json()
 	persona_id = data.get("persona", "").strip()
@@ -599,14 +600,36 @@ async def handle_set_persona(request: web.Request) -> web.Response:
 		)
 	set_active_persona(persona_id)
 	persona = PERSONAS[persona_id]
-	logger.info(f"[api/persona] active persona set to '{persona_id}'")
+	resolved_voice = persona["voice_id"] or active_voice_id
+	set_active_voice_id(resolved_voice)
+	await update_preferences(agentPersona=persona_id, agentVoiceId=resolved_voice)
+	logger.info(f"[api/persona] active persona set to '{persona_id}' voice='{resolved_voice}'")
 	return web.json_response(
 		{
 			"persona": persona_id,
 			"name": persona["name"],
-			"voice_id": persona["voice_id"] or active_voice_id,
+			"voice_id": resolved_voice,
 		}
 	)
+
+
+async def handle_set_voice(request: web.Request) -> web.Response:
+	from tts.tts import voice_ids, set_active_voice_id
+	from db.preferences import update_preferences
+
+	data = await request.json()
+	voice_id = data.get("voice_id", "").strip()
+	if not voice_id:
+		return web.json_response({"error": "voice_id is required"}, status=400)
+	if voice_id not in voice_ids:
+		return web.json_response(
+			{"error": f"unknown voice '{voice_id}'. Available: {voice_ids}"},
+			status=400,
+		)
+	set_active_voice_id(voice_id)
+	await update_preferences(agentVoiceId=voice_id)
+	logger.info(f"[api/voice] active voice set to '{voice_id}'")
+	return web.json_response({"voice_id": voice_id})
 
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -675,6 +698,7 @@ def create_app() -> web.Application:
 	app.router.add_get("/personas", handle_personas)
 	app.router.add_get("/persona", handle_get_persona)
 	app.router.add_post("/persona", handle_set_persona)
+	app.router.add_post("/persona/voice", handle_set_voice)
 	app.router.add_get("/voice/ws", handle_voice_ws)
 	app.router.add_post("/voice", handle_voice)
 	app.router.add_get("/voice/{job_id}", handle_voice_result)

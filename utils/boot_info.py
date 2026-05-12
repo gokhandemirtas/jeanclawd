@@ -45,7 +45,16 @@ def _models() -> list[tuple[str, str]]:
 		("Embedding", "MODEL_EMBEDDING"),
 		("Host", "MODEL_HOST"),
 	]
-	return [(label, os.getenv(env, "—")) for label, env in keys]
+	rows = [(label, os.getenv(env, "—")) for label, env in keys]
+
+	try:
+		from providers import get_provider
+		ctx = get_provider().context_length()
+		rows.append(("Context", f"{ctx:,} tokens"))
+	except Exception:
+		pass
+
+	return rows
 
 
 def _backend() -> list[tuple[str, str]]:

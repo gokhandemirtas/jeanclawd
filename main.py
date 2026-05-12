@@ -1,8 +1,11 @@
 import argparse
 import asyncio
 import os
+import select
 import sys
+import termios
 import time
+import tty
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -32,6 +35,36 @@ except ImportError:
 load_dotenv()
 
 console = Console()
+
+
+async def _watch_for_esc(gen_task: "asyncio.Task[str]") -> None:
+    """Monitor stdin for an Escape keypress and cancel gen_task if detected."""
+    import threading
+
+    stop_event = threading.Event()
+
+    def _blocking_watch() -> None:
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while not stop_event.is_set():
+                readable, _, _ = select.select([sys.stdin], [], [], 0.05)
+                if readable:
+                    ch = os.read(fd, 1)
+                    if ch == b"\x1b":
+                        gen_task.cancel()
+                        return
+        except Exception:
+            pass
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    try:
+        await asyncio.to_thread(_blocking_watch)
+    except asyncio.CancelledError:
+        stop_event.set()
+        raise
 
 
 async def main(
@@ -66,7 +99,9 @@ async def main(
 		api_url = f"http://{_api_host}:{_api_port}"
 		logger.debug("API server started")
 
+	from providers import backend_label as _backend_label
 	inf_ok, inf_detail = await check_inference()
+	inf_detail = f"{_backend_label()} — {inf_detail}"
 
 	db_ok, db_detail = False, ""
 	try:
@@ -100,6 +135,11 @@ async def main(
 		console.print("[red]Database unavailable — cannot start.[/red]")
 		sys.exit(1)
 
+	from db.preferences import apply_preferences
+	from skills.personalizer import start_personalizer
+	await apply_preferences()
+	await start_personalizer()
+
 	await asyncio.to_thread(greet)
 
 	while True:
@@ -123,14 +163,38 @@ async def main(
 				streamed.append(token)
 				console.out(token, end="")
 
-			_start = time.time()
-			effective_query = await resolve_query(user_input)
-			effective_query = await resolve_action_query(effective_query)
-			intent = await asyncio.to_thread(classify, effective_query)
-			logger.debug(f"Intent: {intent}")
+			async def _generate() -> str:
+				nonlocal streamed
+				effective_query = await resolve_query(user_input)
+				effective_query = await resolve_action_query(effective_query)
+				intent = await asyncio.to_thread(classify, effective_query)
+				logger.debug(f"Intent: {intent}")
+				return await route(intent, effective_query, on_token=on_token)
 
-			response = await route(intent, effective_query, on_token=on_token)
+			_start = time.time()
+			gen_task: asyncio.Task[str] = asyncio.create_task(_generate())
+			esc_task = asyncio.create_task(_watch_for_esc(gen_task))
+
+			cancelled = False
+			response = ""
+			try:
+				response = await gen_task
+			except asyncio.CancelledError:
+				cancelled = True
+			finally:
+				esc_task.cancel()
+				try:
+					await esc_task
+				except asyncio.CancelledError:
+					pass
+
 			_elapsed = time.time() - _start
+
+			if cancelled:
+				if streamed:
+					console.out("")
+				console.print("\n[dim]Generation stopped.[/dim]")
+				continue
 
 			from skills.journal import append_to_journal
 			asyncio.create_task(append_to_journal(user_input, response))

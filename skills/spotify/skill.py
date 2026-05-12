@@ -86,7 +86,7 @@ async def handle_spotify(query: str) -> str:
 	)
 
 	with Live(
-		Spinner("dots", text=Text("thinking...", style="dim")),
+		Spinner("dots", text=Text("Spotifying...", style="dim")),
 		console=_console,
 		transient=True,
 	):

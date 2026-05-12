@@ -27,6 +27,11 @@ def enable_tts(enabled: bool = True) -> None:
     _tts_enabled = enabled
 
 
+def set_active_voice_id(voice_id: str) -> None:
+    global active_voice_id
+    active_voice_id = voice_id
+
+
 def is_tts_enabled() -> bool:
     return _tts_enabled
 
