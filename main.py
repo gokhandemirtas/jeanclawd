@@ -42,6 +42,7 @@ async def main(
 	debug: bool, emote: bool, speak: bool, track_camera: bool, server: bool
 ) -> None:
 	logger.set_debug(debug)
+	logger.init_file_logging("logs/app.log")
 
 	loop = asyncio.get_running_loop()
 	active_gen_task: asyncio.Task | None = None

@@ -66,6 +66,18 @@ class _SpotifyAction(BaseModel):
 	)
 
 
+def _resolve_device(hint: str, devices: list[dict]) -> dict | None:
+    if not devices:
+        return None
+    from rank_bm25 import BM25Okapi
+
+    corpus = [d["name"].lower().split() for d in devices]
+    bm25 = BM25Okapi(corpus)
+    scores = bm25.get_scores(hint.lower().split())
+    best_idx = int(scores.argmax())
+    return devices[best_idx] if scores[best_idx] > 0 else None
+
+
 def _recent_history(n_messages: int = 8) -> str:
 	from skills.conversation.skill import _history
 
@@ -106,8 +118,7 @@ async def handle_spotify(query: str) -> str:
 
 		if action.device:
 			devices = await client.get_devices()
-			needle = action.device.lower()
-			match = next((d for d in devices if needle in d["name"].lower()), None)
+			match = _resolve_device(action.device, devices)
 			if match:
 				device_id = match["id"]
 			else:
