@@ -21,18 +21,20 @@ NOTES — create or retrieve personal notes
 SEARCH — explicit web search ("search for", "look up", "google")
 SPOTIFY — music playback or device management
 PLANNER — build a multi-step plan or itinerary
+NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
 CHAT — everything else: general knowledge, history, explanations, science, comparisons, opinions, follow-ups on anything already in the conversation
 
 Critical rules — apply in order, stop at first match:
 1. Short agreements, continuations, or confirmations ("yes", "no", "ok", "sure", "yes all", "sounds good", "go ahead", "tell me more", "please", "exactly") → always CHAT.
 2. If the answer can be derived from data already in the conversation history → CHAT. Never re-fetch.
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
-4. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things.
-5. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
-6. Reactions, opinions, follow-ups on something just said → CHAT.
-7. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
-8. INFORMATION_QUERY / SEARCH only for things the model cannot know: breaking news, real-time events, local business info.
-9. When in doubt → CHAT.
+4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
+5. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things.
+6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
+7. Reactions, opinions, follow-ups on something just said → CHAT.
+8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
+9. INFORMATION_QUERY / SEARCH only for things the model cannot know: breaking news, real-time events, local business info.
+10. When in doubt → CHAT.
 
 Examples:
   history: [microsoft stock → $406, tesla stock → $450]
@@ -51,6 +53,11 @@ Examples:
   "no company history" → CHAT  (correction + general knowledge)
   "I want company history not stock" → CHAT  (explicit redirect)
   "yes please" → CHAT  (confirmation)
+
+  "give me a recipe for pasta amatriciana" → NUTRITION
+  "how many calories in an avocado" → NUTRITION
+  "what can I make with chicken and rice" → NUTRITION
+  "how do I make sushi" → NUTRITION
 
 Respond with JSON only: {"intent": "<INTENT>"}"""
 

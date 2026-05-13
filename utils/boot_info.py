@@ -3,13 +3,14 @@ import os
 import platform
 import shutil
 import subprocess
+import textwrap
 import urllib.request
 
 import aiohttp
 import psutil
 from rich.color import Color
 from rich.columns import Columns
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.style import Style
@@ -19,12 +20,13 @@ from rich.text import Text
 _console = Console()
 
 
-def _gradient_print(
+def _gradient_text(
 	art: str, start_rgb: tuple[int, int, int], end_rgb: tuple[int, int, int]
-) -> None:
-	lines = art.split("\n")
+) -> Text:
+	dedented = textwrap.dedent(art)
+	lines = [line.rstrip() for line in dedented.split("\n")]
 	max_width = max((len(line) for line in lines), default=1)
-	rich_text = Text()
+	rich_text = Text(no_wrap=True)
 	for line in lines:
 		for i, char in enumerate(line):
 			t = i / max_width
@@ -33,7 +35,7 @@ def _gradient_print(
 			b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * t)
 			rich_text.append(char, style=Style(color=Color.from_rgb(r, g, b)))
 		rich_text.append("\n")
-	_console.print(rich_text, end="")
+	return rich_text
 
 
 def _fmt_gb(b: int) -> str:
@@ -279,10 +281,9 @@ def boot(
 	for name, total, free in _resources():
 		res_table.add_row(name, total, free)
 
-	_gradient_print(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
-	_console.print(Rule("[bold magenta]JeanClawd[/bold magenta]"))
-	_console.print(Panel(models_table, title="Models", border_style="dim"))
-	columns = [
+	panels: list = [
+		Rule("[bold magenta]JeanClawd[/bold magenta]"),
+		Panel(models_table, title="Models", border_style="dim"),
 		Panel(backend_table, title="Backend", border_style="dim"),
 		Panel(res_table, title="Resources", border_style="dim"),
 	]
@@ -295,7 +296,7 @@ def boot(
 		for svc, (ok, detail) in connections.items():
 			status = "[green]online[/green]" if ok else "[red]offline[/red]"
 			conn_table.add_row(svc, status, f"[dim]{detail}[/dim]")
-		columns.append(Panel(conn_table, title="Connections", border_style="dim"))
+		panels.append(Panel(conn_table, title="Connections", border_style="dim"))
 
 	if flags:
 		flags_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
@@ -304,7 +305,14 @@ def boot(
 		for flag, enabled in flags.items():
 			state = "[green]on[/green]" if enabled else "[dim]off[/dim]"
 			flags_table.add_row(flag, state)
-		columns.append(Panel(flags_table, title="Flags", border_style="dim"))
+		panels.append(Panel(flags_table, title="Flags", border_style="dim"))
 
-	_console.print(Columns(columns))
+	art = _gradient_text(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
+
+	layout = Table.grid(expand=True)
+	layout.add_column()
+	layout.add_column()
+	layout.add_row(art, Group(*panels))
+
+	_console.print(layout)
 	_console.print()

@@ -33,10 +33,22 @@ def set_debug(enabled: bool) -> None:
 	_debug_enabled = enabled
 
 
-def debug(msg: str) -> None:
-	_write("DEBUG", msg)
-	if _debug_enabled:
-		_console.print(f"[dim][DEBUG] {msg}[/dim]")
+def debug(msg: str, agent: str | None = None) -> None:
+	_write("DEBUG", f"[{agent}] {msg}" if agent else msg)
+	if not _debug_enabled:
+		return
+	# Extract leading [tag] from message if no explicit agent given
+	tag = agent
+	body = msg
+	if not tag and msg.startswith("["):
+		end = msg.find("]")
+		if end != -1:
+			tag = msg[1:end]
+			body = msg[end + 1:].lstrip()
+	if tag:
+		_console.print(f"[dim][DEBUG] [/dim][bold magenta]{escape(tag)}[/bold magenta][dim] {escape(body)}[/dim]")
+	else:
+		_console.print(f"[dim][DEBUG] {escape(msg)}[/dim]")
 
 
 def info(msg: str) -> None:
