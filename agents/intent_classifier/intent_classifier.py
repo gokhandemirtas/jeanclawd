@@ -20,6 +20,7 @@ IntentLiteral = Literal[
 	"SEARCH",
 	"SPOTIFY",
 	"PLANNER",
+	"NUTRITION",
 	"CHAT",
 ]
 

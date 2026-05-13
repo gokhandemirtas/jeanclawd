@@ -11,6 +11,7 @@ NOTES — personal notes: "take a note", "save a note", "note that", "show my no
 SEARCH — web search: "search", "look up", "google", or bare topic/name with no other keyword match
 SPOTIFY — music playback and device management: "play [music]", pause, skip, "next track", volume, "now playing", "what's playing", "my spotify devices", "list devices", "connected devices", "which devices"
 PLANNER — multi-step planning: "plan a trip", "create an itinerary", "build a schedule", "plan my [X]". Subject must be clear.
+NUTRITION — food, recipes, and nutrition: "calories in", "recipe for", "nutrition facts", "how many carbs", "what can I make with", "ingredients for", "healthy recipe", "macros"
 CHAT — everything else: greetings, opinions, reactions, existential or philosophical questions, nonsensical input, requests for physical actions the assistant cannot perform (cooking, driving, opening doors), creative/generative requests ("write me a poem", "make me a list"), and anything with no recognisable domain keyword.
 
 Rules (apply in order, stop at first match):
@@ -22,6 +23,7 @@ Rules (apply in order, stop at first match):
 6. "take a note"/"save a note"/"my notes" → NOTES
 7. "plan"/"itinerary"/"create a schedule" with clear subject → PLANNER
 8. Personal/self-referential questions — contains "my" + a preference/memory keyword ("favourite", "favorite", "like", "love", "hate", "prefer", "remember", "know about me", "told you") → CHAT (user asking about themselves, answered from memory not world knowledge)
+8b. "calories in"/"recipe for"/"nutrition facts"/"how many carbs"/"what can I make with"/"macros"/"ingredients for" → NUTRITION
 9. "what is"/"who is"/"tell me about"/"explain" → INFORMATION_QUERY
 10. "search"/"look up"/"google" or bare name/topic → SEARCH
 11. directions/route between two places → TRANSPORTATION
@@ -46,6 +48,10 @@ Examples:
 "display the list of devices connected to my spotify" → SPOTIFY
 "which devices are connected" → SPOTIFY
 "plan a 2 week Japan itinerary" → PLANNER
+"how many calories in an apple" → NUTRITION
+"recipe for chicken tikka masala" → NUTRITION
+"what can I make with eggs and cheese" → NUTRITION
+"nutrition facts for salmon" → NUTRITION
 "hello" → CHAT
 "are we all going to die" → CHAT
 "will humanity survive" → CHAT

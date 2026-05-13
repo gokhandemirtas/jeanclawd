@@ -11,6 +11,7 @@ from skills.reminder import reminder_skill
 from skills.search import search_skill
 from skills.spotify import spotify_skill
 from skills.transportation import transportation_skill
+from skills.nutrition import nutrition_skill
 from skills.weather import weather_skill
 
 # CHAT is handled directly by the conversation skill (no intermediate handler,
@@ -25,6 +26,7 @@ chat_skill = Skill(
 
 SKILLS: list[Skill] = [
     weather_skill,
+    nutrition_skill,
     finance_skill,
     home_control_skill,
     information_skill,
