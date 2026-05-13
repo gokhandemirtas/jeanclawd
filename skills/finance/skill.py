@@ -108,13 +108,103 @@ def _retrieve_stock_data(ticker_symbol: str, is_historical: bool, period: Option
     ticker = yf.Ticker(ticker_symbol)
     try:
         if is_historical:
-            data = ticker.history(period=period)
-            return data.to_string()
+            effective_period = period or "3mo"
+            hist = ticker.history(period=effective_period)
+            if hist.empty:
+                return f"No historical data available for {ticker_symbol}."
+            return _format_historical_summary(ticker_symbol, hist, effective_period)
         else:
-            data = ticker.fast_info['lastPrice']
-            return str(data)
+            return _format_current_snapshot(ticker_symbol, ticker)
     except Exception as error:
-        return error
+        return str(error)
+
+
+def _format_current_snapshot(ticker_symbol: str, ticker: yf.Ticker) -> str:
+    fi = ticker.fast_info
+    price = fi.get("lastPrice") or fi.get("last_price")
+    prev_close = fi.get("previousClose") or fi.get("previous_close")
+    day_high = fi.get("dayHigh") or fi.get("day_high")
+    day_low = fi.get("dayLow") or fi.get("day_low")
+    week52_high = fi.get("fiftyTwoWeekHigh") or fi.get("fifty_two_week_high")
+    week52_low = fi.get("fiftyTwoWeekLow") or fi.get("fifty_two_week_low")
+    market_cap = fi.get("marketCap") or fi.get("market_cap")
+    currency = fi.get("currency", "USD")
+
+    lines = [f"Ticker: {ticker_symbol}"]
+    if price:
+        lines.append(f"Current price: {price:.2f} {currency}")
+    if prev_close and price:
+        change = price - prev_close
+        pct = (change / prev_close) * 100
+        sign = "+" if change >= 0 else ""
+        lines.append(f"Day change: {sign}{change:.2f} ({sign}{pct:.2f}%)")
+    if day_high and day_low:
+        lines.append(f"Day range: {day_low:.2f} – {day_high:.2f}")
+    if week52_high and week52_low:
+        lines.append(f"52-week range: {week52_low:.2f} – {week52_high:.2f}")
+    if market_cap:
+        lines.append(f"Market cap: {_fmt_large(market_cap)} {currency}")
+    return "\n".join(lines)
+
+
+def _format_historical_summary(ticker_symbol: str, hist, period: str) -> str:
+    closes = hist["Close"]
+    highs = hist["High"]
+    lows = hist["Low"]
+    volumes = hist["Volume"]
+
+    start_price = closes.iloc[0]
+    end_price = closes.iloc[-1]
+    pct_change = ((end_price - start_price) / start_price) * 100
+    period_high = highs.max()
+    period_low = lows.min()
+    avg_vol = volumes.mean()
+
+    # Recent 2-week trend vs prior 2 weeks
+    if len(closes) >= 28:
+        recent = closes.iloc[-14:].mean()
+        prior = closes.iloc[-28:-14].mean()
+        trend_pct = ((recent - prior) / prior) * 100
+        trend = f"+{trend_pct:.1f}%" if trend_pct >= 0 else f"{trend_pct:.1f}%"
+        trend_line = f"Recent trend (last 2 wks vs prior 2 wks): {trend}"
+    else:
+        trend_line = None
+
+    sign = "+" if pct_change >= 0 else ""
+    lines = [
+        f"Ticker: {ticker_symbol} | Period: {period}",
+        f"Start price: {start_price:.2f}",
+        f"End price:   {end_price:.2f}",
+        f"Change:      {sign}{pct_change:.2f}%",
+        f"Period high: {period_high:.2f}",
+        f"Period low:  {period_low:.2f}",
+        f"Avg daily volume: {_fmt_large(avg_vol)}",
+    ]
+    if trend_line:
+        lines.append(trend_line)
+
+    # Monthly breakdown for periods >= 3mo
+    if len(closes) >= 60:
+        lines.append("\nMonthly breakdown:")
+        monthly = hist["Close"].resample("ME").last()
+        monthly_open = hist["Close"].resample("ME").first()
+        for date, close in monthly.items():
+            open_price = monthly_open.get(date, close)
+            m_pct = ((close - open_price) / open_price) * 100
+            sign_m = "+" if m_pct >= 0 else ""
+            lines.append(f"  {date.strftime('%b %Y')}: {close:.2f} ({sign_m}{m_pct:.1f}%)")
+
+    return "\n".join(lines)
+
+
+def _fmt_large(n: float) -> str:
+    if n >= 1e12:
+        return f"{n/1e12:.2f}T"
+    if n >= 1e9:
+        return f"{n/1e9:.2f}B"
+    if n >= 1e6:
+        return f"{n/1e6:.2f}M"
+    return f"{n:.0f}"
 
 
 def handle_finance_stocks(query: str, retry_count: int = 0) -> str:

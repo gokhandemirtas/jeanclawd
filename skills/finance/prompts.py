@@ -36,7 +36,7 @@ Return your response as a valid JSON object with this exact structure:
 **Fields:**
 - **ticker**: Must be a ticker from the Available Tickers list above. Use "UNKNOWN_TICKER" if the company cannot be matched to any entry in the list.
 - **dataType**: Either "CURRENT" or "HISTORICAL"
-- **period**: Only include for historical data. Must be one of: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max". Use null for current data.
+- **period**: Only for historical data. Must be one of: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max". Default to "3mo" when the user asks for history without specifying a timeframe. Use null for current data.
 
 ## Examples
 
