@@ -27,7 +27,7 @@ async def handle_create_reminder(datetime_str: str, description: str) -> str:
       created_at=datetime.now().date(),
       is_completed=False,
     )
-    logger.debug(new_reminder)
+    logger.debug(new_reminder.model_dump_json())
     await new_reminder.insert()
 
     display_time = format_reminder_display(parsed_datetime)

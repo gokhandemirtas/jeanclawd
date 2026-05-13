@@ -3,6 +3,7 @@ import os
 import platform
 import shutil
 import subprocess
+import urllib.request
 
 import aiohttp
 import psutil
@@ -37,6 +38,27 @@ def _gradient_print(
 
 def _fmt_gb(b: int) -> str:
 	return f"{b / 1024**3:.1f} GB"
+
+
+def _lmstudio_loaded_models() -> set[str] | None:
+	"""Return set of loaded model IDs from LM Studio, or None if not using LM Studio."""
+	backend = os.getenv("INFERENCE_PROVIDER", "lmstudio").lower()
+	if backend != "lmstudio":
+		return None
+	host = os.getenv("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
+	try:
+		with urllib.request.urlopen(f"{host}/models", timeout=3) as resp:
+			data = json.loads(resp.read())
+		return {m["id"] for m in data.get("data", [])}
+	except Exception:
+		return set()
+
+
+def _is_loaded(model_val: str, loaded: set[str]) -> bool:
+	"""Check if model_val matches any loaded model ID (substring match)."""
+	if not model_val or model_val == "—":
+		return False
+	return any(model_val in mid or mid in model_val for mid in loaded)
 
 
 def _models() -> list[tuple[str, str]]:
@@ -219,13 +241,27 @@ def boot(
 	connections: dict[str, tuple[bool, str]] | None = None,
 	flags: dict[str, bool] | None = None,
 ) -> None:
+	loaded_models = _lmstudio_loaded_models()
+
 	models_table = Table(
 		box=None, show_header=True, header_style="bold", padding=(0, 2, 0, 0)
 	)
 	models_table.add_column("Role", style="dim", min_width=20)
 	models_table.add_column("Model")
-	for role, model in _models():
-		models_table.add_row(role, f"[cyan]{model}[/cyan]")
+	if loaded_models is not None:
+		models_table.add_column("Status", min_width=12)
+	for row in _models():
+		role, model = row
+		if loaded_models is not None:
+			if model in ("—", "") or role in ("Context", "Host"):
+				status = "[dim]—[/dim]"
+			elif _is_loaded(model, loaded_models):
+				status = "[green]loaded[/green]"
+			else:
+				status = "[red]not loaded[/red]"
+			models_table.add_row(role, f"[cyan]{model}[/cyan]", status)
+		else:
+			models_table.add_row(role, f"[cyan]{model}[/cyan]")
 
 	backend_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
 	backend_table.add_column("Key", style="dim", min_width=12)

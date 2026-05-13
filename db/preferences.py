@@ -40,12 +40,12 @@ async def update_preferences(
     favSpotifyDevice: Optional[str] = None,
 ) -> Preferences:
     persona = await _get_persona()
-    if agentPersona is not None:
-        persona.preferences.agentPersona = agentPersona
-    if agentVoiceId is not None:
-        persona.preferences.agentVoiceId = agentVoiceId
-    if favSpotifyDevice is not None:
-        persona.preferences.favSpotifyDevice = favSpotifyDevice
+    current = persona.preferences
+    persona.preferences = Preferences(
+        agentPersona=agentPersona if agentPersona is not None else current.agentPersona,
+        agentVoiceId=agentVoiceId if agentVoiceId is not None else current.agentVoiceId,
+        favSpotifyDevice=favSpotifyDevice if favSpotifyDevice is not None else current.favSpotifyDevice,
+    )
     persona.last_updated = datetime.now()
     await persona.save()
     return persona.preferences
