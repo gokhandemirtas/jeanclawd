@@ -64,6 +64,7 @@ def _is_loaded(model_val: str, loaded: set[str]) -> bool:
 def _models() -> list[tuple[str, str]]:
 	keys = [
 		("Generalist", "MODEL_GENERALIST"),
+		("Intent", "MODEL_INTENT"),
 		("Embedding", "MODEL_EMBEDDING"),
 		("Host", "MODEL_HOST"),
 	]

@@ -11,6 +11,7 @@ async def route(
     on_token: Callable[[str], None] | None = None,
     voice_mode: bool = False,
 ) -> str:
+    from skills.conversation.skill import handle_conversation
     skill = get_skill(intent)
     sig = inspect.signature(skill.handle)
     kwargs: dict = {}
@@ -23,5 +24,7 @@ async def route(
     except TypeError:
         result = skill.handle(user_input)
     if inspect.isawaitable(result):
-        return await result
+        result = await result
+    if skill.needs_wrapping:
+        return await handle_conversation(user_input, result, on_token=on_token, voice_mode=voice_mode)
     return result

@@ -15,16 +15,13 @@ _JSON_INSTRUCTION = (
 
 
 class LMStudioProvider(InferenceProvider):
-	def __init__(self, model_key: str, temperature: float = 0, max_tokens: int = -1):
-		self._model = lms.llm(
-			model_key,
-			config={
-				"gpu_offload": "max",
-				"temperature": temperature,
-				"max_tokens": max_tokens,
-			},
-		)
-		self._embedding_model = lms.embedding_model(os.environ["MODEL_EMBEDDING"])
+	def __init__(self, model_key: str, temperature: float = 0, max_tokens: int = -1, load_embeddings: bool = True):
+		config: dict = {"temperature": temperature, "max_tokens": max_tokens}
+		if load_embeddings:
+			# gpu_offload is GGUF-specific; omit it for lean/MLX providers
+			config["gpu_offload"] = "max"
+		self._model = lms.llm(model_key, config=config)
+		self._embedding_model = lms.embedding_model(os.environ["MODEL_EMBEDDING"]) if load_embeddings else None
 
 	def _build_chat(self, messages: list[dict], system_override: str | None = None) -> lms.Chat:
 		system = system_override or next((m["content"] for m in messages if m["role"] == "system"), "")
@@ -70,6 +67,8 @@ class LMStudioProvider(InferenceProvider):
 		return "".join(f.content for f in self._model.respond_stream(chat))
 
 	def embed(self, text: str) -> list[float]:
+		if self._embedding_model is None:
+			raise RuntimeError("This provider was created without an embedding model.")
 		return self._embedding_model.embed(text)
 
 	def context_length(self) -> int:
