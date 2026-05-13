@@ -12,8 +12,8 @@ logging.getLogger("lmstudio").setLevel(logging.CRITICAL)
 from rich.console import Console
 
 from agents.action_resolver.agent import resolve_action_query
+from agents.generalist.router import generalist_route
 from agents.greeting.greeting_agent import greet
-from agents.intent_classifier.intent_classifier import classify
 from agents.intent_router.intent_router import route
 from skills.conversation.skill import resolve_query
 from commands import handle_command, _COMMANDS
@@ -156,20 +156,11 @@ async def main(
 
 			async def _generate() -> str:
 				nonlocal streamed
-				from skills.conversation.skill import consume_pending_intent, set_pending_intent, get_current_topic
+				from skills.conversation.skill import get_recent_history
 				effective_query = await resolve_query(user_input)
 				effective_query = await resolve_action_query(effective_query)
-				pending = consume_pending_intent()
-				if pending:
-					intent = pending
-					logger.debug(f"Intent: {intent} (locked — answering clarifying question)")
-				else:
-					intent = await asyncio.to_thread(classify, effective_query, get_current_topic())
-					logger.debug(f"Intent: {intent}")
-				response = await route(intent, effective_query, on_token=on_token)
-				if intent != "CHAT" and isinstance(response, str) and response.rstrip().endswith("?"):
-					set_pending_intent(intent)
-				return response
+				intent = await generalist_route(effective_query, get_recent_history(n=3))
+				return await route(intent, effective_query, on_token=on_token)
 
 			_start = time.time()
 			active_gen_task = asyncio.create_task(_generate())

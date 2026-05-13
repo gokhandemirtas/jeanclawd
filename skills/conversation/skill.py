@@ -80,7 +80,7 @@ class _ChannelFilter:
 
 
 class _ConversationResponse(BaseModel):
-  topic: str = Field(description="3-5 word label describing the subject of this exchange (e.g. 'weather in London', 'Tesla stock price')")
+  topic: str = Field(description="The primary entity or subject name only — no domain qualifier (e.g. 'Microsoft', 'London', 'Tesla', 'Bitcoin'). Used to resolve pronouns in follow-up queries.")
   answer: str = Field(description="Natural language response presenting the data to the user")
 
 
@@ -112,15 +112,25 @@ def consume_pending_intent() -> str | None:
     _pending_intent = None
     return val
 
-_FOLLOWUP_WORDS = frozenset({
+_PURE_PRONOUN_WORDS = frozenset({
   "it", "its", "that", "this", "them", "those", "they", "their",
   "same", "one", "ones", "there", "here", "him", "her", "he", "she",
 })
 
 
 def _is_followup(text: str) -> bool:
+  """Only rewrite very short queries or those that are primarily pronouns.
+
+  Longer queries go to the router as-is — it has full history and handles
+  context without needing a rewrite. Over-aggressive rewriting causes topic
+  bleed (e.g. 'about its history' → 'about Microsoft stock price's history').
+  """
   words = text.lower().split()
-  return len(words) <= 5 or bool(_FOLLOWUP_WORDS & set(words))
+  if len(words) <= 3:
+    return True
+  # Only rewrite if the query is mostly pronouns with little other content
+  non_pronoun = [w for w in words if w not in _PURE_PRONOUN_WORDS]
+  return len(non_pronoun) <= 2
 
 
 async def resolve_query(user_input: str) -> str:
