@@ -261,6 +261,11 @@ async def _compress_oldest() -> None:
   _rolling_summary = _strip_think(response.content)
 
 
+def append_to_history(user_msg: str, assistant_msg: str) -> None:
+  _history.append(HumanMessage(content=user_msg))
+  _history.append(AIMessage(content=assistant_msg))
+
+
 def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
   """Return the last n exchanges as (user, assistant) string pairs."""
   messages = list(_history)

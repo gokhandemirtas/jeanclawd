@@ -31,7 +31,7 @@ async def _fetch_news() -> str:
       logger.warning(f"RSS feed parse error: {feed.bozo_exception}")
       return "Unable to fetch current news at this time."
 
-    entries = feed.entries[:20]
+    entries = feed.entries[:7]
     results = [f"- {e.get('title', 'No title')}: {e.get('summary', 'No summary available')}" for e in entries]
     full_content = "\n".join(results)
 

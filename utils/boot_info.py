@@ -74,6 +74,7 @@ def _models() -> list[tuple[str, str]]:
 
 	try:
 		from providers import get_provider
+
 		ctx = get_provider().context_length()
 		rows.append(("Context", f"{ctx:,} tokens"))
 	except Exception:
@@ -282,7 +283,7 @@ def boot(
 		res_table.add_row(name, total, free)
 
 	panels: list = [
-		Rule("[bold magenta]JeanClawd[/bold magenta]"),
+		Rule("[bold magenta]Info[/bold magenta]"),
 		Panel(models_table, title="Models", border_style="dim"),
 		Panel(backend_table, title="Backend", border_style="dim"),
 		Panel(res_table, title="Resources", border_style="dim"),
@@ -310,8 +311,8 @@ def boot(
 	art = _gradient_text(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
 
 	layout = Table.grid(expand=True)
-	layout.add_column()
-	layout.add_column()
+	layout.add_column(ratio=3)
+	layout.add_column(ratio=2)
 	layout.add_row(art, Group(*panels))
 
 	_console.print(layout)

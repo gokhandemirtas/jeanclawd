@@ -2,13 +2,13 @@ import argparse
 import asyncio
 import logging
 import os
-import signal
 import sys
 import time
 
 from dotenv import load_dotenv
 
 logging.getLogger("lmstudio").setLevel(logging.CRITICAL)
+logging.getLogger("AsyncWebsocketHandler").setLevel(logging.CRITICAL)
 from rich.console import Console
 
 from agents.action_resolver.agent import resolve_action_query
@@ -20,6 +20,7 @@ from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
 from utils.boot_info import boot, check_inference
+from utils.task_queue import enqueue, pending_count, drain, worker
 
 try:
 	from prompt_toolkit import PromptSession
@@ -44,24 +45,7 @@ async def main(
 	logger.set_debug(debug)
 	logger.init_file_logging("logs/app.log")
 
-	loop = asyncio.get_running_loop()
-	active_gen_task: asyncio.Task | None = None
-	last_sigint: float = 0.0
-
-	def _on_sigint() -> None:
-		nonlocal last_sigint, active_gen_task
-		now = time.time()
-		if active_gen_task is not None and not active_gen_task.done():
-			active_gen_task.cancel()
-		else:
-			if now - last_sigint < 1.5:
-				console.print("\nGoodbye! Have a great day!")
-				sys.exit(0)
-			else:
-				console.print("\n[dim]Press Ctrl+C again to exit.[/dim]")
-		last_sigint = now
-
-	loop.add_signal_handler(signal.SIGINT, _on_sigint)
+	asyncio.create_task(worker())
 
 	if emote:
 		from skills.conversation.skill import enable_emote
@@ -154,36 +138,29 @@ async def main(
 				streamed.append(token)
 				console.out(token, end="")
 
-			async def _generate() -> str:
-				nonlocal streamed
+			loop = asyncio.get_running_loop()
+			done: asyncio.Future[str] = loop.create_future()
+
+			async def _queued_generate() -> None:
 				from skills.conversation.skill import get_recent_history
-				effective_query = await resolve_query(user_input)
-				effective_query = await resolve_action_query(effective_query)
-				intent = await generalist_route(effective_query, get_recent_history(n=3))
-				return await route(intent, effective_query, on_token=on_token)
+				try:
+					effective_query = await resolve_query(user_input)
+					effective_query = await resolve_action_query(effective_query)
+					intent = await generalist_route(effective_query, get_recent_history(n=3))
+					result = await route(intent, effective_query, on_token=on_token)
+					if not done.done():
+						done.set_result(result)
+				except Exception as e:
+					if not done.done():
+						done.set_exception(e)
+
+			enqueue("query", _queued_generate())
 
 			_start = time.time()
-			active_gen_task = asyncio.create_task(_generate())
-
-			cancelled = False
-			response = ""
-			try:
-				response = await active_gen_task
-			except asyncio.CancelledError:
-				cancelled = True
-			finally:
-				active_gen_task = None
-
+			response = await done
 			_elapsed = time.time() - _start
 
-			if cancelled:
-				if streamed:
-					console.out("")
-				console.print("\n[dim]Generation stopped.[/dim]")
-				continue
-
-			from skills.journal import append_to_journal
-			asyncio.create_task(append_to_journal(user_input, response))
+			enqueue("journal", _journal(user_input, response))
 
 			if speak:
 				from tts.tts import speak as tts_speak, active_voice_id
@@ -200,12 +177,31 @@ async def main(
 
 			logger.timing(_elapsed)
 
+		except KeyboardInterrupt:
+			count = pending_count()
+			if count == 0:
+				console.print("\nGoodbye! Have a great day!")
+				break
+			console.print(f"\n[yellow]{count} task(s) queued. Clear queue? [y/n][/yellow] ", end="")
+			try:
+				answer = input().strip().lower()
+			except (EOFError, KeyboardInterrupt):
+				console.print("\nGoodbye! Have a great day!")
+				break
+			if answer == "y":
+				removed = drain()
+				console.print(f"[dim]Cleared {removed} task(s). Press Ctrl+C to exit.[/dim]")
 		except EOFError:
 			console.print("\nGoodbye! Have a great day!")
 			break
 		except Exception as e:
 			logger.error(f"An error occurred: {e}")
 			console.print("\nSorry, I encountered an error. Let's try again.\n")
+
+
+async def _journal(question: str, answer: str) -> None:
+	from skills.journal import append_to_journal
+	await append_to_journal(question, answer)
 
 
 if __name__ == "__main__":

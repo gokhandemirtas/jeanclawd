@@ -6,10 +6,7 @@ from datetime import date, datetime
 from db.schemas import Conversations, ConversationExchange, Journal
 from utils.log import logger
 
-# Flush memory when this many exchanges are pending, or after INACTIVITY_SECONDS
-# of no new messages — whichever comes first.
-_BATCH_SIZE = 5
-_INACTIVITY_SECONDS = 60
+_INACTIVITY_SECONDS = 120
 
 _pending: list[tuple[str, str]] = []
 _flush_handle: asyncio.TimerHandle | None = None
@@ -35,23 +32,16 @@ def _enqueue_memory(question: str, answer: str) -> None:
 
     _pending.append((question, answer))
 
-    # Cancel any existing inactivity timer and reschedule
     if _flush_handle is not None:
         _flush_handle.cancel()
 
     loop = asyncio.get_event_loop()
     _flush_handle = loop.call_later(_INACTIVITY_SECONDS, _schedule_flush)
 
-    if len(_pending) >= _BATCH_SIZE:
-        if _flush_handle is not None:
-            _flush_handle.cancel()
-            _flush_handle = None
-        asyncio.create_task(_flush_memory())
-
 
 def _schedule_flush() -> None:
-    """Called by the inactivity timer (synchronous call_later callback)."""
-    asyncio.create_task(_flush_memory())
+    from utils.task_queue import enqueue
+    enqueue("mem0_flush", _flush_memory())
 
 
 async def _flush_memory() -> None:

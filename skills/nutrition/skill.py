@@ -102,8 +102,16 @@ async def handle_nutrition(query: str) -> str:
 
     try:
         if intent.query_type == "NUTRITION_LOOKUP":
-            data = await lookup_nutrition(intent.query)
+            try:
+                data = await lookup_nutrition(intent.query)
+            except aiohttp.ClientResponseError:
+                data = None
             if not data:
+                meals = await search_recipes(intent.query)
+                if meals:
+                    full = await get_recipe_by_id(meals[0]["idMeal"])
+                    if full:
+                        return _format_recipe(full)
                 return f"I couldn't find nutrition data for '{intent.query}'. Try a more specific food name."
             return _format_nutrition(data, intent.query)
 

@@ -27,4 +27,6 @@ async def route(
         result = await result
     if skill.needs_wrapping:
         return await handle_conversation(user_input, result, on_token=on_token, voice_mode=voice_mode)
+    from skills.conversation.skill import append_to_history
+    append_to_history(user_input, result)
     return result
