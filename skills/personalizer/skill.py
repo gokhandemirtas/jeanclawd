@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from utils.log import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,16 @@ class PersonaUpdate(BaseModel):
     character_traits: list[str] = []
     likes: list[str] = []
     dislikes: list[str] = []
+
+    @field_validator("age", mode="before")
+    @classmethod
+    def _coerce_age(cls, v):
+        return None if v in (None, "", "unknown") else v
+
+    @field_validator("has_children", mode="before")
+    @classmethod
+    def _coerce_has_children(cls, v):
+        return None if v in (None, "", "unknown") else v
 
 
 _EXTRACT_PROMPT = """You are a silent observer analysing a conversation log between a user and their AI assistant.

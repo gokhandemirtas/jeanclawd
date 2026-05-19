@@ -4,8 +4,7 @@ import os
 import tempfile
 import threading
 
-import whisper
-
+from stt import get_stt_provider
 from utils import logger
 
 
@@ -25,7 +24,7 @@ def process_voice_job(
 			job.update({"status": "cancelled"})
 			return
 
-		transcript = whisper.load_model("base").transcribe(audio_in)["text"].strip()
+		transcript = get_stt_provider().transcribe(audio_in)
 		logger.debug(f"[api/voice] transcript='{transcript}'")
 		job["transcription"] = transcript
 
@@ -82,7 +81,7 @@ def process_voice_ws(
 		if cancel_event.is_set():
 			return
 
-		transcript = whisper.load_model("base").transcribe(audio_in)["text"].strip()
+		transcript = get_stt_provider().transcribe(audio_in)
 		logger.debug(f"[api/voice/ws] transcript='{transcript}'")
 		send_event({"stage": "transcribed", "text": transcript})
 
