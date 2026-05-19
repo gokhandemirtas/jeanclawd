@@ -11,7 +11,14 @@ async def run_intent_classifier(
     on_status: Callable[[str], None] | None = None,
     voice_mode: bool = False,
 ) -> str:
-    intent = await asyncio.to_thread(classify, user_input)
+    from skills.conversation.skill import consume_pending_intent, get_recent_history, resolve_query
+    pending = consume_pending_intent()
+    if pending:
+        intent = pending
+    else:
+        user_input = await resolve_query(user_input)
+        from agents.generalist.router import generalist_route
+        intent = await generalist_route(user_input, get_recent_history(n=3))
     if on_status:
         on_status(intent.replace("_", " ").title())
     response = await route(intent, user_input, on_token=on_token, voice_mode=voice_mode)

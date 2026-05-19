@@ -3,7 +3,7 @@
 import os
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from skills.notes.create import handle_create_note
 from skills.notes.delete import handle_delete_note
@@ -18,15 +18,19 @@ class _NotesIntentResponse(BaseModel):
     sub_intent: Literal["CREATE", "LIST", "READ", "DELETE"]
 
 
-def _classify_sub_intent(query: str) -> str:
-    result = generate_structured_output(
-        model_name=os.environ["MODEL_GENERALIST"],
-        user_prompt=query,
-        system_prompt=NOTES_INTENT_PROMPT,
-        pydantic_model=_NotesIntentResponse,
-        max_tokens=50,
-    )
-    return result.sub_intent
+def _classify_sub_intent(query: str) -> str | None:
+    try:
+        result = generate_structured_output(
+            model_name=os.environ["MODEL_GENERALIST"],
+            user_prompt=query,
+            system_prompt=NOTES_INTENT_PROMPT,
+            pydantic_model=_NotesIntentResponse,
+            max_tokens=50,
+        )
+        return result.sub_intent
+    except (ValidationError, Exception) as e:
+        logger.warning(f"[notes] sub_intent classification failed: {e}")
+        return None
 
 
 async def handle_notes(query: str) -> str:
@@ -43,4 +47,4 @@ async def handle_notes(query: str) -> str:
         case "DELETE":
             return await handle_delete_note(query)
         case _:
-            return "Could not determine what you'd like to do with your notes."
+            return "I wasn't sure what to do with your notes — you can ask me to save, list, read, or delete a note."

@@ -54,11 +54,13 @@ async def _llm_fallback(query: str) -> str:
 
 async def handle_information_query(query: str) -> str:
   """Handle general knowledge queries — DDG first, LLM fallback with disclaimer."""
-  intent = _classify_intent(query)
-  logger.debug(f"Information intent: query_type={intent.query_type}, keyword={intent.keyword}")
-
-  if intent.query_type.value == "contextual":
-    return _get_contextual_answer(intent.keyword)
+  try:
+    intent = _classify_intent(query)
+    logger.debug(f"Information intent: query_type={intent.query_type}, keyword={intent.keyword}")
+    if intent.query_type.value == "contextual":
+      return _get_contextual_answer(intent.keyword)
+  except Exception as e:
+    logger.warning(f"[information] Intent classification failed ({e}), falling back to web search")
 
   web_results = await web_search(query)
   if web_results:
