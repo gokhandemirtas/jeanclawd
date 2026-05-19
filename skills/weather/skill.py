@@ -109,7 +109,16 @@ async def handle_weather(query: str) -> str:
   logger.debug(f"Detected secondary intent, Location: {location}, period: {time_period}")
 
   if location == "unknown_location" or not location:
-    return "I'd be happy to check the weather for you! Which location would you like the forecast for?"
+    try:
+      from db.schemas import UserPersona
+      persona = await UserPersona.find_one()
+      if persona and persona.location:
+        location = persona.location
+        logger.debug(f"[weather] No location in query — falling back to persona location: {location}")
+      else:
+        return "I'd be happy to check the weather for you! Which location would you like the forecast for?"
+    except Exception:
+      return "I'd be happy to check the weather for you! Which location would you like the forecast for?"
 
   try:
     weather_data = await _query_weather(location, time_period)

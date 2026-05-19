@@ -142,12 +142,21 @@ async def main(
 			done: asyncio.Future[str] = loop.create_future()
 
 			async def _queued_generate() -> None:
-				from skills.conversation.skill import get_recent_history
+				from skills.conversation.skill import get_recent_history, consume_pending_intent
 				try:
 					effective_query = await resolve_query(user_input)
 					effective_query = await resolve_action_query(effective_query)
-					intent = await generalist_route(effective_query, get_recent_history(n=3))
+					from skills.conversation.skill import set_pending_intent
+					pending = consume_pending_intent()
+					if pending:
+						logger.debug(f"[router] pending intent lock: {pending}")
+						intent = pending
+					else:
+						intent = await generalist_route(effective_query, get_recent_history(n=3))
 					result = await route(intent, effective_query, on_token=on_token)
+					if intent != "CHAT" and result.rstrip().endswith("?"):
+						set_pending_intent(intent)
+						logger.debug(f"[router] skill asked a question, locking next turn to {intent}")
 					if not done.done():
 						done.set_result(result)
 				except Exception as e:

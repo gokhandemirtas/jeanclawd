@@ -7,10 +7,36 @@ from json_repair import repair_json
 
 from .base import InferenceProvider
 
+def _make_template(response_format: Type[BaseModel]) -> str:
+	"""Build a fill-in-the-blank JSON template from a Pydantic model.
+
+	Shows the model a concrete object with placeholder values rather than
+	the raw JSON schema definition, which some models echo back verbatim.
+	"""
+	schema = response_format.model_json_schema()
+	props = schema.get("properties", {})
+	template: dict = {}
+	for field_name, field_schema in props.items():
+		field_type = field_schema.get("type", "string")
+		desc = field_schema.get("description", "")
+		hint = f"<{desc}>" if desc else f"<{field_type}>"
+		if field_type == "array":
+			template[field_name] = [hint]
+		elif field_type == "integer":
+			template[field_name] = 0
+		elif field_type == "boolean":
+			template[field_name] = False
+		elif field_type == "object":
+			template[field_name] = {}
+		else:
+			template[field_name] = hint
+	return json.dumps(template, indent=2)
+
+
 _JSON_INSTRUCTION = (
-	"Respond with a single JSON object that strictly follows the schema below. "
-	"Output only the JSON — no explanation, no markdown, no code fences.\n\n"
-	"Schema:\n{schema}"
+	"Output ONLY a JSON object with the placeholder values below replaced by your real response.\n"
+	"No explanation, no markdown, no code fences — just the JSON.\n\n"
+	"{template}"
 )
 
 
@@ -38,12 +64,9 @@ class LMStudioProvider(InferenceProvider):
 		messages: list[dict],
 		response_format: Type[BaseModel],
 	) -> Iterator[str]:
-		# LM Studio's grammar-constrained generation (response_format=) crashes with
-		# 'tree_reduce' on some models. Inject the schema into the system prompt instead
-		# and parse JSON from free-form output.
-		schema = json.dumps(response_format.model_json_schema(), indent=2)
+		template = _make_template(response_format)
 		original_system = next((m["content"] for m in messages if m["role"] == "system"), "")
-		system = original_system + "\n\n" + _JSON_INSTRUCTION.format(schema=schema)
+		system = original_system + "\n\n" + _JSON_INSTRUCTION.format(template=template)
 		chat = self._build_chat(messages, system_override=system)
 		for fragment in self._model.respond_stream(chat):
 			yield fragment.content

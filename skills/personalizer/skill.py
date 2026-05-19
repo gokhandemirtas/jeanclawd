@@ -4,7 +4,8 @@ Runs as part of the compaction flow, on the raw exchanges, before they are summa
 Uses a fast regex pre-filter to skip the LLM entirely when no personal signals are present.
 Merges new findings into the existing UserPersona document in MongoDB.
 
-The persona is injected into Jeans's CHAT system prompt so she can address the user naturally.
+The persona is injected into the CHAT system prompt so the assistant can address
+the user naturally and fill in query gaps (e.g. missing location for weather).
 """
 
 import asyncio
@@ -17,30 +18,56 @@ from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
-# Schemas
+# Extraction schema — mirrors the askable fields of UserPersona
 # ---------------------------------------------------------------------------
 
 
 class PersonaUpdate(BaseModel):
-	name: str = "unknown"
-	location: str = "unknown"
-	communication_style: str = (
-		"unknown"  # "formal" | "casual" | "technical" | "mixed" | "unknown"
-	)
-	likes: list[str] = []
-	dislikes: list[str] = []
+    name: str = "unknown"
+    location: str = "unknown"
+    country: str = "unknown"
+    occupation: str = "unknown"
+    diet: str = "unknown"
+    interests: list[str] = []
+    age: Optional[int] = None
+    gender: str = "unknown"
+    relationship_status: str = "unknown"
+    has_children: Optional[bool] = None
+    languages: list[str] = []
+    nationality: str = "unknown"
+    political_leaning: str = "unknown"
+    religion: str = "unknown"
+    education: str = "unknown"
+    communication_style: str = "unknown"
+    character_traits: list[str] = []
+    likes: list[str] = []
+    dislikes: list[str] = []
 
 
-_EXTRACT_PROMPT = """You are a silent observer analysing a day's conversation log between a user and their AI assistant.
+_EXTRACT_PROMPT = """You are a silent observer analysing a conversation log between a user and their AI assistant.
 
 IMPORTANT: The assistant may be wrong or hallucinating. Only extract facts the USER themselves expressed.
 
 Rules:
 - name: only if the user refers to themselves by name or confirms a name they were addressed by.
-- location: city or country only if explicitly mentioned. Do not infer from topics.
+- location: city or town only if explicitly mentioned by the user. Do not infer from topics.
+- country: country only if explicitly mentioned.
+- occupation: job or profession only if the user states it.
+- diet: e.g. "vegan", "vegetarian", "pescatarian", "omnivore" — only if stated.
+- interests: concrete hobbies or interests the user mentioned. Empty list if none.
+- age: numeric age only if stated. null otherwise.
+- gender: only if the user explicitly states how they identify.
+- relationship_status: e.g. "single", "married", "partnered" — only if stated.
+- has_children: true/false only if stated. null otherwise.
+- languages: languages the user speaks, only if mentioned.
+- nationality: only if explicitly stated.
+- political_leaning: only if the user explicitly states a political view.
+- religion: only if the user explicitly states a religious belief or lack thereof.
+- education: e.g. "bachelor's", "PhD", "high school" — only if stated.
 - communication_style: infer from how the user writes — "formal", "casual", "technical", or "mixed".
+- character_traits: personality traits observable from the user's messages (e.g. "direct", "curious", "humorous"). Empty list if unclear.
 - likes / dislikes: concrete things the user expressed preference for or against. Empty list if none found.
-- Use "unknown" for string fields where nothing was found.
+- Use "unknown" for string fields where nothing was found. Use null for optional numeric/bool fields.
 
 Return a JSON object matching the schema exactly."""
 
@@ -53,27 +80,87 @@ _cached_persona_context: Optional[str] = None
 
 
 def get_persona_context() -> Optional[str]:
-	"""Return a formatted persona string for injection into Jean's system prompt."""
-	return _cached_persona_context
+    """Return a formatted persona string for injection into the CHAT system prompt."""
+    return _cached_persona_context
 
 
 def _build_persona_context(persona) -> str:
-	lines = ["## About the user you are talking to:"]
+    lines = ["## About the user you are talking to:"]
 
-	if persona.name:
-		lines.append(
-			f"- Their name is {persona.name}. Address them by name naturally when it fits."
-		)
-	if persona.location:
-		lines.append(f"- Location: {persona.location}")
-	if persona.communication_style:
-		lines.append(f"- Communication style: {persona.communication_style}")
-	if persona.likes:
-		lines.append(f"- Likes: {', '.join(persona.likes)}")
-	if persona.dislikes:
-		lines.append(f"- Dislikes: {', '.join(persona.dislikes)}")
+    if persona.name:
+        lines.append(f"- Name: {persona.name}. Address them by name naturally when it fits.")
+    if persona.location:
+        lines.append(f"- Location: {persona.location}")
+    if persona.country:
+        lines.append(f"- Country: {persona.country}")
+    if persona.occupation:
+        lines.append(f"- Occupation: {persona.occupation}")
+    if persona.diet:
+        lines.append(f"- Diet: {persona.diet}")
+    if persona.interests:
+        lines.append(f"- Interests: {', '.join(persona.interests)}")
+    if persona.age is not None:
+        lines.append(f"- Age: {persona.age}")
+    if persona.gender:
+        lines.append(f"- Gender: {persona.gender}")
+    if persona.relationship_status:
+        lines.append(f"- Relationship status: {persona.relationship_status}")
+    if persona.has_children is not None:
+        lines.append(f"- Has children: {'yes' if persona.has_children else 'no'}")
+    if persona.languages:
+        lines.append(f"- Languages: {', '.join(persona.languages)}")
+    if persona.nationality:
+        lines.append(f"- Nationality: {persona.nationality}")
+    if persona.political_leaning:
+        lines.append(f"- Political leaning: {persona.political_leaning}")
+    if persona.religion:
+        lines.append(f"- Religion: {persona.religion}")
+    if persona.education:
+        lines.append(f"- Education: {persona.education}")
+    if persona.communication_style:
+        lines.append(f"- Communication style: {persona.communication_style}")
+    if persona.character_traits:
+        lines.append(f"- Character traits: {', '.join(persona.character_traits)}")
+    if persona.likes:
+        lines.append(f"- Likes: {', '.join(persona.likes)}")
+    if persona.dislikes:
+        lines.append(f"- Dislikes: {', '.join(persona.dislikes)}")
 
-	return "\n".join(lines)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Persona question picker — data-driven from UserPersona field metadata
+# ---------------------------------------------------------------------------
+
+
+def get_next_persona_question(persona) -> Optional[str]:
+    """Return the question for the next empty askable field, ordered by tier.
+
+    Reads tier/question metadata from UserPersona.model_fields so any new field
+    added to the schema with json_schema_extra={"tier": N, "question": "..."} is
+    automatically picked up here — no other changes needed.
+    """
+    from db.schemas import UserPersona
+
+    candidates = []
+    for field_name, field_info in UserPersona.model_fields.items():
+        extra = field_info.json_schema_extra
+        if not isinstance(extra, dict):
+            continue
+        tier = extra.get("tier", 0)
+        question = extra.get("question", "")
+        if tier < 1 or not question:
+            continue
+        val = getattr(persona, field_name, None)
+        if val is None or val == [] or val == "":
+            candidates.append((tier, field_name, question))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: (x[0], x[1]))
+    return candidates[0][2]
 
 
 # ---------------------------------------------------------------------------
@@ -82,20 +169,32 @@ def _build_persona_context(persona) -> str:
 
 
 def _build_changes(existing, update: PersonaUpdate) -> dict:
-	changes = {}
+    changes = {}
 
-	for field in ("name", "location", "communication_style"):
-		val = getattr(update, field)
-		if val and val != "unknown" and not getattr(existing, field):
-			changes[field] = val
+    scalar_fields = (
+        "name", "location", "country", "occupation", "diet",
+        "gender", "relationship_status", "nationality",
+        "political_leaning", "religion", "education", "communication_style",
+    )
+    for field in scalar_fields:
+        val = getattr(update, field)
+        if val and val != "unknown" and not getattr(existing, field):
+            changes[field] = val
 
-	for field in ("likes", "dislikes"):
-		current: list = getattr(existing, field) or []
-		new_items = [x for x in getattr(update, field) if x not in current]
-		if new_items:
-			changes[field] = current + new_items
+    if update.age is not None and existing.age is None:
+        changes["age"] = update.age
 
-	return changes
+    if update.has_children is not None and existing.has_children is None:
+        changes["has_children"] = update.has_children
+
+    list_fields = ("interests", "languages", "character_traits", "likes", "dislikes")
+    for field in list_fields:
+        current: list = getattr(existing, field) or []
+        new_items = [x for x in getattr(update, field) if x not in current]
+        if new_items:
+            changes[field] = current + new_items
+
+    return changes
 
 
 # ---------------------------------------------------------------------------
@@ -103,12 +202,14 @@ def _build_changes(existing, update: PersonaUpdate) -> dict:
 # ---------------------------------------------------------------------------
 
 _PERSONAL_SIGNAL = re.compile(
-	r"\b(i('m| am| was| were| have| had| work| worked| like| love| hate| enjoy| prefer|"
-	r" believe| think| feel| vote| practice| follow| play| read| watch| listen)|"
-	r"my (name|birthday|birth|age|job|wife|husband|partner|kids?|children|family|religion|"
-	r"faith|politics?|hobby|hobbies|interest|passion|fav(ou?rite)?)|"
-	r"i('m| am) (a |an |into |from )|born (in|on)|i don'?t (like|enjoy|eat|drink|believe|support))\b",
-	re.IGNORECASE,
+    r"\b(i('m| am| was| were| have| had| work| worked| like| love| hate| enjoy| prefer|"
+    r" believe| think| feel| vote| practice| follow| play| read| watch| listen|"
+    r" speak| eat| drink| identify)|"
+    r"my (name|birthday|birth|age|job|wife|husband|partner|kids?|children|family|religion|"
+    r"faith|politics?|hobby|hobbies|interest|passion|fav(ou?rite)?|diet|language|nationality|"
+    r"education|background|degree|career|occupation)|"
+    r"i('m| am) (a |an |into |from )|born (in|on)|i don'?t (like|enjoy|eat|drink|believe|support))\b",
+    re.IGNORECASE,
 )
 
 
@@ -118,74 +219,76 @@ _PERSONAL_SIGNAL = re.compile(
 
 
 def _extract_sync(log: str) -> PersonaUpdate:
-	import os
-	from utils.llm_structured_output import generate_structured_output
+    import os
+    from utils.llm_structured_output import generate_structured_output
 
-	return generate_structured_output(
-		model_name=os.environ["MODEL_GENERALIST"],
-		user_prompt=log,
-		system_prompt=_EXTRACT_PROMPT,
-		pydantic_model=PersonaUpdate,
-		max_tokens=256,
-	)
+    return generate_structured_output(
+        model_name=os.environ["MODEL_GENERALIST"],
+        user_prompt=log,
+        system_prompt=_EXTRACT_PROMPT,
+        pydantic_model=PersonaUpdate,
+        max_tokens=1024,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Public entry point — called before compaction so raw exchanges are not lost
+# Public entry points
 # ---------------------------------------------------------------------------
 
 
 async def analyze_persona_from_log(exchanges: list) -> None:
-	"""Extract user facts from a day's raw exchanges and merge into UserPersona."""
-	global _cached_persona_context
+    """Extract user facts from a day's raw exchanges and merge into UserPersona."""
+    global _cached_persona_context
 
-	all_user_text = " ".join(ex.question for ex in exchanges)
-	if not _PERSONAL_SIGNAL.search(all_user_text):
-		return
+    # Filter to exchanges where the user said something personally revealing,
+    # then cap to the most recent 20 to keep the prompt within model limits.
+    signal_exchanges = [ex for ex in exchanges if _PERSONAL_SIGNAL.search(ex.question)]
+    if not signal_exchanges:
+        return
+    signal_exchanges = signal_exchanges[-20:]
 
-	lines = []
-	for ex in exchanges:
-		lines.append(f"User: {ex.question}")
-		lines.append(f"Assistant: {ex.answer}")
-	log = "\n".join(lines)
+    lines = []
+    for ex in signal_exchanges:
+        lines.append(f"User: {ex.question}")
+        lines.append(f"Assistant: {ex.answer}")
+    log = "\n".join(lines)
 
-	try:
-		from db.schemas import UserPersona
+    try:
+        from db.schemas import UserPersona
 
-		loop = asyncio.get_running_loop()
-		update = await loop.run_in_executor(None, lambda: _extract_sync(log))
+        loop = asyncio.get_running_loop()
+        update = await loop.run_in_executor(None, lambda: _extract_sync(log))
 
-		existing = await UserPersona.find_one()
-		if existing is None:
-			existing = await UserPersona(last_updated=datetime.now()).insert()
+        existing = await UserPersona.find_one()
+        if existing is None:
+            existing = await UserPersona(last_updated=datetime.now()).insert()
 
-		changes = _build_changes(existing, update)
-		if not changes:
-			return
+        changes = _build_changes(existing, update)
+        if not changes:
+            return
 
-		changes["last_updated"] = datetime.now()
+        changes["last_updated"] = datetime.now()
 
-		from beanie.operators import Set
+        from beanie.operators import Set
+        await existing.update(Set(changes))
 
-		await existing.update(Set(changes))
+        updated = await UserPersona.find_one()
+        _cached_persona_context = _build_persona_context(updated)
+        logger.debug(f"[personalizer] Persona updated: {list(changes.keys())}")
 
-		updated = await UserPersona.find_one()
-		_cached_persona_context = _build_persona_context(updated)
-		logger.debug(f"[personalizer] Persona updated: {list(changes.keys())}")
-
-	except Exception as e:
-		logger.error(f"[personalizer] Update failed: {e}")
+    except Exception as e:
+        logger.error(f"[personalizer] Update failed: {e}")
 
 
 async def start_personalizer() -> str | None:
-	"""Load existing persona from DB on startup."""
-	global _cached_persona_context
-	try:
-		from db.schemas import UserPersona
+    """Load existing persona from DB on startup."""
+    global _cached_persona_context
+    try:
+        from db.schemas import UserPersona
 
-		existing = await UserPersona.find_one()
-		if existing:
-			_cached_persona_context = _build_persona_context(existing)
-			return "[personalizer] Loaded existing persona from DB."
-	except Exception as e:
-		logger.warning(f"[personalizer] Could not load existing persona: {e}")
+        existing = await UserPersona.find_one()
+        if existing:
+            _cached_persona_context = _build_persona_context(existing)
+            return "[personalizer] Loaded existing persona from DB."
+    except Exception as e:
+        logger.warning(f"[personalizer] Could not load existing persona: {e}")

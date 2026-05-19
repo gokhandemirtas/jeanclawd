@@ -87,9 +87,14 @@ async def generalist_route(query: str, history: list[tuple[str, str]]) -> Intent
 
     Unlike the intent classifier, this sees recent exchanges so it can
     correctly handle conversational shifts, negations, and follow-ups.
+    Falls back to CHAT on any routing failure so the conversation never hard-crashes.
     """
     import time
     t = time.time()
-    intent = await asyncio.to_thread(_route_sync, query, history)
-    logger.debug(f"[router] {intent} ({time.time() - t:.2f}s)")
-    return intent
+    try:
+        intent = await asyncio.to_thread(_route_sync, query, history)
+        logger.debug(f"[router] {intent} ({time.time() - t:.2f}s)")
+        return intent
+    except Exception as e:
+        logger.warning(f"[router] Routing failed ({e}), falling back to CHAT")
+        return "CHAT"
