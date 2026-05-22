@@ -96,6 +96,16 @@ async def main(
 	if api_url:
 		connections["API"] = (True, api_url)
 
+	if not db_ok:
+		console.print("[red]Database unavailable — cannot start.[/red]")
+		sys.exit(1)
+
+	from db.preferences import apply_preferences
+	from skills.personalizer import start_personalizer
+	await apply_preferences()
+	await start_personalizer()
+
+	from agents.persona import get_active_persona_id, get_active_voice_id
 	boot(
 		connections=connections,
 		flags={
@@ -105,16 +115,11 @@ async def main(
 			"track_camera": track_camera,
 			"server": server,
 		},
+		persona={
+			"Persona": get_active_persona_id(),
+			"Voice": get_active_voice_id() or "—",
+		},
 	)
-
-	if not db_ok:
-		console.print("[red]Database unavailable — cannot start.[/red]")
-		sys.exit(1)
-
-	from db.preferences import apply_preferences
-	from skills.personalizer import start_personalizer
-	await apply_preferences()
-	await start_personalizer()
 
 	await asyncio.to_thread(greet)
 

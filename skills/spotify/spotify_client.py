@@ -105,3 +105,20 @@ class SpotifyClient:
         if device_id:
             params["device_id"] = device_id
         await self._put("/me/player/volume", params=params)
+
+    async def get_user_playlists(self, limit: int = 50) -> list[dict]:
+        """Returns list of {"name": ..., "uri": ..., "track_count": ...}."""
+        data = await self._get("/me/playlists", params={"limit": limit})
+        return [
+            {
+                "name": item["name"],
+                "uri": item["uri"],
+                "track_count": (item.get("tracks") or {}).get("total", 0),
+            }
+            for item in (data or {}).get("items", [])
+            if item and item.get("name") and item.get("uri")
+        ]
+
+    async def play_playlist(self, device_id: Optional[str], playlist_uri: str) -> None:
+        params = {"device_id": device_id} if device_id else None
+        await self._put("/me/player/play", json={"context_uri": playlist_uri}, params=params)

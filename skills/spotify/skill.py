@@ -19,7 +19,8 @@ _auth = SpotifyAuthProvider()
 _SPOTIFY_PROMPT = """You are a Spotify command parser. Extract the action, target(s), and device from the user's request.
 
 Actions:
-- PLAY: play a song, artist, album, or playlist
+- PLAY: play a song, artist, or album
+- PLAY_PLAYLIST: play one of the user's saved playlists by name
 - PAUSE: pause playback
 - RESUME: resume playback
 - SKIP: skip to the next track
@@ -29,9 +30,11 @@ Actions:
 - NOW_PLAYING: show what is currently playing
 - QUEUE: add a song to the queue
 - LIST_DEVICES: list available/connected Spotify devices
+- LIST_PLAYLISTS: list the user's saved playlists
 
 For PLAY and QUEUE involving a single song, set `target` to the search query (e.g. "Bohemian Rhapsody Queen").
-If the user refers to a list of songs mentioned earlier in the conversation (e.g. "play them all", "play the playlist"), extract each song title + artist into `targets` as separate strings.
+For PLAY_PLAYLIST, set `target` to the playlist name as the user said it.
+If the user refers to a list of songs mentioned earlier in the conversation (e.g. "play them all"), extract each song title + artist into `targets` as separate strings.
 If the user says "first song", "second song", etc., resolve that to the specific song from the conversation context and set `target`.
 For VOLUME, extract the level as an integer 0–100.
 If the user specifies a device (e.g. "on my Mac", "on the TV", "on iPhone"), extract the device name.
@@ -42,6 +45,7 @@ Leave optional fields as null if not applicable.
 class _SpotifyAction(BaseModel):
 	action: Literal[
 		"PLAY",
+		"PLAY_PLAYLIST",
 		"PAUSE",
 		"RESUME",
 		"SKIP",
@@ -50,13 +54,14 @@ class _SpotifyAction(BaseModel):
 		"NOW_PLAYING",
 		"QUEUE",
 		"LIST_DEVICES",
+		"LIST_PLAYLISTS",
 	]
 	target: Optional[str] = Field(
-		None, description="Search query for a single PLAY/QUEUE action"
+		None, description="Search query for PLAY/QUEUE, or playlist name for PLAY_PLAYLIST"
 	)
 	targets: Optional[list[str]] = Field(
 		None,
-		description="List of search queries when playing multiple songs (e.g. a playlist)",
+		description="List of search queries when playing multiple songs",
 	)
 	volume: Optional[int] = Field(
 		None, description="Volume 0-100 for VOLUME action", ge=0, le=100
@@ -137,6 +142,27 @@ async def handle_spotify(query: str) -> str:
 				lines.append(f"- {d['name']} ({d['type']}, {status})")
 			return "Connected Spotify devices:\n" + "\n".join(lines)
 
+		if action.action == "LIST_PLAYLISTS":
+			playlists = await client.get_user_playlists()
+			if not playlists:
+				return "No playlists found in your Spotify library."
+			lines = [f"- {p['name']} ({p['track_count']} tracks)" for p in playlists]
+			return "Your Spotify playlists:\n" + "\n".join(lines)
+
+		if action.action == "PLAY_PLAYLIST":
+			name_hint = action.target or query
+			playlists = await client.get_user_playlists()
+			if not playlists:
+				return "No playlists found in your Spotify library."
+			from rank_bm25 import BM25Okapi
+			corpus = [p["name"].lower().split() for p in playlists]
+			bm25 = BM25Okapi(corpus)
+			scores = bm25.get_scores(name_hint.lower().split())
+			best_idx = int(scores.argmax())
+			match = playlists[best_idx] if scores[best_idx] > 0 else playlists[0]
+			await client.play_playlist(device_id, match["uri"])
+			return f"Playing playlist: {match['name']}."
+
 		if action.action == "NOW_PLAYING":
 			track = await client.now_playing()
 			if not track:
@@ -171,6 +197,11 @@ async def handle_spotify(query: str) -> str:
 
 		if action.action in ("SKIP", "NEXT"):
 			await client.skip(device_id)
+			import asyncio
+			await asyncio.sleep(0.6)
+			track = await client.now_playing()
+			if track:
+				return f"Now playing: {track['name']} by {track['artist']}."
 			return "Skipped to the next track."
 
 		if action.action == "PREVIOUS":

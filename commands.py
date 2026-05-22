@@ -109,7 +109,11 @@ async def cmd_ctx() -> None:
     import os
 
     import tiktoken
-    n_ctx = int(os.environ.get("MODEL_CTX", 8192))
+    try:
+        from providers import get_provider
+        n_ctx = get_provider().context_length()
+    except Exception:
+        n_ctx = int(os.environ.get("MODEL_CTX", 8192))
     history_text = _format_history()
     enc = tiktoken.get_encoding("cl100k_base")
     used = len(enc.encode(history_text)) if history_text else 0

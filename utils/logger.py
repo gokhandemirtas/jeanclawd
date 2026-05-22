@@ -64,13 +64,16 @@ def warning(msg: str) -> None:
 
 def error(msg: str) -> None:
 	_write("ERROR", msg)
-	_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
+	if _debug_enabled:
+		_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
 
 
 def exception(msg: str) -> None:
-	_write("ERROR", msg + "\n" + traceback.format_exc())
-	_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
-	_console.print(f"[dim]{escape(traceback.format_exc())}[/dim]")
+	tb = traceback.format_exc()
+	_write("ERROR", msg + "\n" + tb)
+	if _debug_enabled:
+		_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
+		_console.print(f"[dim]{escape(tb)}[/dim]")
 
 
 def stream(content: str) -> None:

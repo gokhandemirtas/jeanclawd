@@ -244,6 +244,7 @@ _JEANCLAWD = r"""
 def boot(
 	connections: dict[str, tuple[bool, str]] | None = None,
 	flags: dict[str, bool] | None = None,
+	persona: dict[str, str] | None = None,
 ) -> None:
 	loaded_models = _lmstudio_loaded_models()
 
@@ -307,6 +308,14 @@ def boot(
 			state = "[green]on[/green]" if enabled else "[dim]off[/dim]"
 			flags_table.add_row(flag, state)
 		panels.append(Panel(flags_table, title="Flags", border_style="dim"))
+
+	if persona:
+		persona_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
+		persona_table.add_column("Key", style="dim", min_width=14)
+		persona_table.add_column("Value")
+		for key, val in persona.items():
+			persona_table.add_row(key, f"[cyan]{val}[/cyan]")
+		panels.append(Panel(persona_table, title="Persona", border_style="dim"))
 
 	art = _gradient_text(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
 

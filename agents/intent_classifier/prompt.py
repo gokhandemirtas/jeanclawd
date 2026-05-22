@@ -12,7 +12,7 @@ NUTRITION — the user wants recipe, nutrition, or food preparation information
 INFORMATION_QUERY — the user wants factual knowledge about something in the world
 NOTES — the user explicitly wants to save, read, list, or delete a personal note
 SEARCH — the user wants a web search on a topic
-SPOTIFY — the user wants to control music playback or query Spotify
+SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, skip, volume, list playlists, play a playlist, now playing, list devices)
 PLANNER — the user is explicitly asking the assistant to create a plan or itinerary on their behalf
 CHAT — the user is chatting, sharing news about themselves, reacting, correcting, or asking something personal
 

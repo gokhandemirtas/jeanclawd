@@ -29,6 +29,7 @@ class PersonaUpdate(BaseModel):
     occupation: str = "unknown"
     diet: str = "unknown"
     interests: list[str] = []
+    music: list[str] = []
     age: Optional[int] = None
     gender: str = "unknown"
     relationship_status: str = "unknown"
@@ -65,13 +66,14 @@ Rules:
 - occupation: job or profession only if the user states it.
 - diet: e.g. "vegan", "vegetarian", "pescatarian", "omnivore" — only if stated.
 - interests: concrete hobbies or interests the user mentioned. Empty list if none.
+- music: music genres or artists the user listens to or likes (e.g. "heavy metal", "jazz", "The Beatles"). Use this field — NOT likes — for anything music-related. Empty list if none.
 - age: numeric age only if stated. null otherwise.
 - gender: only if the user explicitly states how they identify.
 - relationship_status: e.g. "single", "married", "partnered" — only if stated.
 - has_children: true/false only if stated. null otherwise.
 - languages: languages the user speaks, only if mentioned.
 - nationality: only if explicitly stated.
-- political_leaning: only if the user explicitly states a political view.
+- political_leaning: infer from explicit statements. "I don't like left wing" → "right-leaning". "I hate conservatives" → "left-leaning". Use plain descriptors like "right-leaning", "left-leaning", "centrist", "libertarian". Only "unknown" if truly no signal.
 - religion: only if the user explicitly states a religious belief or lack thereof.
 - education: e.g. "bachelor's", "PhD", "high school" — only if stated.
 - communication_style: infer from how the user writes — "formal", "casual", "technical", or "mixed".
@@ -109,6 +111,8 @@ def _build_persona_context(persona) -> str:
         lines.append(f"- Diet: {persona.diet}")
     if persona.interests:
         lines.append(f"- Interests: {', '.join(persona.interests)}")
+    if persona.music:
+        lines.append(f"- Music: {', '.join(persona.music)}")
     if persona.age is not None:
         lines.append(f"- Age: {persona.age}")
     if persona.gender:
@@ -205,7 +209,7 @@ def _build_changes(existing, update: PersonaUpdate) -> dict:
     if update.has_children is not None and existing.has_children is None:
         changes["has_children"] = update.has_children
 
-    list_fields = ("interests", "languages", "character_traits", "likes", "dislikes")
+    list_fields = ("interests", "music", "languages", "character_traits", "likes", "dislikes")
     for field in list_fields:
         current: list = getattr(existing, field) or []
         new_items = [x for x in getattr(update, field) if x not in current]

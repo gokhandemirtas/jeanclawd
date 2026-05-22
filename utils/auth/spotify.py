@@ -24,6 +24,8 @@ _SCOPES = " ".join([
     "user-read-playback-state",
     "user-modify-playback-state",
     "user-read-currently-playing",
+    "playlist-read-private",
+    "playlist-read-collaborative",
 ])
 _REDIRECT_URI = "http://127.0.0.1:8888/callback"
 _CALLBACK_TIMEOUT = 5000  # seconds to wait for the browser redirect
