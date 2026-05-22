@@ -217,6 +217,59 @@ class _OpenAICompatibleLLM:
 			await task
 
 
+class _OpenAILLM:
+	def __init__(
+		self,
+		model_name: str,
+		temperature: float = 0.7,
+		max_tokens: int = 1024,
+		top_p: float = 0.9,
+		**_kwargs,
+	):
+		self._model_name = model_name
+		self._temperature = temperature
+		self._max_tokens = max_tokens
+		self._top_p = top_p
+
+	def _client(self):
+		from openai import AsyncOpenAI
+		return AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+	def bind(self, max_tokens: Optional[int] = None) -> "_OpenAILLM":
+		return _OpenAILLM(
+			model_name=self._model_name,
+			temperature=self._temperature,
+			max_tokens=max_tokens if max_tokens is not None else self._max_tokens,
+			top_p=self._top_p,
+		)
+
+	async def ainvoke(self, messages: list) -> AIMessage:
+		msgs = _to_openai_messages(messages)
+		resp = await self._client().chat.completions.create(
+			model=self._model_name,
+			messages=msgs,
+			temperature=self._temperature,
+			max_completion_tokens=self._max_tokens,
+			top_p=self._top_p,
+		)
+		return AIMessage(content=resp.choices[0].message.content)
+
+	async def astream(self, messages: list):
+		msgs = _to_openai_messages(messages)
+		stream = await self._client().chat.completions.create(
+			model=self._model_name,
+			messages=msgs,
+			temperature=self._temperature,
+			max_completion_tokens=self._max_tokens,
+			top_p=self._top_p,
+			stream=True,
+		)
+		async for chunk in stream:
+			content = chunk.choices[0].delta.content
+			if content:
+				yield _StreamChunk(content=content)
+
+
 def create_llm(
 	model_name: Optional[str] = None,
 	temperature: float = 0.7,
@@ -224,9 +277,17 @@ def create_llm(
 	top_p: float = 0.9,
 	top_k: int = 40,
 	repeat_penalty: float = 1.0,
-) -> "_LMStudioLLM | _OpenAICompatibleLLM":
+) -> "_LMStudioLLM | _OpenAICompatibleLLM | _OpenAILLM":
 	name = model_name or os.environ.get("MODEL_GENERALIST", "")
 	backend = os.environ.get("INFERENCE_PROVIDER", "lmstudio").lower()
+
+	if backend == "openai":
+		return _OpenAILLM(
+			model_name=name,
+			temperature=temperature,
+			max_tokens=max_tokens,
+			top_p=top_p,
+		)
 
 	if backend == "openai_compatible":
 		return _OpenAICompatibleLLM(

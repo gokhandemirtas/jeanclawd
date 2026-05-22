@@ -54,9 +54,10 @@ async def main(
 		logger.debug("Emote mode enabled")
 
 	if speak:
-		from tts.tts import enable_tts
+		from tts.tts import enable_tts, set_spinner
 
 		enable_tts()
+		set_spinner(False)  # spinner corrupts streamed text in CLI mode
 		logger.debug("TTS enabled")
 
 	if track_camera:
@@ -135,8 +136,10 @@ async def main(
 			streamed: list[str] = []
 
 			def on_token(token: str) -> None:
+				if not streamed:
+					print("\033[36m", end="", flush=True)  # cyan on first token
 				streamed.append(token)
-				console.out(token, end="")
+				print(token, end="", flush=True)
 
 			loop = asyncio.get_running_loop()
 			done: asyncio.Future[str] = loop.create_future()
@@ -171,18 +174,18 @@ async def main(
 
 			enqueue("journal", _journal(user_input, response))
 
+			if streamed:
+				print("\033[0m")  # reset color + newline
+			else:
+				logger.newline()
+				logger.info(response)
+				logger.newline()
+
 			if speak:
 				from tts.tts import speak as tts_speak, active_voice_id
 				from agents.persona import get_active_voice_id
 
 				await asyncio.to_thread(tts_speak, response, get_active_voice_id() or active_voice_id)
-
-			if streamed:
-				console.out("")
-			else:
-				logger.newline()
-				logger.info(response)
-				logger.newline()
 
 			logger.timing(_elapsed)
 

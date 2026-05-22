@@ -1,3 +1,4 @@
+import contextlib
 import os
 import select
 import termios
@@ -16,6 +17,12 @@ from utils import logger
 from pocket_tts import TTSModel
 
 _console = Console(stderr=True, force_terminal=True)
+_show_spinner = True
+
+
+def set_spinner(enabled: bool) -> None:
+    global _show_spinner
+    _show_spinner = enabled
 
 voice_ids = ["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"]
 active_voice_id = "azelma"
@@ -73,7 +80,8 @@ def synthesise(text: str, output_path: str, voice_id: str = active_voice_id, can
 
     all_audio = []
     try:
-        with Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True):
+        ctx = Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True) if _show_spinner else contextlib.nullcontext()
+        with ctx:
             for chunk in chunks:
                 if cancel_event.is_set():
                     break
@@ -110,8 +118,9 @@ def speak(text: str, voice_id: str = active_voice_id):
         voice_state = tts_model.get_state_for_audio_prompt(voice_id)
         chunks = tts_model.generate_audio_stream(voice_state, text_to_generate=text)
 
+        spinner_ctx = Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True) if _show_spinner else contextlib.nullcontext()
         with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
-            with Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True):
+            with spinner_ctx:
                 for chunk in chunks:
                     if stop_event.is_set():
                         break

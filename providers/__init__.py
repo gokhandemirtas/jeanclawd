@@ -8,6 +8,7 @@ _BACKEND_LABELS: dict[str, str] = {
 	"lmstudio": "LM Studio",
 	"llamacpp": "llama.cpp",
 	"openai_compatible": "OpenAI-compatible",
+	"openai": "OpenAI",
 }
 
 
@@ -28,10 +29,13 @@ def _make_provider(model: str, load_embeddings: bool = True) -> InferenceProvide
 	elif backend == "openai_compatible":
 		from .openai_compatible import OpenAICompatibleProvider
 		return OpenAICompatibleProvider(model)
+	elif backend == "openai":
+		from .openai import OpenAIProvider
+		return OpenAIProvider(model)
 	else:
 		raise ValueError(
 			f"Unknown INFERENCE_PROVIDER: {backend!r}. "
-			"Choose 'lmstudio', 'llamacpp', or 'openai_compatible'."
+			"Choose 'lmstudio', 'llamacpp', 'openai_compatible', or 'openai'."
 		)
 
 

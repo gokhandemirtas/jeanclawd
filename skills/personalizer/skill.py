@@ -150,6 +150,9 @@ def get_next_persona_question(persona) -> Optional[str]:
     Reads tier/question metadata from UserPersona.model_fields so any new field
     added to the schema with json_schema_extra={"tier": N, "question": "..."} is
     automatically picked up here — no other changes needed.
+
+    Scalar fields with any stored value are permanently skipped.
+    List fields are skipped once they have at least one entry.
     """
     from db.schemas import UserPersona
 
@@ -163,8 +166,13 @@ def get_next_persona_question(persona) -> Optional[str]:
         if tier < 1 or not question:
             continue
         val = getattr(persona, field_name, None)
-        if val is None or val == [] or val == "":
-            candidates.append((tier, field_name, question))
+        if isinstance(val, list):
+            if val:
+                continue
+        else:
+            if val is not None and val != "":
+                continue
+        candidates.append((tier, field_name, question))
 
     if not candidates:
         return None

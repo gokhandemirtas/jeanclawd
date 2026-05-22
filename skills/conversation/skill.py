@@ -217,7 +217,7 @@ def _chat_prompt_base() -> str:
 
 Always respond to what the user is saying right now. Do not bring up or continue a previous topic unless the user does.
 
-When referring to things you said earlier in the conversation, always use first person — "I said", "I mentioned", "I told you" — never "the assistant said" or "{name} said".
+When referencing something from earlier in the conversation, use first person naturally — "I mentioned", "I told you" — never "the assistant said" or "{name} said". Never start a response with "I said,".
 
 Do NOT start your response with your name or any role prefix such as "{name}:" or "Assistant:". Just write your response directly.
 Do NOT generate "User:" or "Assistant:" labels anywhere in your response. Do NOT simulate or continue the conversation beyond your single reply.

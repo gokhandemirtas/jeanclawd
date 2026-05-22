@@ -182,7 +182,7 @@ Using the research findings below, write a direct, conversational response that:
 - Keeps it concise (2-4 sentences). No bullet points, no headers, plain prose only
 - Never dump raw search results — synthesise and interpret them
 - Check if the user intends to continue the conversation based on what was discussed earlier
-- Always use first person when referring to yourself — "I said", "I mentioned" — never "the assistant" or "{name} said\""""
+- Always use first person when referring to yourself — "I mentioned" — never "the assistant" or "{name} said". Never start a response with "I said,\""""
 
 
 async def _synthesize(user_query: str, observations: list[str], persona: str | None = None) -> str:
