@@ -9,4 +9,4 @@ class MLXWhisperProvider(STTProvider):
 
     def transcribe(self, audio_path: str) -> str:
         import mlx_whisper
-        return mlx_whisper.transcribe(audio_path, path_or_hf_repo=self._repo)["text"].strip()
+        return mlx_whisper.transcribe(audio_path, path_or_hf_repo=self._repo, language="en")["text"].strip()

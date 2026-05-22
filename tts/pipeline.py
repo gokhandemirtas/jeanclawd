@@ -1,11 +1,33 @@
 import asyncio
 import base64
 import os
+import re
 import tempfile
 import threading
 
 from stt import get_stt_provider
 from utils import logger
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F700-\U0001F77F"  # alchemical
+    "\U0001F780-\U0001F7FF"  # geometric shapes extended
+    "\U0001F800-\U0001F8FF"  # supplemental arrows
+    "\U0001F900-\U0001F9FF"  # supplemental symbols
+    "\U0001FA00-\U0001FA6F"  # chess / other
+    "\U0001FA70-\U0001FAFF"  # symbols & pictographs extended-a
+    "\U00002702-\U000027B0"  # dingbats
+    "\U000024C2-\U0001F251"  # enclosed characters
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _clean_for_tts(text: str) -> str:
+    return _EMOJI_RE.sub("", text).strip()
 
 
 def process_voice_job(
@@ -45,7 +67,7 @@ def process_voice_job(
 
 		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 			audio_out = tmp.name
-		synthesise(response_text, audio_out, voice_id=voice_id, cancel_event=cancel_event)
+		synthesise(_clean_for_tts(response_text), audio_out, voice_id=voice_id, cancel_event=cancel_event)
 
 		if cancel_event.is_set():
 			job.update({"status": "cancelled"})
@@ -99,7 +121,7 @@ def process_voice_ws(
 
 		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 			audio_out = tmp.name
-		synthesise(response_text, audio_out, voice_id=voice_id, cancel_event=cancel_event)
+		synthesise(_clean_for_tts(response_text), audio_out, voice_id=voice_id, cancel_event=cancel_event)
 
 		if cancel_event.is_set():
 			return

@@ -123,6 +123,10 @@ _PURE_PRONOUN_WORDS = frozenset({
   "same", "one", "ones", "there", "here", "him", "her", "he", "she",
 })
 
+# Demonstratives that modify a noun ("this dish", "that recipe") always need
+# context resolution — stateless downstream skills can't resolve them otherwise.
+_DEMONSTRATIVES = frozenset({"this", "that", "these", "those"})
+
 
 def _is_followup(text: str) -> bool:
   """Only rewrite very short queries or those that are primarily pronouns.
@@ -133,6 +137,10 @@ def _is_followup(text: str) -> bool:
   """
   words = text.lower().split()
   if len(words) <= 3:
+    return True
+  # Demonstrative pronouns ("this dish", "that recipe") always reference context
+  # even in longer queries — stateless skills have no history to resolve them.
+  if any(w in _DEMONSTRATIVES for w in words):
     return True
   # Only rewrite if the query is mostly pronouns with little other content
   non_pronoun = [w for w in words if w not in _PURE_PRONOUN_WORDS]
