@@ -159,12 +159,13 @@ async def main(
 					if pending:
 						logger.debug(f"[router] pending intent lock: {pending}")
 						intent = pending
+						confidence = 1.0
 					else:
-						intent = await generalist_route(effective_query, get_recent_history(n=3))
+						intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
+						if confidence < 0.75 and intent != "CHAT":
+							logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
+							intent = "CHAT"
 					result = await route(intent, effective_query, on_token=on_token)
-					if intent != "CHAT" and result.rstrip().endswith("?"):
-						set_pending_intent(intent)
-						logger.debug(f"[router] skill asked a question, locking next turn to {intent}")
 					if not done.done():
 						done.set_result(result)
 				except Exception as e:

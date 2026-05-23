@@ -85,12 +85,12 @@ class _ConversationResponse(BaseModel):
 
 
 class _ChatResponse(BaseModel):
-  topic: str = Field(description="3-5 word label describing what this conversation is about (e.g. 'French Revolution causes', 'best pizza in London')")
+  topic: str = Field(description="The primary named entity being discussed — a specific title, name, or place (e.g. 'Bring Her Back', 'Tesla', 'Paris'). Used to resolve follow-up queries like 'find similar ones' or 'who made it'. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'.")
   answer: str = Field(description="Your conversational response to the user")
 
 
 class _TopicResponse(BaseModel):
-  topic: str = Field(description="3-5 word label describing the subject of this exchange")
+  topic: str = Field(description="The primary named entity being discussed — a specific title, name, or place (e.g. 'Bring Her Back', 'Tesla', 'Paris'). Used to resolve follow-up queries. Avoid generic category labels.")
 
 
 # Tracks the active conversation topic so the intent classifier can resolve follow-ups.
@@ -127,6 +127,16 @@ _PURE_PRONOUN_WORDS = frozenset({
 # context resolution — stateless downstream skills can't resolve them otherwise.
 _DEMONSTRATIVES = frozenset({"this", "that", "these", "those"})
 
+# Words that imply "similar/related to X" where X must come from context.
+_IMPLICIT_REFERENCE_WORDS = frozenset({"similar", "related", "like", "alike", "comparable"})
+
+# Phrases where the user redirects to a skill/tool without restating the topic.
+# These always need context expansion regardless of length.
+_SKILL_REDIRECT_PHRASES = (
+    "use it", "search it", "look it up", "google it", "find it",
+    "use the search", "use search", "use your search", "you have a search",
+)
+
 
 def _is_followup(text: str) -> bool:
   """Only rewrite very short queries or those that are primarily pronouns.
@@ -141,6 +151,14 @@ def _is_followup(text: str) -> bool:
   # Demonstrative pronouns ("this dish", "that recipe") always reference context
   # even in longer queries — stateless skills have no history to resolve them.
   if any(w in _DEMONSTRATIVES for w in words):
+    return True
+  # "similar", "related", etc. imply "similar to X" where X is always the current topic.
+  if any(w in _IMPLICIT_REFERENCE_WORDS for w in words):
+    return True
+  # Skill-redirect phrases ("use it", "look it up", "you have a search skill") always
+  # reference the current topic — expand regardless of length.
+  lowered = text.lower()
+  if any(phrase in lowered for phrase in _SKILL_REDIRECT_PHRASES):
     return True
   # Only rewrite if the query is mostly pronouns with little other content
   non_pronoun = [w for w in words if w not in _PURE_PRONOUN_WORDS]
@@ -158,13 +176,17 @@ async def resolve_query(user_input: str) -> str:
   llm = _get_llm(temperature=0.1, max_tokens=60)
   response = await llm.ainvoke([
     SystemMessage(content=(
-      "Rewrite the user's follow-up as a complete, standalone question using the topic. "
-      "Return only the rewritten question — no explanation, no punctuation changes beyond what's needed."
+      "Expand the follow-up into a self-contained search query using the topic.\n"
+      "- If the follow-up contains pronouns or demonstratives (it, its, this, these, those, them, that, they, there), replace them with the topic.\n"
+      "- If the follow-up is short and has no clear subject, append the topic as the subject (e.g. 'find similar movies' + topic 'Bring Her Back' → 'find movies similar to Bring Her Back').\n"
+      "- Do NOT change any other words. Do NOT rephrase.\n"
+      "Return only the expanded query — nothing else."
     )),
     HumanMessage(content=f"Topic: {_current_topic}\nFollow-up: {user_input}"),
   ])
   rewritten = _strip_think(response.content).strip()
-  if rewritten and rewritten.lower() != user_input.lower():
+  # Discard rewrites that are longer than 3x the original or unchanged — likely hallucinated or useless
+  if rewritten and rewritten.lower() != user_input.lower() and len(rewritten) <= len(user_input) * 3:
     logger.debug(f"[query] '{user_input}' → '{rewritten}'")
     return rewritten
   return user_input
@@ -447,6 +469,10 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
         + f'\n\nAt the end of your response, naturally work in this question as part of the conversation — '
         f'do not make it feel like a form or survey: "{persona_question}"'
       )
+    memories = await _fetch_relevant_memories(query)
+    if memories:
+      logger.debug(f"[CHAT] Injecting memories: {memories[:120]}")
+      system = system + "\n\n" + memories
     from utils.resource_monitor import compute_chat_history_limit
     history_lines = []
     for msg in list(_history)[-compute_chat_history_limit():]:
@@ -468,6 +494,17 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     final = _strip_think(full_text)
     _history.append(HumanMessage(content=query))
     _history.append(AIMessage(content=final))
+    prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
+    topic_result = await asyncio.to_thread(
+      generate_structured_output,
+      model_name=os.environ["MODEL_GENERALIST"],
+      user_prompt=f"{prev}User asked: {query}\nAnswer: {final[:300]}",
+      system_prompt="Extract the primary named entity being discussed (a specific title, name, or place — e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement about the same entity as the previous topic, return that same entity name unchanged. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'.",
+      pydantic_model=_TopicResponse,
+      max_tokens=50,
+    )
+    _current_topic = topic_result.topic
+    logger.debug(f"[chat] topic='{_current_topic}'")
     return final
 
   # Check if query needs multi-step reasoning
@@ -484,11 +521,12 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     final = await reason_and_act(query, conversation_context, persona=persona)
 
     # Extract topic from the completed reasoning exchange
+    prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
     topic_result = await asyncio.to_thread(
       generate_structured_output,
       model_name=os.environ["MODEL_GENERALIST"],
-      user_prompt=f"User asked: {query}\nAnswer: {final[:300]}",
-      system_prompt="Extract a 3-5 word topic label describing the subject of this exchange.",
+      user_prompt=f"{prev}User asked: {query}\nAnswer: {final[:300]}",
+      system_prompt="Extract the primary named entity being discussed (a specific title, name, or place — e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement about the same entity as the previous topic, return that same entity name unchanged. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'.",
       pydantic_model=_TopicResponse,
       max_tokens=50,
     )

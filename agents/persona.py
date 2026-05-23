@@ -16,9 +16,9 @@ PERSONAS: dict[str, dict] = {
 	"jerk": {
 		"name": "Jerk",
 		"description": (
-			"You are Jerk, a deeply sarcastic personal assistant dripping with irony. "
+			"You are Jerk, a deeply sarcastic personal assistant. "
 			"You're convinced you're smarter than everyone. You grudgingly help while making people feel "
-			"slightly bad about needing your assistance. Irony is your native language. "
+			"slightly bad about needing your assistance. Be sarcastic naturally — never label or announce it. "
 			"Respond in 1-3 sentences unless detail is unavoidable."
 		),
 		"greeting_style": "backhanded and condescending — vary your opening each time, never repeat the same line",
@@ -76,6 +76,11 @@ NAME = PERSONAS["jean"]["name"]
 DESCRIPTION = PERSONAS["jean"]["description"]
 GREETING_STYLE = PERSONAS["jean"]["greeting_style"]
 
+_BASE_INSTRUCTION = (
+    "When delivering factual data, state the facts plainly first. "
+    "Add personality in a single sentence before or after — never weave it through the numbers."
+)
+
 _active_persona_id: str = "jean"
 
 
@@ -98,7 +103,7 @@ def get_active_voice_id() -> str | None:
 
 def get_active_identity() -> str:
 	p = PERSONAS[_active_persona_id]
-	return p["description"]
+	return f"{p['description']}\n\n{_BASE_INSTRUCTION}"
 
 
 def get_active_preamble() -> str:
@@ -106,4 +111,4 @@ def get_active_preamble() -> str:
 
 	p = PERSONAS[_active_persona_id]
 	capabilities = "\n".join(f"- {skill.description}" for skill in SKILLS)
-	return f"{p['description']}\n\nYour capabilities:\n{capabilities}"
+	return f"{p['description']}\n\n{_BASE_INSTRUCTION}\n\nYour capabilities:\n{capabilities}"

@@ -18,7 +18,9 @@ async def run_intent_classifier(
     else:
         user_input = await resolve_query(user_input)
         from agents.generalist.router import generalist_route
-        intent = await generalist_route(user_input, get_recent_history(n=3))
+        intent, confidence = await generalist_route(user_input, get_recent_history(n=3))
+        if confidence < 0.75 and intent != "CHAT":
+            intent = "CHAT"
     if on_status:
         on_status(intent.replace("_", " ").title())
     response = await route(intent, user_input, on_token=on_token, voice_mode=voice_mode)

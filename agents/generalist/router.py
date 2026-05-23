@@ -10,7 +10,7 @@ from utils.log import logger
 _ROUTER_PROMPT = """You are a query router. Given a conversation history and the user's latest message, return the single best intent.
 
 Intents:
-HOME_CONTROL — control smart home devices: lights, lamp, thermostat, turn on/off, dim
+HOME_CONTROL — explicit commands to control smart home devices: lights, lamp, turn on/off, dim. Must be a direct imperative action, NOT a complaint or observation about temperature/comfort ("it's hot", "too cold", "I'm warm").
 WEATHER — fetch LIVE weather data for a location not yet discussed
 FINANCE_STOCKS — fetch LIVE stock/crypto prices not yet discussed
 TRANSPORTATION — directions or route between two specific places
@@ -18,7 +18,7 @@ REMINDER — set a timer, alarm, or reminder
 NEWSFEED — fetch today's news headlines
 INFORMATION_QUERY — real-time lookup of something a language model could NOT know (obscure niche facts, very recent events, specific URLs, local business info)
 NOTES — create or retrieve personal notes
-SEARCH — explicit web search ("search for", "look up", "google")
+SEARCH — explicit web search ("search for", "look up", "google", "use the search skill", "use it" when referring to search/looking something up)
 SPOTIFY — music playback or device management
 PLANNER — build a multi-step plan or itinerary
 NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
@@ -44,10 +44,19 @@ Examples:
   "what is Microsoft's current market cap?" → FINANCE_STOCKS  (live metric not in history)
   "how about Apple?" → FINANCE_STOCKS  (new ticker, not in history)
 
+  history: [lights turned on]
+  "today was very hot, I can't take this much heat" → CHAT  (complaint/opinion, not a device command)
+  "it's too warm in here" → CHAT  (observation, not a command)
+
   history: [london weather → 12°C, paris weather → 13°C]
   "which one is warmer?" → CHAT
   "nice. where should I go?" → CHAT
   "what about rome?" → WEATHER  (new location)
+
+  history: [discussion about horror movies after 2024]
+  "you have a search skill, use it" → SEARCH  (explicit redirect to search)
+  "look it up" → SEARCH  (explicit redirect to search)
+  "use it" → SEARCH  (when context is about finding/fetching something not in history)
 
   history: [any stock discussion]
   "no company history" → CHAT  (correction + general knowledge)
@@ -59,14 +68,17 @@ Examples:
   "what can I make with chicken and rice" → NUTRITION
   "how do I make sushi" → NUTRITION
 
-Respond with JSON only: {"intent": "<INTENT>"}"""
+Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
+
+confidence: how certain you are this is the right domain intent (1.0 = unambiguous action, 0.5 = could be CHAT). Use < 0.7 when the query is conversational, emotional, or ambiguous."""
 
 
 class _RouteDecision(BaseModel):
     intent: IntentLiteral
+    confidence: float = 1.0
 
 
-def _route_sync(query: str, history: list[tuple[str, str]]) -> IntentLiteral:
+def _route_sync(query: str, history: list[tuple[str, str]]) -> tuple[IntentLiteral, float]:
     lines = []
     for user_msg, assistant_msg in history[-3:]:
         lines.append(f"User: {user_msg}")
@@ -79,10 +91,10 @@ def _route_sync(query: str, history: list[tuple[str, str]]) -> IntentLiteral:
         {"role": "user", "content": content},
     ]
     result = get_provider().complete(messages, _RouteDecision)
-    return result.intent
+    return result.intent, result.confidence
 
 
-async def generalist_route(query: str, history: list[tuple[str, str]]) -> IntentLiteral:
+async def generalist_route(query: str, history: list[tuple[str, str]]) -> tuple[IntentLiteral, float]:
     """Route a query using the generalist model with conversation history.
 
     Unlike the intent classifier, this sees recent exchanges so it can
@@ -92,9 +104,9 @@ async def generalist_route(query: str, history: list[tuple[str, str]]) -> Intent
     import time
     t = time.time()
     try:
-        intent = await asyncio.to_thread(_route_sync, query, history)
-        logger.debug(f"[router] {intent} ({time.time() - t:.2f}s)")
-        return intent
+        intent, confidence = await asyncio.to_thread(_route_sync, query, history)
+        logger.debug(f"[router] {intent} (confidence={confidence:.2f}, {time.time() - t:.2f}s)")
+        return intent, confidence
     except Exception as e:
         logger.warning(f"[router] Routing failed ({e}), falling back to CHAT")
-        return "CHAT"
+        return "CHAT", 1.0

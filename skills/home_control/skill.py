@@ -46,7 +46,14 @@ def _classify_intent(query: str) -> dict:
     return {"type": "ALL", "on": True}
 
 
-_LIST_KEYWORDS = {"list", "show", "what", "which", "available", "display"}
+_LIST_KEYWORDS = {"list", "show", "available", "display"}
+_STATUS_PHRASES = ["status", "check if", "are the", "is the", "are my", "is my", "are on", "are off", "is on", "is off", "which.*on", "which.*off"]
+
+
+def _is_status_query(query: str) -> bool:
+  import re
+  q = query.lower()
+  return any(re.search(phrase, q) for phrase in _STATUS_PHRASES)
 
 
 def _is_list_query(query: str) -> bool:
@@ -68,6 +75,23 @@ async def _execute_home_control(hue_client: HueBridgeClient, query: str, force_s
   config = await hue_client.get_configuration(force=force_sync)
   lights_list = hue_client.get_lights_formatted(config)
   groups_list = hue_client.get_groups_formatted(config)
+
+  if _is_status_query(query):
+    intent = _classify_intent(query)
+    target_type = intent.get("type")
+    target_id: Optional[int] = None
+    query_words = set(query.lower().split())
+    if target_type == "GROUP":
+      for group in config.groups:
+        if set(group.name.lower().split()) & query_words:
+          target_id = group.id
+          break
+    elif target_type == "LIGHT":
+      for light in config.lights:
+        if set(light.name.lower().split()) & query_words:
+          target_id = light.id
+          break
+    return await hue_client.get_status(target_type, target_id)
 
   if _is_list_query(query):
     return f"Groups: {groups_list}\nLights: {lights_list}"
