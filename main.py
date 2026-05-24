@@ -40,7 +40,7 @@ console = Console()
 
 
 async def main(
-	debug: bool, emote: bool, speak: bool, track_camera: bool, server: bool
+	debug: bool, emote: bool, speak: bool, track_camera: bool, server: bool, listen: bool
 ) -> None:
 	logger.set_debug(debug)
 	logger.init_file_logging("logs/app.log")
@@ -59,6 +59,11 @@ async def main(
 		enable_tts()
 		set_spinner(False)  # spinner corrupts streamed text in CLI mode
 		logger.debug("TTS enabled")
+
+	if listen:
+		from stt import get_stt_provider
+		await asyncio.to_thread(get_stt_provider)  # warm up model without blocking event loop
+		logger.debug("STT voice input enabled")
 
 	if track_camera:
 		from skills.camera_tracking.skill import start_tracking
@@ -112,6 +117,7 @@ async def main(
 			"debug": debug,
 			"emote": emote,
 			"speak": speak,
+			"listen": listen,
 			"track_camera": track_camera,
 			"server": server,
 		},
@@ -125,7 +131,29 @@ async def main(
 
 	while True:
 		try:
-			if _prompt_session is not None:
+			if listen:
+				console.print("[dim]❯ Press Enter to speak…[/dim]", end=" ")
+				from stt import get_stt_provider
+				from stt.recorder import record_until_enter
+				audio_path, is_silent = await asyncio.to_thread(record_until_enter)
+				if is_silent:
+					os.unlink(audio_path)
+					console.print("[dim](silence detected, skipping)[/dim]")
+					continue
+				console.print("[dim]Transcribing…[/dim]")
+				try:
+					user_input = await asyncio.to_thread(get_stt_provider().transcribe, audio_path)
+				finally:
+					os.unlink(audio_path)
+				if not user_input:
+					continue
+				# Guard against Whisper hallucinations (single word repeated many times)
+				words = user_input.split()
+				if len(words) > 6 and len(set(w.lower() for w in words)) <= 2:
+					console.print("[dim](transcription looks like a hallucination, skipping)[/dim]")
+					continue
+				console.print(f"[cyan]You:[/cyan] {user_input}")
+			elif _prompt_session is not None:
 				user_input = (await _prompt_session.prompt_async("❯ ")).strip()
 			else:
 				user_input = (await asyncio.to_thread(console.input, "❯ ")).strip()
@@ -231,6 +259,7 @@ if __name__ == "__main__":
 		"--track_camera", action="store_true", help="Enable camera tracking"
 	)
 	parser.add_argument("--server", action="store_true", help="Start the API server")
+	parser.add_argument("--listen", action="store_true", help="Enable microphone voice input (push-to-talk)")
 	args = parser.parse_args()
 	asyncio.run(
 		main(
@@ -239,5 +268,6 @@ if __name__ == "__main__":
 			speak=args.speak,
 			track_camera=args.track_camera,
 			server=args.server,
+			listen=args.listen,
 		)
 	)

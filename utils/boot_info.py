@@ -303,10 +303,17 @@ def boot(
 	if flags:
 		flags_table = Table(box=None, show_header=False, padding=(0, 2, 0, 0))
 		flags_table.add_column("Flag", style="dim", min_width=14)
-		flags_table.add_column("State")
-		for flag, enabled in flags.items():
-			state = "[green]on[/green]" if enabled else "[dim]off[/dim]"
-			flags_table.add_row(flag, state)
+		flags_table.add_column("State", min_width=6)
+		flags_table.add_column("Flag", style="dim", min_width=14)
+		flags_table.add_column("State", min_width=6)
+		items = list(flags.items())
+		mid = (len(items) + 1) // 2
+		for left, right in zip(items[:mid], items[mid:] + [(None, None)]):
+			l_flag, l_enabled = left
+			r_flag, r_enabled = right
+			l_state = "[green]on[/green]" if l_enabled else "[dim]off[/dim]"
+			r_state = ("[green]on[/green]" if r_enabled else "[dim]off[/dim]") if r_flag else ""
+			flags_table.add_row(l_flag, l_state, r_flag or "", r_state)
 		panels.append(Panel(flags_table, title="Flags", border_style="dim"))
 
 	if persona:
