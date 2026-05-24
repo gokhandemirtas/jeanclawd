@@ -144,15 +144,5 @@ def stop_monitor():
 
 
 if __name__ == "__main__":
-  import signal
-  import sys
-
-  interval = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
-  start_monitor(interval)
-
-  try:
-    signal.pause()
-  except KeyboardInterrupt:
-    pass
-  finally:
-    stop_monitor()
+  import subprocess
+  subprocess.run([sys.executable, str(Path(__file__).parent.parent / "monitor.py")] + sys.argv[1:])

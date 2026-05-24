@@ -1,4 +1,4 @@
-"""Live log monitor — run in a separate terminal tab while the main app is running.
+"""Live log + resource monitor — run in a separate terminal tab while the main app is running.
 
 Usage:
     python monitor.py
@@ -7,14 +7,81 @@ Usage:
 
 import argparse
 import json
+import math
 from pathlib import Path
 
+import psutil
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.widgets import Button, Footer, Header, Label, RichLog
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, Footer, Header, Label, RichLog, Static
 
 LOG_FILE_DEFAULT = Path(__file__).parent / "logs" / "app.log"
+
+# ------------------------------------------------------------------ resource helpers
+
+def _rbar(used: float, total: float, width: int = 18) -> str:
+	pct = used / total if total else 0
+	filled = int(width * pct)
+	return "█" * filled + "░" * (width - filled)
+
+
+def _fmt_mb(mb: float) -> str:
+	return f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+def _resource_markup() -> str:
+	lines: list[str] = []
+
+	# CPU
+	pct = psutil.cpu_percent(interval=None)
+	bar = _rbar(pct, 100)
+	lines.append(f"[bold cyan]CPU[/bold cyan]")
+	lines.append(f"[{bar}] [bold]{pct:.1f}%[/bold]")
+	lines.append("")
+
+	# RAM
+	vm = psutil.virtual_memory()
+	used_mb = vm.used / 1024 ** 2
+	total_mb = vm.total / 1024 ** 2
+	bar = _rbar(used_mb, total_mb)
+	lines.append(f"[bold cyan]Memory[/bold cyan]")
+	lines.append(f"[{bar}]")
+	lines.append(f"[bold]{_fmt_mb(used_mb)}[/bold] / {_fmt_mb(total_mb)}")
+	lines.append("")
+
+	# Swap
+	sw = psutil.swap_memory()
+	if sw.total > 0:
+		sw_used = sw.used / 1024 ** 2
+		sw_total = sw.total / 1024 ** 2
+		bar = _rbar(sw_used, sw_total)
+		lines.append(f"[bold cyan]Swap[/bold cyan]")
+		lines.append(f"[{bar}]")
+		lines.append(f"[bold]{_fmt_mb(sw_used)}[/bold] / {_fmt_mb(sw_total)}")
+		lines.append("")
+
+	# NVIDIA VRAM
+	try:
+		from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlDeviceGetName, nvmlInit
+		nvmlInit()
+		h = nvmlDeviceGetHandleByIndex(0)
+		info = nvmlDeviceGetMemoryInfo(h)
+		name = nvmlDeviceGetName(h)
+		vram_used = info.used / 1024 ** 2
+		vram_total = info.total / 1024 ** 2
+		bar = _rbar(vram_used, vram_total)
+		lines.append(f"[bold cyan]VRAM[/bold cyan] [dim]{name}[/dim]")
+		lines.append(f"[{bar}]")
+		lines.append(f"[bold]{_fmt_mb(vram_used)}[/bold] / {_fmt_mb(vram_total)}")
+		lines.append("")
+	except Exception:
+		pass
+
+	return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ log helpers
 
 LEVEL_STYLE = {
 	"DEBUG": "dim white",
@@ -53,8 +120,21 @@ class MonitorApp(App):
 		background: $panel;
 		color: $text-muted;
 	}
+	#body {
+		height: 1fr;
+	}
+	#log-pane {
+		width: 3fr;
+	}
 	#log-view {
 		border: none;
+		height: 1fr;
+	}
+	#resource-pane {
+		width: 26;
+		border-left: solid $panel;
+		padding: 1 2;
+		background: $surface;
 	}
 	"""
 
@@ -81,13 +161,22 @@ class MonitorApp(App):
 				yield Button(lvl, id=f"btn-{lvl}")
 			yield Button("CLEAR", id="btn-clear", variant="warning")
 		yield Label(self._stats_text(), id="stats")
-		yield RichLog(id="log-view", highlight=False, markup=True, wrap=True)
+		with Horizontal(id="body"):
+			with Vertical(id="log-pane"):
+				yield RichLog(id="log-view", highlight=False, markup=True, wrap=True)
+			with Vertical(id="resource-pane"):
+				yield Static(_resource_markup(), id="resources")
 		yield Footer()
 
 	def on_mount(self) -> None:
+		psutil.cpu_percent(interval=None)  # warm up — first call always returns 0.0
 		if self._log_path.exists():
 			self._file_pos = self._log_path.stat().st_size  # start from end (live tail)
 		self.set_interval(0.5, self._poll)
+		self.set_interval(1.0, self._poll_resources)
+
+	def _poll_resources(self) -> None:
+		self.query_one("#resources", Static).update(_resource_markup())
 
 	# ------------------------------------------------------------------ polling
 
