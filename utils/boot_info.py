@@ -1,9 +1,12 @@
+import colorsys
 import json
+import math
 import os
 import platform
 import shutil
 import subprocess
 import textwrap
+import time
 import urllib.request
 
 import aiohttp
@@ -11,6 +14,7 @@ import psutil
 from rich.color import Color
 from rich.columns import Columns
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.style import Style
@@ -324,12 +328,35 @@ def boot(
 			persona_table.add_row(key, f"[cyan]{val}[/cyan]")
 		panels.append(Panel(persona_table, title="Persona", border_style="dim"))
 
-	art = _gradient_text(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
-
 	layout = Table.grid(expand=True)
 	layout.add_column(ratio=3)
 	layout.add_column(ratio=2)
-	layout.add_row(art, Group(*panels))
 
+	duration = 2.5
+	fps = 20
+	start_time = time.monotonic()
+
+	def _hue_rgb(hue: float) -> tuple[int, int, int]:
+		r, g, b = colorsys.hsv_to_rgb(hue % 1.0, 1.0, 1.0)
+		return int(r * 255), int(g * 255), int(b * 255)
+
+	with Live(console=_console, refresh_per_second=fps, transient=True) as live:
+		while True:
+			elapsed = time.monotonic() - start_time
+			if elapsed >= duration:
+				break
+			t = elapsed / duration
+			start_hue = 0.13 + 0.5 * math.sin(t * math.pi * 2)
+			end_hue = start_hue + 0.15
+			art = _gradient_text(_JEANCLAWD, _hue_rgb(start_hue), _hue_rgb(end_hue))
+			frame = Table.grid(expand=True)
+			frame.add_column(ratio=3)
+			frame.add_column(ratio=2)
+			frame.add_row(art, Group(*panels))
+			live.update(frame)
+			time.sleep(1 / fps)
+
+	art = _gradient_text(_JEANCLAWD, (255, 193, 0), (220, 20, 0))
+	layout.add_row(art, Group(*panels))
 	_console.print(layout)
 	_console.print()
