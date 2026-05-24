@@ -93,6 +93,34 @@ class _TopicResponse(BaseModel):
   topic: str = Field(description="The primary named entity being discussed — a specific title, name, or place (e.g. 'Bring Her Back', 'Tesla', 'Paris'). Used to resolve follow-up queries. Avoid generic category labels.")
 
 
+_TOPIC_SYSTEM_PROMPT = (
+  "Extract the primary named entity being discussed (a specific title, name, or place — "
+  "e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement "
+  "about the same entity as the previous topic, return that same entity name unchanged. "
+  "Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'. "
+  "Return a JSON object with a single 'topic' key."
+)
+
+
+async def _safe_extract_topic(query: str, answer: str) -> None:
+  """Extract and update _current_topic, silently keeping the previous value on failure."""
+  global _current_topic
+  try:
+    prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
+    result = await asyncio.to_thread(
+      generate_structured_output,
+      model_name=os.environ["MODEL_GENERALIST"],
+      user_prompt=f"{prev}User asked: {query}\nAnswer: {answer[:300]}",
+      system_prompt=_TOPIC_SYSTEM_PROMPT,
+      pydantic_model=_TopicResponse,
+      max_tokens=50,
+    )
+    _current_topic = result.topic
+    logger.debug(f"[chat] topic='{_current_topic}'")
+  except Exception as e:
+    logger.warning(f"[chat] topic extraction failed ({e}), keeping previous topic")
+
+
 # Tracks the active conversation topic so the intent classifier can resolve follow-ups.
 _current_topic: str | None = None
 
@@ -494,17 +522,7 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     final = _strip_think(full_text)
     _history.append(HumanMessage(content=query))
     _history.append(AIMessage(content=final))
-    prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
-    topic_result = await asyncio.to_thread(
-      generate_structured_output,
-      model_name=os.environ["MODEL_GENERALIST"],
-      user_prompt=f"{prev}User asked: {query}\nAnswer: {final[:300]}",
-      system_prompt="Extract the primary named entity being discussed (a specific title, name, or place — e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement about the same entity as the previous topic, return that same entity name unchanged. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'.",
-      pydantic_model=_TopicResponse,
-      max_tokens=50,
-    )
-    _current_topic = topic_result.topic
-    logger.debug(f"[chat] topic='{_current_topic}'")
+    await _safe_extract_topic(query, final)
     return final
 
   # Check if query needs multi-step reasoning
@@ -520,18 +538,7 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     persona = get_persona_context()
     final = await reason_and_act(query, conversation_context, persona=persona)
 
-    # Extract topic from the completed reasoning exchange
-    prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
-    topic_result = await asyncio.to_thread(
-      generate_structured_output,
-      model_name=os.environ["MODEL_GENERALIST"],
-      user_prompt=f"{prev}User asked: {query}\nAnswer: {final[:300]}",
-      system_prompt="Extract the primary named entity being discussed (a specific title, name, or place — e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement about the same entity as the previous topic, return that same entity name unchanged. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'.",
-      pydantic_model=_TopicResponse,
-      max_tokens=50,
-    )
-    _current_topic = topic_result.topic
-    logger.debug(f"[chat/reasoning] topic='{_current_topic}'")
+    await _safe_extract_topic(query, final)
 
     _history.append(HumanMessage(content=query))
     _history.append(AIMessage(content=final))
@@ -585,8 +592,9 @@ async def handle_chat(query: str, on_token: Callable[[str], None] | None = None,
     max_tokens=512 if voice_mode else 1024,
   )
   final = _strip_think(result.answer)
-  _current_topic = result.topic
-  logger.debug(f"[chat] topic='{_current_topic}'")
+  if result.topic:
+    _current_topic = result.topic
+    logger.debug(f"[chat] topic='{_current_topic}'")
 
   _history.append(HumanMessage(content=query))
   _history.append(AIMessage(content=final))

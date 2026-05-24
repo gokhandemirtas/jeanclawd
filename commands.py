@@ -424,6 +424,87 @@ async def cmd_connect(args: str) -> None:
         logger.info(f"Unknown service '{service}'. Available: spotify, hue")
 
 
+async def cmd_persona(args: str) -> None:
+    """Set the active persona and optionally the voice.
+
+    Usage:
+      /persona              — interactive fuzzy picker
+      /persona <id>         — switch persona directly
+      /persona <id> <voice> — switch persona and voice in one command
+    """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
+
+    from agents.persona import PERSONAS, set_active_persona, get_active_persona_id, get_active_voice_id
+    from tts.tts import voice_ids, set_active_voice_id
+    from db.preferences import update_preferences
+
+    persona_ids = list(PERSONAS.keys())
+    parts = args.strip().split()
+
+    # --- Resolve persona ---
+    if parts and parts[0] in persona_ids:
+        selected_persona = parts[0]
+        voice_arg = parts[1] if len(parts) > 1 else None
+    elif parts:
+        logger.info(f"Unknown persona '{parts[0]}'. Available: {', '.join(persona_ids)}")
+        return
+    else:
+        # Interactive picker
+        lines = [f"  {pid:<10} — {PERSONAS[pid]['name']}" for pid in persona_ids]
+        logger.info("Available personas:\n" + "\n".join(lines))
+        try:
+            picker = PromptSession(
+                completer=FuzzyCompleter(WordCompleter(persona_ids, sentence=True))
+            )
+            raw = (await picker.prompt_async("  persona ❯ ")).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            logger.info("Cancelled.")
+            return
+        if not raw:
+            logger.info("No persona selected.")
+            return
+        raw_parts = raw.split()
+        selected_persona = raw_parts[0]
+        voice_arg = raw_parts[1] if len(raw_parts) > 1 else None
+        if selected_persona not in persona_ids:
+            logger.info(f"Unknown persona '{selected_persona}'.")
+            return
+
+    # --- Resolve voice ---
+    current_voice = get_active_voice_id() or "azelma"
+    persona_default_voice = PERSONAS[selected_persona].get("voice_id") or current_voice
+
+    if voice_arg and voice_arg in voice_ids:
+        selected_voice = voice_arg
+    elif voice_arg:
+        logger.info(f"Unknown voice '{voice_arg}'. Available: {', '.join(voice_ids)}")
+        return
+    else:
+        try:
+            picker = PromptSession(
+                completer=FuzzyCompleter(WordCompleter(voice_ids, sentence=True))
+            )
+            logger.info(f"Voices: {', '.join(voice_ids)}")
+            raw_voice = (
+                await picker.prompt_async(f"  voice ❯ [{persona_default_voice}] ")
+            ).strip().lower()
+            selected_voice = raw_voice if raw_voice in voice_ids else persona_default_voice
+            if raw_voice and raw_voice not in voice_ids:
+                logger.info(f"Unknown voice '{raw_voice}', using '{persona_default_voice}'.")
+        except (KeyboardInterrupt, EOFError):
+            logger.info("Cancelled.")
+            return
+
+    # --- Apply + persist ---
+    set_active_persona(selected_persona)
+    set_active_voice_id(selected_voice)
+    await update_preferences(agentPersona=selected_persona, agentVoiceId=selected_voice)
+    logger.info(
+        f"Persona → {PERSONAS[selected_persona]['name']}  |  Voice → {selected_voice}  (saved)"
+    )
+
+
 async def cmd_help() -> None:
     logger.info(
         "Available commands:\n"
@@ -431,6 +512,7 @@ async def cmd_help() -> None:
         "  /clear             — wipe the in-memory conversation history\n"
         "  /history           — print session history to the terminal\n"
         "  /analyze           — extract personal facts from this session into your persona profile\n"
+        "  /persona [id] [v]  — switch persona and voice (fuzzy picker, or pass args directly)\n"
         "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
         "  /connect <service> — authenticate a service (spotify | hue)\n"
         "  /memories [q]      — list all mem0 memories, or search with a query\n"
@@ -449,6 +531,7 @@ _COMMANDS = {
     "/clear": cmd_clear,
     "/history": cmd_history,
     "/analyze": cmd_analyze,
+    "/persona": cmd_persona,
     "/model": cmd_model,
     "/connect": cmd_connect,
     "/memories": cmd_memories,

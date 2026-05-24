@@ -1,40 +1,60 @@
+import math
 import tempfile
-import threading
 
 import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
 
-_SAMPLE_RATE = 16000  # Whisper expects 16kHz
-_CHANNELS = 1
-_SILENCE_THRESHOLD = 200  # RMS below this → treat as silence
+_SAMPLE_RATE = 16000
+_CHUNK_FRAMES = 1600  # 100ms per chunk
+_SILENCE_RMS = 200  # below this → silence
+_SILENCE_SECONDS = 1.5  # stop after this much continuous silence
+_MIN_SPEECH_SECONDS = 0.3  # discard recordings shorter than this
+_SILENCE_CHUNKS = int(_SILENCE_SECONDS * _SAMPLE_RATE / _CHUNK_FRAMES)
+_MIN_SPEECH_CHUNKS = int(_MIN_SPEECH_SECONDS * _SAMPLE_RATE / _CHUNK_FRAMES)
+_BAR_WIDTH = 20
 
 
-def record_until_enter() -> tuple[str, bool]:
-    """Record from the default microphone until the user presses Enter.
+def _vu_bar(rms: float) -> str:
+	"""Render a VU bar with dBFS and RMS for threshold tuning."""
+	db = 20 * math.log10(max(rms, 1) / 32768)  # dBFS, 0 = full scale
+	# Map -60..0 dBFS to 0.._BAR_WIDTH
+	filled = max(0, min(_BAR_WIDTH, int((db + 60) / 60 * _BAR_WIDTH)))
+	bar = "█" * filled + "░" * (_BAR_WIDTH - filled)
+	state = "SPEECH" if rms >= _SILENCE_RMS else "silent"
+	return f"\r🎙  │{bar}│ {db:+.1f} dBFS  rms={rms:5.0f}  threshold={_SILENCE_RMS}  [{state}]   "
 
-    Returns (wav_path, is_silent). Caller is responsible for deleting the file.
-    is_silent=True means the audio is below the silence threshold — skip transcription.
-    """
-    chunks: list[np.ndarray] = []
 
-    def _callback(indata: np.ndarray, frames: int, time, status) -> None:
-        chunks.append(indata.copy())
+def record_until_silence() -> tuple[str, bool]:
+	"""Record from the default mic, stopping after sustained silence.
 
-    stream = sd.InputStream(
-        samplerate=_SAMPLE_RATE,
-        channels=_CHANNELS,
-        dtype="int16",
-        callback=_callback,
-    )
+	Returns (wav_path, too_short). Caller is responsible for deleting the file.
+	too_short=True means the recording was below the minimum speech threshold.
+	"""
+	chunks: list[np.ndarray] = []
+	silent_chunks = 0
+	speech_chunks = 0
 
-    with stream:
-        input()  # blocks until Enter
+	with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16") as stream:
+		while True:
+			data, _ = stream.read(_CHUNK_FRAMES)
+			rms = float(np.sqrt(np.mean(data.astype(np.float32) ** 2)))
+			chunks.append(data.copy())
 
-    audio = np.concatenate(chunks, axis=0) if chunks else np.zeros((1, 1), dtype="int16")
-    rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
-    is_silent = rms < _SILENCE_THRESHOLD
+			print(_vu_bar(rms), end="", flush=True)
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    wav.write(tmp.name, _SAMPLE_RATE, audio)
-    return tmp.name, is_silent
+			if rms < _SILENCE_RMS:
+				silent_chunks += 1
+				if speech_chunks >= _MIN_SPEECH_CHUNKS and silent_chunks >= _SILENCE_CHUNKS:
+					break
+			else:
+				speech_chunks += 1
+				silent_chunks = 0
+
+	print()  # newline after VU bar
+	audio = np.concatenate(chunks, axis=0)
+	too_short = speech_chunks < _MIN_SPEECH_CHUNKS
+
+	tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+	wav.write(tmp.name, _SAMPLE_RATE, audio)
+	return tmp.name, too_short

@@ -62,8 +62,10 @@ async def main(
 
 	if listen:
 		from stt import get_stt_provider
-		await asyncio.to_thread(get_stt_provider)  # warm up model without blocking event loop
-		logger.debug("STT voice input enabled")
+		from stt.wakeword import preload as preload_wakeword
+		await asyncio.to_thread(get_stt_provider)
+		await asyncio.to_thread(preload_wakeword)
+		logger.debug("STT voice input enabled (wake word: hey jarvis)")
 
 	if track_camera:
 		from skills.camera_tracking.skill import start_tracking
@@ -132,15 +134,17 @@ async def main(
 	while True:
 		try:
 			if listen:
-				console.print("[dim]❯ Press Enter to speak…[/dim]", end=" ")
 				from stt import get_stt_provider
-				from stt.recorder import record_until_enter
-				audio_path, is_silent = await asyncio.to_thread(record_until_enter)
-				if is_silent:
+				from stt.wakeword import listen_for_wakeword
+				from stt.recorder import record_until_silence
+				console.print("[dim]Listening… (say 'hey jarvis')[/dim]")
+				await asyncio.to_thread(listen_for_wakeword)
+				console.print("[dim]🎙  Recording…[/dim]", end="\r")
+				audio_path, too_short = await asyncio.to_thread(record_until_silence)
+				if too_short:
 					os.unlink(audio_path)
-					console.print("[dim](silence detected, skipping)[/dim]")
 					continue
-				console.print("[dim]Transcribing…[/dim]")
+				console.print("[dim]Transcribing…[/dim]", end="\r")
 				try:
 					user_input = await asyncio.to_thread(get_stt_provider().transcribe, audio_path)
 				finally:
@@ -150,7 +154,6 @@ async def main(
 				# Guard against Whisper hallucinations (single word repeated many times)
 				words = user_input.split()
 				if len(words) > 6 and len(set(w.lower() for w in words)) <= 2:
-					console.print("[dim](transcription looks like a hallucination, skipping)[/dim]")
 					continue
 				console.print(f"[cyan]You:[/cyan] {user_input}")
 			elif _prompt_session is not None:
