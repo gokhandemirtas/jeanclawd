@@ -12,7 +12,7 @@ NUTRITION — the user wants recipe, nutrition, or food preparation information
 INFORMATION_QUERY — the user wants factual knowledge about something in the world
 NOTES — the user explicitly wants to save, read, list, or delete a personal note
 SEARCH — the user wants a web search on a topic
-SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, skip, volume, list playlists, play a playlist, now playing, list devices)
+SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, stop, skip, volume, list playlists, play a playlist, now playing, list devices)
 PLANNER — the user is explicitly asking the assistant to create a plan or itinerary on their behalf
 CHAT — the user is chatting, sharing news about themselves, reacting, correcting, or asking something personal
 
@@ -20,6 +20,7 @@ Key distinctions:
 - PLANNER requires the user to ask the assistant to plan something. Mentioning a trip or event is not PLANNER.
 - NOTES requires an explicit note action. A sentence containing the word "note" is not automatically NOTES.
 - CHAT covers anything conversational, emotional, personal, or where the user is sharing rather than requesting an action.
+- "Stop the music", "stop playing", or "stop" in a music context is SPOTIFY, not HOME_CONTROL.
 - When in doubt, CHAT is the safe default.
 
 Respond with the intent JSON only."""

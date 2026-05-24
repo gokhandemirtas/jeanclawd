@@ -19,6 +19,7 @@ Rules:
 2. If a room or specific light is mentioned → type: "GROUP" or "LIGHT"
 3. on/turn on = on: true; off/turn off = on: false
 4. toggle/switch = on: null (means toggle current state)
+5. This prompt only controls lights. Music, audio, and playback are never handled here.
 
 Examples:
 {"type": "ALL", "on": true}
