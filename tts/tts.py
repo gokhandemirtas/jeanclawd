@@ -1,4 +1,5 @@
 import contextlib
+import importlib.util
 import io
 import os
 import select
@@ -6,6 +7,7 @@ import termios
 import threading
 import time
 import tty
+from pathlib import Path
 
 import numpy as np
 import scipy.io.wavfile
@@ -21,11 +23,31 @@ _show_spinner = True
 
 # TTS_PROVIDER: local | lmstudio | remote
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "local")
-# For lmstudio/remote backends
-TTS_MODEL = os.getenv("TTS_MODEL", "kokoro")
+# TTS_MODEL: adapter filename (without .py) under tts/models/
+TTS_MODEL = os.getenv("TTS_MODEL", "")
 _lmstudio_host = os.getenv("MODEL_HOST", "http://localhost:1234/v1")
 TTS_HOST = os.getenv("TTS_HOST", _lmstudio_host if TTS_PROVIDER == "lmstudio" else "https://api.openai.com/v1")
 TTS_API_KEY = os.getenv("TTS_API_KEY", os.getenv("OPENAI_API_KEY", "lm-studio"))
+
+
+def _load_model_adapter():
+    """Load tts/models/{TTS_MODEL}.py if it exists. Returns the module or None."""
+    if not TTS_MODEL:
+        return None
+    adapter_path = Path(__file__).parent / "models" / f"{TTS_MODEL}.py"
+    if not adapter_path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location(f"tts_model_{TTS_MODEL}", adapter_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_adapter = _load_model_adapter()
+
+# Resolve effective model ID and default voice from adapter (or env fallbacks)
+_effective_model_id: str = getattr(_adapter, "MODEL_ID", TTS_MODEL or "kokoro")
+_adapter_default_voice: str = getattr(_adapter, "DEFAULT_VOICE", "af_heart")
 
 
 def set_spinner(enabled: bool) -> None:
@@ -34,7 +56,7 @@ def set_spinner(enabled: bool) -> None:
 
 
 voice_ids = ["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"]
-active_voice_id = "azelma"
+active_voice_id = _adapter_default_voice if TTS_PROVIDER != "local" else "azelma"
 _tts_enabled = False
 
 
@@ -45,6 +67,12 @@ def enable_tts(enabled: bool = True) -> None:
 
 def set_active_voice_id(voice_id: str) -> None:
     global active_voice_id
+    if not voice_id:
+        return
+    adapter_voices = getattr(_adapter, "VOICES", {})
+    if TTS_PROVIDER != "local" and adapter_voices and voice_id not in adapter_voices:
+        logger.warning(f"[tts] Voice '{voice_id}' not in adapter voices, keeping '{active_voice_id}'")
+        return
     active_voice_id = voice_id
 
 
@@ -77,14 +105,32 @@ def _get_openai_client():
 
 def _remote_synthesise_bytes(text: str, voice_id: str) -> bytes:
     """Call OpenAI-compatible TTS endpoint and return raw WAV bytes."""
+    import json
     client = _get_openai_client()
+    adapter_voices = getattr(_adapter, "VOICES", {})
+    adapter_default = getattr(_adapter, "DEFAULT_VOICE", voice_id)
+    if adapter_voices and voice_id not in adapter_voices:
+        logger.warning(f"Voice '{voice_id}' not supported by {_effective_model_id}, using '{adapter_default}'")
+        voice_id = adapter_default
+    effective_voice = getattr(_adapter, "VOICE_BLEND", None) or voice_id
     response = client.audio.speech.create(
-        model=TTS_MODEL,
-        voice=voice_id,
+        model=_effective_model_id,
+        voice=effective_voice,
         input=text,
         response_format="wav",
     )
-    return response.content
+    data = response.content
+    # LM Studio may return a JSON error body instead of audio
+    if not data.startswith(b"RIFF"):
+        try:
+            err = json.loads(data)
+            msg = err.get("error", {})
+            if isinstance(msg, dict):
+                msg = msg.get("message", data)
+        except Exception:
+            msg = data[:200]
+        raise RuntimeError(f"TTS endpoint returned an error: {msg}")
+    return data
 
 
 def _play_wav_bytes(wav_bytes: bytes, stop_event: threading.Event) -> None:
