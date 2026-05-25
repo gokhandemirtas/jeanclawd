@@ -6,6 +6,8 @@
 
 MODEL_ID = "mlx-community/VibeVoice-Realtime-0.5B-fp16"
 
+SAMPLE_RATE = 24000  # Hz, used for PCM streaming
+
 DEFAULT_VOICE = "en-Frank_man"
 
 VOICES = {

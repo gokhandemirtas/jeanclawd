@@ -233,6 +233,29 @@ def synthesise(text: str, output_path: str, voice_id: str = active_voice_id, can
     return output_path
 
 
+def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
+    """Stream PCM audio from remote endpoint directly into sounddevice — no buffering."""
+    adapter_voices = getattr(_adapter, "VOICES", {})
+    adapter_default = getattr(_adapter, "DEFAULT_VOICE", voice_id)
+    if adapter_voices and voice_id not in adapter_voices:
+        voice_id = adapter_default
+    effective_voice = getattr(_adapter, "VOICE_BLEND", None) or voice_id
+    sample_rate = getattr(_adapter, "SAMPLE_RATE", 24000)
+
+    client = _get_openai_client()
+    with client.audio.speech.with_streaming_response.create(
+        model=_effective_model_id,
+        voice=effective_voice,
+        input=text,
+        response_format="pcm",
+    ) as response:
+        with sd.RawOutputStream(samplerate=sample_rate, channels=1, dtype="int16") as stream:
+            for chunk in response.iter_bytes(chunk_size=4096):
+                if stop_event.is_set():
+                    break
+                stream.write(chunk)
+
+
 def speak(text: str, voice_id: str = active_voice_id):
     if not text:
         logger.warning("No text provided for TTS, skipping")
@@ -248,14 +271,7 @@ def speak(text: str, voice_id: str = active_voice_id):
         if TTS_PROVIDER == "local":
             _local_speak(text, voice_id, stop_event)
         else:
-            ctx = (
-                Live(Spinner("dots", text=Text("Synthesising audio…", style="dim")), console=_console, transient=True)
-                if _show_spinner else contextlib.nullcontext()
-            )
-            with ctx:
-                wav_bytes = _remote_synthesise_bytes(text, voice_id)
-            if not stop_event.is_set():
-                _play_wav_bytes(wav_bytes, stop_event)
+            _remote_stream_speak(text, voice_id, stop_event)
 
         if stop_event.is_set():
             logger.debug("TTS interrupted by user")
