@@ -51,9 +51,9 @@ def _search_tavily(query: str) -> list[str]:
     if not api_key:
         return []
     try:
-        results = TavilyClient(api_key=api_key).search(query, max_results=5).get("results", [])
+        results = TavilyClient(api_key=api_key).search(query, max_results=5, search_depth="advanced", include_raw_content=True).get("results", [])
         lines = [
-            f"- {r.get('title', '')}: {r.get('content', '').replace(chr(10), ' ')} ({r.get('url', '')})"
+            f"- {r.get('title', '')}: {(r.get('raw_content') or r.get('content', '')).replace(chr(10), ' ')} ({r.get('url', '')})"
             for r in results
         ]
         logger.debug(f"Tavily returned {len(lines)} results for '{query}'")
@@ -76,5 +76,5 @@ async def web_search(query: str) -> str | None:
     ranked = _rank_by_relevance(query, combined)
     logger.debug(f"Ranked {len(combined)} results → top {len(ranked)}")
     for i, r in enumerate(ranked):
-        logger.debug(f"  [{i+1}] {r[:120]}")
+        logger.debug(f"  [{i+1}] {r}")
     return "\n".join(ranked)

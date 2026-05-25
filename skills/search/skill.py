@@ -41,4 +41,7 @@ def _extract_topic(user_message: str) -> str:
 async def handle_search(query: str) -> str:
     topic = _extract_topic(query)
     results = await web_search(topic)
-    return results if results else f"No results found for: {topic}"
+    if not results:
+        return f"No results found for: {topic}"
+    top_result = results.split("\n")[0]
+    return f"User query: {topic}\n\nTop result: {top_result}"
