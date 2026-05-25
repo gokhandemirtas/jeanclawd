@@ -82,6 +82,8 @@ _BASE_INSTRUCTION = (
 )
 
 _active_persona_id: str = "jean"
+_speak_enabled: bool = False
+_listen_enabled: bool = False
 
 
 def get_active_persona_id() -> str:
@@ -93,6 +95,12 @@ def set_active_persona(persona_id: str) -> None:
 	_active_persona_id = persona_id
 
 
+def set_io_capabilities(speak: bool, listen: bool) -> None:
+	global _speak_enabled, _listen_enabled
+	_speak_enabled = speak
+	_listen_enabled = listen
+
+
 def get_active_name() -> str:
 	return PERSONAS[_active_persona_id]["name"]
 
@@ -101,9 +109,20 @@ def get_active_voice_id() -> str | None:
 	return PERSONAS[_active_persona_id]["voice_id"]
 
 
+def _io_capability_note() -> str:
+	notes = []
+	if _speak_enabled:
+		notes.append("text-to-speech (your responses are read aloud — avoid markdown, bullet lists, and special characters)")
+	if _listen_enabled:
+		notes.append("voice input (the user can speak to you via microphone)")
+	if not notes:
+		return ""
+	return "\n\nActive I/O capabilities:\n" + "\n".join(f"- {n}" for n in notes)
+
+
 def get_active_identity() -> str:
 	p = PERSONAS[_active_persona_id]
-	return f"{p['description']}\n\n{_BASE_INSTRUCTION}"
+	return f"{p['description']}\n\n{_BASE_INSTRUCTION}{_io_capability_note()}"
 
 
 def get_active_preamble() -> str:
@@ -111,4 +130,4 @@ def get_active_preamble() -> str:
 
 	p = PERSONAS[_active_persona_id]
 	capabilities = "\n".join(f"- {skill.description}" for skill in SKILLS)
-	return f"{p['description']}\n\n{_BASE_INSTRUCTION}\n\nYour capabilities:\n{capabilities}"
+	return f"{p['description']}\n\n{_BASE_INSTRUCTION}\n\nYour capabilities:\n{capabilities}{_io_capability_note()}"

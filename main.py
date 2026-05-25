@@ -67,6 +67,9 @@ async def main(
 		await asyncio.to_thread(preload_wakeword)
 		logger.debug("STT voice input enabled (wake word: hey jarvis)")
 
+	from agents.persona import set_io_capabilities
+	set_io_capabilities(speak=speak, listen=listen)
+
 	if track_camera:
 		from skills.camera_tracking.skill import start_tracking
 
