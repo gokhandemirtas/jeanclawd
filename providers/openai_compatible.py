@@ -83,6 +83,8 @@ class OpenAICompatibleProvider(InferenceProvider):
 	) -> BaseModel:
 		raw = "".join(self.complete_stream(messages, response_format))
 		raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+		if not raw:
+			raise ValueError("Model returned an empty response")
 		match = re.search(r"\{.*\}", raw, re.DOTALL)
 		text = match.group(0) if match else raw
 		return response_format.model_validate_json(repair_json(text))

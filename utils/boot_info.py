@@ -1,4 +1,5 @@
 import colorsys
+import importlib.util
 import json
 import math
 import os
@@ -8,6 +9,7 @@ import subprocess
 import textwrap
 import time
 import urllib.request
+from pathlib import Path
 
 import aiohttp
 import psutil
@@ -67,6 +69,31 @@ def _is_loaded(model_val: str, loaded: set[str]) -> bool:
 	return any(model_val in mid or mid in model_val for mid in loaded)
 
 
+def _tts_rows() -> list[tuple[str, str]]:
+	provider = os.getenv("TTS_PROVIDER", "local")
+	tts_model = os.getenv("TTS_MODEL", "")
+	tts_host = os.getenv("TTS_HOST", "")
+
+	model_id = tts_model
+	if tts_model:
+		adapter_path = Path(__file__).parent.parent / "tts" / "models" / f"{tts_model}.py"
+		if adapter_path.exists():
+			try:
+				spec = importlib.util.spec_from_file_location("_tts_adapter", adapter_path)
+				mod = importlib.util.module_from_spec(spec)
+				spec.loader.exec_module(mod)
+				model_id = getattr(mod, "MODEL_ID", tts_model)
+			except Exception:
+				pass
+
+	rows = [("TTS Model", model_id or "—")]
+	if provider in ("remote", "lmstudio") and tts_host:
+		rows.append(("TTS Host", tts_host))
+	else:
+		rows.append(("TTS Provider", provider))
+	return rows
+
+
 def _models() -> list[tuple[str, str]]:
 	keys = [
 		("Generalist", "MODEL_GENERALIST"),
@@ -84,6 +111,7 @@ def _models() -> list[tuple[str, str]]:
 	except Exception:
 		pass
 
+	rows.extend(_tts_rows())
 	return rows
 
 

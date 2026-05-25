@@ -80,6 +80,8 @@ class LMStudioProvider(InferenceProvider):
 		# Strip <think>...</think> blocks before parsing
 		import re
 		raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+		if not raw:
+			raise ValueError("Model returned an empty response")
 		# Extract first JSON object/array if the model added surrounding text
 		match = re.search(r"\{.*\}", raw, re.DOTALL)
 		text = match.group(0) if match else raw
