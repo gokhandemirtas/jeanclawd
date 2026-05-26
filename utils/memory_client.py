@@ -324,6 +324,23 @@ def compact_memories(user_id: str = "default") -> tuple[int, int]:
 	return original_count, len(compacted_facts)
 
 
+def get_all_memories(user_id: str = "default") -> list[str]:
+	"""Return all stored memory strings for the user."""
+	try:
+		mem = _get_memory()
+		raw = mem.get_all(filters={"user_id": user_id}, top_k=1000)
+		results = raw.get("results", raw) if isinstance(raw, dict) else raw
+		memories = []
+		for r in results:
+			text = r.get("memory") or r.get("text") if isinstance(r, dict) else str(r)
+			if text:
+				memories.append(text)
+		return memories
+	except Exception:
+		logger.exception("[memory_client] get_all failed")
+		return []
+
+
 def search_memories(query: str, user_id: str = "default", limit: int = 5) -> list[str]:
 	"""Return facts relevant to the query, or [] on failure."""
 	try:

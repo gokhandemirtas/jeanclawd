@@ -87,22 +87,62 @@ async def cmd_planner(args: str) -> None:
 
 
 async def cmd_analyze() -> None:
-    from skills.personalizer.skill import analyze_persona_from_log, get_persona_context
-    from db.schemas import Conversations
-    from datetime import date
+    from skills.personalizer.skill import analyze_persona_from_log, analyze_persona_from_memories, get_persona_context
+    from skills.journal.compact import compact_conversations
+    from skills.journal.journal_writer import write_journal_entry
+    from db.schemas import Conversations, Journal
 
-    today = date.today()
-    doc = await Conversations.find_one(Conversations.date == today)
-    if not doc or not doc.exchanges:
-        logger.info("No conversations from today to analyse.")
-        return
+    all_docs = await Conversations.find_all().to_list()
 
-    await analyze_persona_from_log(doc.exchanges)
+    # Step 1: build user persona from all raw conversation exchanges
+    all_exchanges = [ex for doc in all_docs if doc.exchanges for ex in doc.exchanges]
+    if all_exchanges:
+        logger.info(f"Building user persona from {len(all_exchanges)} exchange(s) across {len(all_docs)} day(s)…")
+        await analyze_persona_from_log(all_exchanges)
+    else:
+        logger.info("No conversation exchanges found.")
+
+    # Step 2: build user persona from mem0 memories (fills remaining gaps)
+    logger.info("Analysing mem0 memories for persona gaps…")
+    mem_updates = await analyze_persona_from_memories()
+    if mem_updates:
+        logger.info(f"Memory pass filled {mem_updates} additional field(s).")
+    else:
+        logger.info("Memory pass found nothing new.")
+
+    # Step 3: compact any uncompacted days
+    uncompacted = [d for d in all_docs if d.exchanges and d.compact_status != "complete"]
+    if uncompacted:
+        logger.info(f"Compacting {len(uncompacted)} day(s)…")
+        for doc in uncompacted:
+            try:
+                await compact_conversations(doc.date)
+                logger.info(f"  ✓ {doc.date} ({len(doc.exchanges)} exchange(s))")
+            except Exception as e:
+                logger.warning(f"  ✗ {doc.date}: {e}")
+    else:
+        logger.info("All days already compacted.")
+
+    # Step 4: write journal entries for compacted days that don't have one yet
+    all_docs = await Conversations.find_all().to_list()
+    existing_journal_dates = {e.datestamp for e in await Journal.find_all().to_list()}
+    needs_journal = [d for d in all_docs if d.compacted and d.date not in existing_journal_dates]
+    if needs_journal:
+        logger.info(f"Writing {len(needs_journal)} journal entry/entries…")
+        for doc in needs_journal:
+            try:
+                await write_journal_entry(doc.date)
+                logger.info(f"  ✓ Journal written for {doc.date}")
+            except Exception as e:
+                logger.warning(f"  ✗ Journal failed for {doc.date}: {e}")
+    else:
+        logger.info("All compacted days already have journal entries.")
+
     context = get_persona_context()
     if context:
-        logger.info(f"Done ({len(doc.exchanges)} exchange(s) scanned).\n{context}")
+        logger.info(f"Done.\n{context}")
     else:
-        logger.info(f"Done ({len(doc.exchanges)} exchange(s) scanned). No new personal facts found.")
+        logger.info("Done. No personal facts found.")
 
 
 async def cmd_ctx() -> None:

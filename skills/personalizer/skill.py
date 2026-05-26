@@ -302,6 +302,56 @@ async def analyze_persona_from_log(exchanges: list) -> None:
         logger.error(f"[personalizer] Update failed: {e}")
 
 
+async def analyze_persona_from_memories() -> int:
+    """Extract user facts from all mem0 memories and merge into UserPersona.
+
+    Returns the number of fields updated.
+    """
+    global _cached_persona_context
+
+    import asyncio
+    from utils.memory_client import get_all_memories
+
+    memories = await asyncio.get_running_loop().run_in_executor(None, get_all_memories)
+    if not memories:
+        return 0
+
+    # Memories are already compact facts — filter for personal signals then extract.
+    personal = [m for m in memories if _PERSONAL_SIGNAL.search(m)]
+    if not personal:
+        return 0
+
+    log = "\n".join(f"- {m}" for m in personal)
+
+    try:
+        from db.schemas import UserPersona
+        from datetime import datetime
+
+        loop = asyncio.get_running_loop()
+        update = await loop.run_in_executor(None, lambda: _extract_sync(log))
+
+        existing = await UserPersona.find_one()
+        if existing is None:
+            existing = await UserPersona(last_updated=datetime.now()).insert()
+
+        changes = _build_changes(existing, update)
+        if not changes:
+            return 0
+
+        changes["last_updated"] = datetime.now()
+        from beanie.operators import Set
+        await existing.update(Set(changes))
+
+        updated = await UserPersona.find_one()
+        _cached_persona_context = _build_persona_context(updated)
+        logger.debug(f"[personalizer] Persona updated from memories: {list(changes.keys())}")
+        return len(changes)
+
+    except Exception as e:
+        logger.error(f"[personalizer] Memory analysis failed: {e}")
+        return 0
+
+
 async def start_personalizer() -> str | None:
     """Load existing persona from DB on startup."""
     global _cached_persona_context
