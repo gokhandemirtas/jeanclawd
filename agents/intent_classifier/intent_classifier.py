@@ -29,6 +29,20 @@ class IntentResponse(BaseModel):
 	intent: IntentLiteral
 
 
+_SEARCH_PREFIXES = (
+    "research ", "deep research", "search ", "search for ", "look up ",
+    "find information", "find info", "deep dive", "tell me everything about",
+)
+
+
+def _keyword_classify(text: str) -> IntentLiteral | None:
+    """Fast pre-check for high-confidence intents that small models routinely miss."""
+    t = text.lower().strip()
+    if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
+        return "SEARCH"
+    return None
+
+
 def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral:
 	"""Classify user_input into an intent.
 
@@ -39,6 +53,10 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 	Falls back to the generalist provider if the intent model returns bad output.
 	"""
 	from providers import get_provider
+	shortcut = _keyword_classify(user_input)
+	if shortcut:
+		logger.debug(f"[intent] {shortcut} (keyword match)")
+		return shortcut
 	if current_topic:
 		content = f"Recent topic: {current_topic}\nQuery: {user_input}"
 	else:

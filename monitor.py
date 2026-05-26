@@ -10,6 +10,8 @@ import json
 import math
 from pathlib import Path
 
+from rich.markup import escape
+
 import psutil
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -218,7 +220,7 @@ class MonitorApp(App):
 		level = entry.get("level", "INFO")
 		msg = entry.get("msg", "")
 		style = LEVEL_STYLE.get(level, "")
-		log_view.write(f"[dim]{ts}[/dim] [{style}]{level:<5}[/{style}] {msg}")
+		log_view.write(f"[dim]{ts}[/dim] [{style}]{level:<5}[/{style}] {escape(msg)}")
 		if self._auto_scroll:
 			log_view.scroll_end(animate=False)
 

@@ -18,7 +18,7 @@ REMINDER — set a timer, alarm, or reminder
 NEWSFEED — fetch today's news headlines
 INFORMATION_QUERY — real-time lookup of something a language model could NOT know (obscure niche facts, very recent events, specific URLs, local business info)
 NOTES — create or retrieve personal notes
-SEARCH — explicit web search ("search for", "look up", "google", "use the search skill", "use it" when referring to search/looking something up)
+SEARCH — user wants to search or research a topic. Triggers: "search for", "look up", "google", "research", "deep dive", "deep research", "tell me everything about", "find everything about", "comprehensive overview", "in depth", "in-depth", "full breakdown", "use the search skill", "use it" when referring to search
 SPOTIFY — music playback or device management
 PLANNER — build a multi-step plan or itinerary
 NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
@@ -29,7 +29,8 @@ Critical rules — apply in order, stop at first match:
 2. If the answer can be derived from data already in the conversation history → CHAT. Never re-fetch.
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
-5. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things.
+5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
+6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things.
 6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
 7. Reactions, opinions, follow-ups on something just said → CHAT.
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.

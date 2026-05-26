@@ -10,7 +10,7 @@ from utils.search import search_wikipedia, web_search
 from skills.search.deep_research import deep_research
 
 _DEEP_RESEARCH_TRIGGERS = {
-    "research", "deep dive", "deep-dive", "find everything",
+    "research", "deep research", "deep dive", "deep-dive", "find everything",
     "comprehensive", "in depth", "in-depth", "full breakdown", "tell me everything",
 }
 
@@ -27,6 +27,16 @@ class _SearchQuery(BaseModel):
     query: str
 
 
+_TRIGGER_STRIP = re.compile(
+    r"^(deep\s+research|research|search(\s+for)?|look\s+up|find(\s+information)?(\s+about)?|deep\s+dive(\s+into)?)\s+",
+    flags=re.IGNORECASE,
+)
+
+
+def _strip_trigger(text: str) -> str:
+    return _TRIGGER_STRIP.sub("", text).strip()
+
+
 def _extract_topic(user_message: str) -> str:
     match = re.match(r"search\s*:\s*(.+)", user_message, flags=re.IGNORECASE)
     if match:
@@ -39,10 +49,10 @@ def _extract_topic(user_message: str) -> str:
             pydantic_model=_SearchQuery,
         )
         logger.debug(f"[search] Extracted query: '{result.query}' from: '{user_message}'")
-        return result.query.strip()
+        return _strip_trigger(result.query)
     except Exception as e:
         logger.warning(f"[search] Query extraction failed ({e}), using raw input")
-        return user_message.strip()
+        return _strip_trigger(user_message)
 
 
 def _is_deep_research(query: str) -> bool:
@@ -55,7 +65,10 @@ async def handle_search(query: str) -> str:
 
     if _is_deep_research(query):
         logger.debug(f"[search] Deep research mode for '{topic}'")
-        return await deep_research(original_query=query, topic=topic)
+        answer, references = await deep_research(original_query=query, topic=topic)
+        if references:
+            logger.debug(f"[search] {len(references)} reference(s) collected")
+        return answer
 
     wiki = await asyncio.to_thread(search_wikipedia, topic)
     if wiki:
