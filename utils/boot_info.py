@@ -99,6 +99,7 @@ def _models() -> list[tuple[str, str]]:
 		("Generalist", "MODEL_GENERALIST"),
 		("Intent", "MODEL_INTENT"),
 		("Embedding", "MODEL_EMBEDDING"),
+		("Vision (VLM)", "MODEL_VLM"),
 		("Host", "MODEL_HOST"),
 	]
 	rows = [(label, os.getenv(env, "—")) for label, env in keys]

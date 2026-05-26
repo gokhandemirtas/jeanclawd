@@ -343,6 +343,57 @@ async def handle_voice_result(request: web.Request) -> web.Response:
 	return web.json_response(result)
 
 
+async def handle_vision(request: web.Request) -> web.Response:
+	"""POST /vision — describe an image via MODEL_VLM and inject into conversation context.
+
+	Accepts multipart/form-data with:
+	  image  — image file (required)
+	  prompt — custom prompt string (optional)
+	"""
+	from utils.vlm import describe_image
+	from skills.conversation.skill import append_to_history
+
+	if not request.content_type.startswith("multipart/"):
+		return web.json_response({"error": "multipart/form-data required"}, status=400)
+
+	try:
+		reader = await request.multipart()
+	except Exception as e:
+		return web.json_response({"error": f"Failed to parse multipart: {e}"}, status=400)
+
+	image_bytes: bytes | None = None
+	filename: str = "image"
+	prompt: str | None = None
+
+	async for part in reader:
+		if part.name == "image":
+			filename = part.filename or "image"
+			image_bytes = await part.read()
+		elif part.name == "prompt":
+			prompt = (await part.read()).decode()
+
+	if not image_bytes:
+		return web.json_response({"error": "image field is required"}, status=400)
+
+	try:
+		kwargs = {"image_bytes": image_bytes}
+		if prompt:
+			kwargs["prompt"] = prompt
+		description = await describe_image(**kwargs)
+	except ValueError as e:
+		return web.json_response({"error": str(e)}, status=503)
+	except Exception as e:
+		logger.error(f"[api/vision] VLM call failed: {e}")
+		return web.json_response({"error": "VLM inference failed"}, status=500)
+
+	append_to_history(
+		f"[Image: {filename}]",
+		f"I can see the following in the image: {description}",
+	)
+
+	return web.json_response({"description": description, "context_injected": True})
+
+
 async def handle_compact_ws(request: web.Request) -> web.WebSocketResponse:
 	from datetime import date
 	from db.schemas import Conversations
@@ -701,6 +752,7 @@ def create_app() -> web.Application:
 	app.router.add_post("/persona/voice", handle_set_voice)
 	app.router.add_get("/voice/ws", handle_voice_ws)
 	app.router.add_post("/voice", handle_voice)
+	app.router.add_post("/vision", handle_vision)
 	app.router.add_get("/voice/{job_id}", handle_voice_result)
 	app.router.add_delete("/voice/{job_id}", handle_voice_cancel)
 	app.router.add_get("/compact", handle_compact_ws)

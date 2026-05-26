@@ -545,6 +545,45 @@ async def cmd_persona(args: str) -> None:
     )
 
 
+async def cmd_look(args: str) -> None:
+    """Describe an image via the VLM and inject the description into conversation context."""
+    from utils.vlm import describe_image
+    from skills.conversation.skill import append_to_history
+
+    parts = args.strip().split(None, 1)
+    if not parts:
+        logger.info("Usage: /look <image_path> [optional prompt]")
+        return
+
+    image_path = parts[0]
+    prompt = parts[1] if len(parts) > 1 else None
+
+    try:
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+    except FileNotFoundError:
+        logger.info(f"File not found: {image_path}")
+        return
+    except OSError as e:
+        logger.info(f"Could not read file: {e}")
+        return
+
+    logger.info(f"Analysing image: {image_path}")
+    kwargs = {"image_bytes": image_bytes}
+    if prompt:
+        kwargs["prompt"] = prompt
+
+    description = await describe_image(**kwargs)
+
+    # Inject into conversation history so the CHAT model has visual context
+    append_to_history(
+        f"[Image: {image_path}]",
+        f"I can see the following in the image: {description}",
+    )
+
+    logger.info(f"Image description:\n{description}")
+
+
 async def cmd_help() -> None:
     logger.info(
         "Available commands:\n"
@@ -562,6 +601,7 @@ async def cmd_help() -> None:
         "  /ctx               — show context window usage for the current session\n"
         "  /note [title]      — save a note from the current conversation context\n"
         "  /planner <task>    — run an autonomous multi-step planning agent\n"
+        "  /look <path> [q]   — describe an image via the VLM and inject into context\n"
         "  /help              — show this message"
     )
 
@@ -581,6 +621,7 @@ _COMMANDS = {
     "/ctx": cmd_ctx,
     "/note": cmd_note,
     "/planner": cmd_planner,
+    "/look": cmd_look,
     "/help": cmd_help,
 }
 
