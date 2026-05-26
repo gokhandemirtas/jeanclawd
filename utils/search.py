@@ -63,6 +63,19 @@ def _search_tavily(query: str) -> list[str]:
         return []
 
 
+def search_wikipedia(query: str) -> str | None:
+    import wikipedia
+    try:
+        return wikipedia.summary(query, sentences=5, auto_suggest=True)
+    except wikipedia.exceptions.DisambiguationError as e:
+        try:
+            return wikipedia.summary(e.options[0], sentences=5)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 async def web_search(query: str) -> str | None:
     """Search DuckDuckGo and Tavily in parallel, rank by relevance, return top results."""
     with Live(Spinner("dots", text=Text(f"Searching: {query}", style="dim")), console=_console, transient=True):

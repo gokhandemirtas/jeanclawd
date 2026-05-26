@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import select
 import termios
 import threading
@@ -296,7 +297,20 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 	_play_wav_bytes(response.content, stop_event)
 
 
+def _sanitize_for_speech(text: str) -> str:
+	# markdown images: ![alt](url) → drop entirely
+	text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+	# markdown links: [label](url) → keep label only
+	text = re.sub(r"\[([^\]]+)\]\(.*?\)", r"\1", text)
+	# bare URLs
+	text = re.sub(r"https?://\S+", "", text)
+	# leftover punctuation from removed URLs (e.g. trailing commas, parens)
+	text = re.sub(r"\s([,;:])", r"\1", text)
+	return " ".join(text.split())
+
+
 def speak(text: str, voice_id: str = active_voice_id):
+	text = _sanitize_for_speech(text)
 	if not text:
 		logger.warning("No text provided for TTS, skipping")
 		return
