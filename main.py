@@ -256,6 +256,53 @@ async def _journal(question: str, answer: str) -> None:
 	await append_to_journal(question, answer)
 
 
+def _keepalive_loop(forwarded_args: list[str]) -> None:
+	"""Restart loop that inherits the terminal — required for the interactive CLI.
+
+	Supervisord captures stdin and breaks prompt_toolkit; subprocess.run inherits
+	the parent's stdio so the REPL works normally. Exits cleanly on returncode 0
+	(Ctrl+C / /quit); aborts after 3 rapid crashes (< 5 s uptime) to avoid
+	looping forever on unrecoverable errors like a bound port.
+	"""
+	import subprocess
+	import pathlib
+
+	# If supervisord is running and managing this process, shut it down first
+	# to avoid two keepalive mechanisms fighting over the same port.
+	sock = pathlib.Path(__file__).parent / "logs" / "supervisor.sock"
+	if sock.exists():
+		supervisorctl = pathlib.Path(__file__).parent / ".venv" / "bin" / "supervisorctl"
+		conf = pathlib.Path(__file__).parent / "supervisord.conf"
+		subprocess.run([str(supervisorctl), "-c", str(conf), "shutdown"],
+			capture_output=True)
+		time.sleep(1)
+
+	_RAPID_CRASH_THRESHOLD = 5.0
+	_MAX_RAPID_CRASHES = 3
+
+	cmd = [sys.executable, __file__] + forwarded_args
+	rapid_crashes = 0
+
+	while True:
+		started_at = time.time()
+		result = subprocess.run(cmd)
+		uptime = time.time() - started_at
+
+		if result.returncode == 0:
+			break
+
+		if uptime < _RAPID_CRASH_THRESHOLD:
+			rapid_crashes += 1
+			if rapid_crashes >= _MAX_RAPID_CRASHES:
+				print(f"\n[keepalive] Crashed {rapid_crashes} times in under {_RAPID_CRASH_THRESHOLD}s — giving up.")
+				sys.exit(1)
+		else:
+			rapid_crashes = 0
+
+		print(f"\n[keepalive] Exited with code {result.returncode} — restarting in 2s…")
+		time.sleep(2)
+
+
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--debug", action="store_true", help="Enable debug/warn logging")
@@ -266,7 +313,14 @@ if __name__ == "__main__":
 	)
 	parser.add_argument("--server", action="store_true", help="Start the API server")
 	parser.add_argument("--listen", action="store_true", help="Enable microphone voice input (push-to-talk)")
+	parser.add_argument("--keepalive", action="store_true", help="Run under supervisord (auto-restart on crash)")
 	args = parser.parse_args()
+
+	if args.keepalive:
+		forwarded = [a for a in sys.argv[1:] if a != "--keepalive"]
+		_keepalive_loop(forwarded)  # blocks here, restarts on crash, exits on clean quit
+		sys.exit(0)
+
 	asyncio.run(
 		main(
 			debug=args.debug,

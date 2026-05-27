@@ -44,6 +44,7 @@ dependencies = [
     "textual>=8.2.5",
     "mlx-audio>=0.4.3",
     "webrtcvad>=2.0.10",
+    "supervisor>=4.3.0",
 ]
 
 [project.optional-dependencies]
