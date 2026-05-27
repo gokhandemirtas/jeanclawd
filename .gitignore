@@ -58,3 +58,5 @@ logs/
 .DS_Store
 
 .claude/*
+
+storage/*

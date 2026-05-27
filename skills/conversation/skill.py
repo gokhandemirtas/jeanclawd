@@ -176,9 +176,10 @@ def _is_followup(text: str) -> bool:
   words = text.lower().split()
   if len(words) <= 3:
     return True
-  # Demonstrative pronouns ("this dish", "that recipe") always reference context
-  # even in longer queries — stateless skills have no history to resolve them.
-  if any(w in _DEMONSTRATIVES for w in words):
+  # Demonstrative pronouns ("this dish", "that recipe") reference context when the
+  # query is short. Long queries use demonstratives as predicate determiners ("it's
+  # this AI that...") and are self-contained — don't inject topic bleed into them.
+  if len(words) <= 8 and any(w in _DEMONSTRATIVES for w in words):
     return True
   # "similar", "related", etc. imply "similar to X" where X is always the current topic.
   if any(w in _IMPLICIT_REFERENCE_WORDS for w in words):
@@ -205,7 +206,8 @@ async def resolve_query(user_input: str) -> str:
   response = await llm.ainvoke([
     SystemMessage(content=(
       "Expand the follow-up into a self-contained search query using the topic.\n"
-      "- If the follow-up contains pronouns or demonstratives (it, its, this, these, those, them, that, they, there), replace them with the topic.\n"
+      "- If the follow-up contains pronouns or demonstratives (it, its, this, these, those, them, that, they, there) that clearly refer back to the topic, replace them with the topic.\n"
+      "- If the demonstrative describes a NEW subject being introduced (e.g. 'it's this AI that...'), leave it unchanged — the query is already self-contained.\n"
       "- If the follow-up is short and has no clear subject, append the topic as the subject (e.g. 'find similar movies' + topic 'Bring Her Back' → 'find movies similar to Bring Her Back').\n"
       "- Do NOT change any other words. Do NOT rephrase.\n"
       "Return only the expanded query — nothing else."

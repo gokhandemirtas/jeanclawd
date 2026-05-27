@@ -97,7 +97,11 @@ def get_persona_context() -> Optional[str]:
 
 
 def _build_persona_context(persona) -> str:
-    lines = ["## About the user you are talking to:"]
+    lines = [
+        "## About the user you are talking to:",
+        "Use these facts as background context only. Do NOT steer the conversation toward "
+        "the user's interests or music unless they bring the topic up first.",
+    ]
 
     if persona.name:
         lines.append(f"- Name: {persona.name}. Address them by name naturally when it fits.")
