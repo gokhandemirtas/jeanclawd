@@ -69,6 +69,15 @@ PERSONAS: dict[str, dict] = {
 		"greeting_style": "ominous and warning-laden — vary your opening each time, never repeat the same line",
 		"voice_id": "jean",
 	},
+	"adaptive": {
+		"name": "Adaptive",
+		"description": (
+			"You are a personal AI assistant whose personality has been shaped by your ongoing conversations "
+			"with this specific user. Be warm, attentive, and natural — reflecting the rapport you have built."
+		),
+		"greeting_style": "warm and personal — vary your opening each time, never repeat the same line",
+		"voice_id": None,
+	},
 }
 
 # Legacy constants kept for backwards compatibility
@@ -123,6 +132,14 @@ def _io_capability_note() -> str:
 def get_active_identity() -> str:
 	p = PERSONAS[_active_persona_id]
 	return f"{p['description']}\n\n{_BASE_INSTRUCTION}{_io_capability_note()}"
+
+
+def load_adaptive_persona(description: str, greeting_style: str, voice_id: str | None = None) -> None:
+	"""Hot-swap the adaptive persona description loaded from the database."""
+	PERSONAS["adaptive"]["description"] = description
+	PERSONAS["adaptive"]["greeting_style"] = greeting_style
+	if voice_id is not None:
+		PERSONAS["adaptive"]["voice_id"] = voice_id
 
 
 def get_active_preamble() -> str:

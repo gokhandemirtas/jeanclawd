@@ -95,6 +95,20 @@ class Note(Document):
 		name = "Notes"
 
 
+class AgentPersona(Document):
+	"""Evolved agent persona synthesised from journal history. One document per persona_id."""
+
+	persona_id: str = "adaptive"
+	description: str
+	greeting_style: str
+	voice_id: Optional[str] = None
+	last_evolved: datetime
+	journal_count: int = 0
+
+	class Settings:
+		name = "AgentPersona"
+
+
 class VoiceSettings(Document):
 	active_voice_id: str = "azelma"
 

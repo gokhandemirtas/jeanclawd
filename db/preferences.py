@@ -23,6 +23,9 @@ async def apply_preferences() -> None:
     try:
         prefs = await get_preferences()
 
+        from agents.adaptive_persona import load_adaptive_persona_from_db
+        await load_adaptive_persona_from_db()
+
         from agents.persona import set_active_persona
         set_active_persona(prefs.agentPersona)
 

@@ -138,6 +138,15 @@ async def cmd_analyze() -> None:
     else:
         logger.info("All compacted days already have journal entries.")
 
+    # Step 5: synthesise the Adaptive persona from the full journal history
+    from agents.adaptive_persona import evolve_adaptive_persona
+    logger.info("Synthesising adaptive persona from journal history…")
+    evolved = await evolve_adaptive_persona()
+    if evolved:
+        logger.info("Adaptive persona updated. Switch to it with: /persona adaptive")
+    else:
+        logger.info("Adaptive persona not updated (not enough journal entries or synthesis failed).")
+
     context = get_persona_context()
     if context:
         logger.info(f"Done.\n{context}")
@@ -591,7 +600,7 @@ async def cmd_help() -> None:
         "  /clear             — wipe the in-memory conversation history\n"
         "  /history           — print session history to the terminal\n"
         "  /analyze           — extract personal facts from this session into your persona profile\n"
-        "  /persona [id] [v]  — switch persona and voice (fuzzy picker, or pass args directly)\n"
+        "  /persona [id] [v]  — switch persona and voice; 'adaptive' evolves from your journal history\n"
         "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
         "  /connect <service> — authenticate a service (spotify | hue)\n"
         "  /memories [q]      — list all mem0 memories, or search with a query\n"

@@ -55,11 +55,20 @@ async def write_journal_entry(for_date: date) -> str:
 	logger.info(f"[journal] Written entry for {for_date}")
 
 	# Index in Qdrant for semantic journal search (fire-and-forget)
-	import asyncio
-
 	asyncio.create_task(_index_journal(for_date, narrative))
 
+	# Re-synthesise the Adaptive persona with the new journal entry (fire-and-forget)
+	asyncio.create_task(_evolve_adaptive_persona())
+
 	return narrative
+
+
+async def _evolve_adaptive_persona() -> None:
+	try:
+		from agents.adaptive_persona import evolve_adaptive_persona
+		await evolve_adaptive_persona()
+	except Exception:
+		logger.exception("[journal] Adaptive persona evolution failed")
 
 
 async def _index_journal(for_date, narrative: str) -> None:
