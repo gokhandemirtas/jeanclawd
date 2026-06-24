@@ -1,4 +1,3 @@
-import os
 import time
 from typing import Literal
 
@@ -30,17 +29,57 @@ class IntentResponse(BaseModel):
 
 
 _SEARCH_PREFIXES = (
-    "research ", "deep research", "search ", "search for ", "look up ",
-    "find information", "find info", "deep dive", "tell me everything about",
+	"research ",
+	"deep research",
+	"search ",
+	"search for ",
+	"look up ",
+	"find information",
+	"find info",
+	"deep dive",
+	"tell me everything about",
+)
+
+_DATETIME_QUERIES = frozenset(
+	{
+		"todays date",
+		"what is todays date",
+		"whats todays date",
+		"what is the date",
+		"whats the date",
+		"what is the date today",
+		"whats the date today",
+		"current date",
+		"date today",
+		"what time is it",
+		"whats the time",
+		"what is the time",
+		"what is the time now",
+		"current time",
+		"time now",
+		"what day is it",
+		"whats today",
+		"what is today",
+		"current day",
+		"what day is today",
+		"what day",
+		"what day of the week",
+		"what day of the week is it",
+		"what is the day today",
+		"whats the day today",
+	}
 )
 
 
 def _keyword_classify(text: str) -> IntentLiteral | None:
-    """Fast pre-check for high-confidence intents that small models routinely miss."""
-    t = text.lower().strip()
-    if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
-        return "SEARCH"
-    return None
+	"""Fast pre-check for high-confidence intents that small models routinely miss."""
+	t = text.lower().strip()
+	if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
+		return "SEARCH"
+	t_norm = t.replace("'", "").replace("\u2019", "")
+	if t_norm in _DATETIME_QUERIES:
+		return "INFORMATION_QUERY"
+	return None
 
 
 def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral:
@@ -53,6 +92,7 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 	Falls back to the generalist provider if the intent model returns bad output.
 	"""
 	from providers import get_provider
+
 	shortcut = _keyword_classify(user_input)
 	if shortcut:
 		logger.debug(f"[intent] {shortcut} (keyword match)")
@@ -66,6 +106,7 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 		{"role": "user", "content": content},
 	]
 	import time
+
 	try:
 		t = time.time()
 		response = get_intent_provider().complete(messages, IntentResponse)

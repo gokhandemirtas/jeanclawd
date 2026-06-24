@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 from pydantic import BaseModel
 
@@ -16,7 +15,7 @@ FINANCE_STOCKS — fetch LIVE stock/crypto prices not yet discussed
 TRANSPORTATION — directions or route between two specific places
 REMINDER — set a timer, alarm, or reminder
 NEWSFEED — fetch today's news headlines
-INFORMATION_QUERY — real-time lookup of something a language model could NOT know (obscure niche facts, very recent events, specific URLs, local business info)
+INFORMATION_QUERY — real-time lookup of something a language model could NOT know: current date, time, or day of week, obscure niche facts, very recent events, specific URLs, local business info
 NOTES — create or retrieve personal notes
 SEARCH — user wants to search or research a topic. Triggers: "search for", "look up", "google", "research", "deep dive", "deep research", "tell me everything about", "find everything about", "comprehensive overview", "in depth", "in-depth", "full breakdown", "use the search skill", "use it" when referring to search
 SPOTIFY — music playback or device management
@@ -30,7 +29,7 @@ Critical rules — apply in order, stop at first match:
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
-6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things.
+6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
 6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
 7. Reactions, opinions, follow-ups on something just said → CHAT.
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
@@ -69,45 +68,56 @@ Examples:
   "what can I make with chicken and rice" → NUTRITION
   "how do I make sushi" → NUTRITION
 
+  "what is today's date?" → INFORMATION_QUERY  (the model cannot know the current date)
+  "what time is it?" → INFORMATION_QUERY  (the model cannot know the current time)
+  "what day is it?" → INFORMATION_QUERY  (the model cannot know the current day)
+
 Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
 
 confidence: how certain you are this is the right domain intent (1.0 = unambiguous action, 0.5 = could be CHAT). Use < 0.7 when the query is conversational, emotional, or ambiguous."""
 
 
 class _RouteDecision(BaseModel):
-    intent: IntentLiteral
-    confidence: float = 1.0
+	intent: IntentLiteral
+	confidence: float = 1.0
 
 
-def _route_sync(query: str, history: list[tuple[str, str]]) -> tuple[IntentLiteral, float]:
-    lines = []
-    for user_msg, assistant_msg in history[-3:]:
-        lines.append(f"User: {user_msg}")
-        lines.append(f"Assistant: {assistant_msg[:200]}")
-    context = "\n".join(lines)
-    content = f"{context}\n\nUser: {query}" if context else query
+def _route_sync(
+	query: str, history: list[tuple[str, str]]
+) -> tuple[IntentLiteral, float]:
+	lines = []
+	for user_msg, assistant_msg in history[-3:]:
+		lines.append(f"User: {user_msg}")
+		lines.append(f"Assistant: {assistant_msg[:200]}")
+	context = "\n".join(lines)
+	content = f"{context}\n\nUser: {query}" if context else query
 
-    messages = [
-        {"role": "system", "content": _ROUTER_PROMPT},
-        {"role": "user", "content": content},
-    ]
-    result = get_provider().complete(messages, _RouteDecision)
-    return result.intent, result.confidence
+	messages = [
+		{"role": "system", "content": _ROUTER_PROMPT},
+		{"role": "user", "content": content},
+	]
+	result = get_provider().complete(messages, _RouteDecision)
+	return result.intent, result.confidence
 
 
-async def generalist_route(query: str, history: list[tuple[str, str]]) -> tuple[IntentLiteral, float]:
-    """Route a query using the generalist model with conversation history.
+async def generalist_route(
+	query: str, history: list[tuple[str, str]]
+) -> tuple[IntentLiteral, float]:
+	"""Route a query using the generalist model with conversation history.
 
-    Unlike the intent classifier, this sees recent exchanges so it can
-    correctly handle conversational shifts, negations, and follow-ups.
-    Falls back to CHAT on any routing failure so the conversation never hard-crashes.
-    """
-    import time
-    t = time.time()
-    try:
-        intent, confidence = await asyncio.to_thread(_route_sync, query, history)
-        logger.debug(f"[router] {intent} (confidence={confidence:.2f}, {time.time() - t:.2f}s)")
-        return intent, confidence
-    except Exception as e:
-        logger.warning(f"[router] Routing failed ({e}), falling back to CHAT")
-        return "CHAT", 1.0
+	Unlike the intent classifier, this sees recent exchanges so it can
+	correctly handle conversational shifts, negations, and follow-ups.
+	Falls back to CHAT on any routing failure so the conversation never hard-crashes.
+	"""
+	import time
+
+	t = time.time()
+	try:
+		intent, confidence = await asyncio.to_thread(_route_sync, query, history)
+		logger.debug(
+			f"[router] {intent} (confidence={confidence:.2f}, {time.time() - t:.2f}s)"
+		)
+		return intent, confidence
+	except Exception as e:
+		logger.warning(f"[router] Routing failed ({e}), falling back to CHAT")
+		return "CHAT", 1.0
