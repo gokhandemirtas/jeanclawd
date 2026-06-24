@@ -289,7 +289,7 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 	payload = {
 		"text": text,
 		"voice": _resolve_kokoro_voice(voice_id),
-		"speed": 1.0,
+		"speed": 1.8,
 		"lang": TTS_LANG,
 	}
 	response = requests.post(TTS_HOST, json=payload, timeout=60)

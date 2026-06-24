@@ -473,6 +473,62 @@ async def cmd_connect(args: str) -> None:
         logger.info(f"Unknown service '{service}'. Available: spotify, hue")
 
 
+async def cmd_voice(args: str) -> None:
+    """Set the active voice ID for the agent.
+
+    Usage:
+      /voice              — interactive fuzzy picker
+      /voice <id>         — switch voice directly
+    """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
+
+    from tts.tts import voice_ids, set_active_voice_id
+    from db.preferences import update_preferences
+    from agents.persona import get_active_persona_id
+
+    # Get available voices
+    voices = voice_ids
+    
+    # If no args provided, show interactive picker
+    if not args.strip():
+        try:
+            picker = PromptSession(
+                completer=FuzzyCompleter(WordCompleter(voices, sentence=True))
+            )
+            logger.info(f"Available voices: {', '.join(voices)}")
+            raw_voice = (
+                await picker.prompt_async("  voice ❯ ")
+            ).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            logger.info("Cancelled.")
+            return
+        if not raw_voice:
+            logger.info("No voice selected.")
+            return
+        selected_voice = raw_voice
+    else:
+        # Use provided voice ID
+        selected_voice = args.strip()
+    
+    # Validate voice exists
+    if selected_voice not in voices:
+        logger.info(f"Unknown voice '{selected_voice}'. Available: {', '.join(voices)}")
+        return
+    
+    # Apply voice change
+    set_active_voice_id(selected_voice)
+    await update_preferences(agentVoiceId=selected_voice)
+    
+    # Get current persona for display
+    from agents.persona import PERSONAS
+    current_persona = get_active_persona_id()
+    
+    logger.info(
+        f"Voice → {selected_voice} (saved)  |  Persona → {PERSONAS[current_persona]['name']}"
+    )
+
+
 async def cmd_persona(args: str) -> None:
     """Set the active persona and optionally the voice.
 
@@ -601,6 +657,7 @@ async def cmd_help() -> None:
         "  /history           — print session history to the terminal\n"
         "  /analyze           — extract personal facts from this session into your persona profile\n"
         "  /persona [id] [v]  — switch persona and voice; 'adaptive' evolves from your journal history\n"
+        "  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
         "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
         "  /connect <service> — authenticate a service (spotify | hue)\n"
         "  /memories [q]      — list all mem0 memories, or search with a query\n"
@@ -621,6 +678,7 @@ _COMMANDS = {
     "/history": cmd_history,
     "/analyze": cmd_analyze,
     "/persona": cmd_persona,
+    "/voice": cmd_voice,
     "/model": cmd_model,
     "/connect": cmd_connect,
     "/memories": cmd_memories,
