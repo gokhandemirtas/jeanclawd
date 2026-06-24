@@ -103,8 +103,9 @@ class _TopicResponse(BaseModel):
 
 _TOPIC_SYSTEM_PROMPT = (
 	"Extract the primary named entity being discussed (a specific title, name, or place — "
-	"e.g. 'Bring Her Back', 'Tesla', 'Paris'). If the conversation is a follow-up or refinement "
-	"about the same entity as the previous topic, return that same entity name unchanged. "
+	"e.g. 'Bring Her Back', 'Tesla', 'Paris'). "
+	"If the current message is clearly about the same entity as the previous topic, return that entity name unchanged. "
+	"If the current message is a command, action, or activity with no clear named entity (e.g. 'lights on', 'set a timer', 'play music'), return an empty string. "
 	"Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'. "
 	"Return a JSON object with a single 'topic' key."
 )
@@ -123,7 +124,7 @@ async def _safe_extract_topic(query: str, answer: str) -> None:
 			pydantic_model=_TopicResponse,
 			max_tokens=50,
 		)
-		_current_topic = result.topic
+		_current_topic = result.topic or None
 		logger.debug(f"[chat] topic='{_current_topic}'")
 	except Exception as e:
 		logger.warning(f"[chat] topic extraction failed ({e}), keeping previous topic")
@@ -202,15 +203,17 @@ _SKILL_REDIRECT_PHRASES = (
 
 
 def _is_followup(text: str) -> bool:
-	"""Only rewrite very short queries or those that are primarily pronouns.
+	"""Only rewrite queries that clearly reference the current topic.
+
+	Short imperative commands (e.g. 'lights on', 'play music', 'set a 5 min timer')
+	are self-contained and must NOT have the current topic injected — that causes
+	bleed (e.g. 'lights on' + topic 'Microsoft' → 'Microsoft lights on').
 
 	Longer queries go to the router as-is — it has full history and handles
 	context without needing a rewrite. Over-aggressive rewriting causes topic
 	bleed (e.g. 'about its history' → 'about Microsoft stock price's history').
 	"""
 	words = text.lower().split()
-	if len(words) <= 3:
-		return True
 	# Demonstrative pronouns ("this dish", "that recipe") reference context when the
 	# query is short. Long queries use demonstratives as predicate determiners ("it's
 	# this AI that...") and are self-contained — don't inject topic bleed into them.
@@ -224,9 +227,14 @@ def _is_followup(text: str) -> bool:
 	lowered = text.lower()
 	if any(phrase in lowered for phrase in _SKILL_REDIRECT_PHRASES):
 		return True
+	# Short queries with pronouns that reference the topic ("who made it",
+	# "what's its price"). Short imperative commands (no pronouns) are self-contained
+	# and must pass through unchanged.
+	if len(words) <= 3 and any(w in _PURE_PRONOUN_WORDS for w in words):
+		return True
 	# Only rewrite if the query is mostly pronouns with little other content
 	non_pronoun = [w for w in words if w not in _PURE_PRONOUN_WORDS]
-	return len(non_pronoun) <= 2
+	return len(non_pronoun) <= 2 and any(w in _PURE_PRONOUN_WORDS for w in words)
 
 
 async def resolve_query(user_input: str) -> str:
@@ -242,10 +250,12 @@ async def resolve_query(user_input: str) -> str:
 		[
 			SystemMessage(
 				content=(
-					"Expand the follow-up into a self-contained search query using the topic.\n"
+					"Expand the follow-up into a self-contained query using the topic.\n"
 					"- If the follow-up contains pronouns or demonstratives (it, its, this, these, those, them, that, they, there) that clearly refer back to the topic, replace them with the topic.\n"
 					"- If the demonstrative describes a NEW subject being introduced (e.g. 'it's this AI that...'), leave it unchanged — the query is already self-contained.\n"
-					"- If the follow-up is short and has no clear subject, append the topic as the subject (e.g. 'find similar movies' + topic 'Bring Her Back' → 'find movies similar to Bring Her Back').\n"
+					"- If the follow-up is a complete, self-contained imperative or command (e.g. 'lights on', 'play music', 'set a 5 min timer'), return it UNCHANGED — the topic does not apply.\n"
+					"- If the follow-up is short and clearly references the topic (e.g. 'find similar movies' + topic 'Bring Her Back' → 'find movies similar to Bring Her Back'), expand using the topic.\n"
+					"- When in doubt, return the follow-up UNCHANGED. False negatives (not expanding) are better than false positives (topic bleed).\n"
 					"- Do NOT change any other words. Do NOT rephrase.\n"
 					"Return only the expanded query — nothing else."
 				)
@@ -467,7 +477,7 @@ async def handle_conversation(
 		max_tokens=512 if voice_mode else 768,
 	)
 	final = _strip_think(result.answer)
-	_current_topic = result.topic
+	_current_topic = result.topic or None
 	logger.debug(f"[conversation] topic='{_current_topic}'")
 
 	# Store in shared history so CHAT can reference this exchange
