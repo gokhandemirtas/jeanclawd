@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import time
 
 from dotenv import load_dotenv
@@ -10,6 +11,9 @@ from dotenv import load_dotenv
 logging.getLogger("lmstudio").setLevel(logging.CRITICAL)
 logging.getLogger("AsyncWebsocketHandler").setLevel(logging.CRITICAL)
 from rich.console import Console
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.text import Text
 
 from agents.action_resolver.agent import resolve_action_query
 from agents.generalist.router import generalist_route
@@ -37,6 +41,47 @@ except ImportError:
 load_dotenv()
 
 console = Console()
+_spinner_console = Console(stderr=True, force_terminal=True)
+
+
+class _ProgressSpinner:
+	"""Threaded progress spinner that renders to stderr.
+
+	The spinner runs in a background thread so the main async loop can keep
+	processing (routing, queued tasks, etc.). `stop()` blocks until the
+	`rich.live.Live` context has fully exited and the spinner line is
+	cleared — safe to call from a callback right before writing the first
+	token to stdout, with no garbled output.
+	"""
+
+	def __init__(self, message: str = "Thinking…") -> None:
+		self._message = message
+		self._stop_event = threading.Event()
+		self._thread: threading.Thread | None = None
+
+	def start(self) -> None:
+		if self._thread is not None and self._thread.is_alive():
+			return
+		self._stop_event.clear()
+		self._thread = threading.Thread(target=self._spin, daemon=True)
+		self._thread.start()
+
+	def _spin(self) -> None:
+		spinner = Spinner("dots", text=Text(self._message, style="dim"))
+		with Live(spinner, console=_spinner_console, transient=True):
+			self._stop_event.wait()
+
+	def stop(self) -> None:
+		self._stop_event.set()
+		if self._thread is not None:
+			self._thread.join(timeout=1.0)
+
+	def __enter__(self) -> "_ProgressSpinner":
+		self.start()
+		return self
+
+	def __exit__(self, *exc_info) -> None:
+		self.stop()
 
 
 async def main(
@@ -172,54 +217,57 @@ async def main(
 				await handle_command(user_input)
 				continue
 
-			streamed: list[str] = []
+			with _ProgressSpinner() as spinner:
+				streamed: list[str] = []
 
-			def on_token(token: str) -> None:
-				if not streamed:
-					print("\033[36m", end="", flush=True)  # cyan on first token
-				streamed.append(token)
-				print(token, end="", flush=True)
+				def on_token(token: str) -> None:
+					if not streamed:
+						spinner.stop()
+						print("\033[36m", end="", flush=True)  # cyan on first token
+					streamed.append(token)
+					print(token, end="", flush=True)
 
-			loop = asyncio.get_running_loop()
-			done: asyncio.Future[str] = loop.create_future()
+				loop = asyncio.get_running_loop()
+				done: asyncio.Future[str] = loop.create_future()
 
-			async def _queued_generate() -> None:
-				from skills.conversation.skill import get_recent_history, consume_pending_intent
-				try:
-					effective_query = await resolve_query(user_input)
-					effective_query = await resolve_action_query(effective_query)
-					from skills.conversation.skill import set_pending_intent
-					pending = consume_pending_intent()
-					if pending:
-						logger.debug(f"[router] pending intent lock: {pending}")
-						intent = pending
-						confidence = 1.0
-					else:
-						intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
-						if confidence < 0.75 and intent != "CHAT":
-							logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
-							intent = "CHAT"
-					result = await route(intent, effective_query, on_token=on_token)
-					if not done.done():
-						done.set_result(result)
-				except Exception as e:
-					if not done.done():
-						done.set_exception(e)
+				async def _queued_generate() -> None:
+					from skills.conversation.skill import get_recent_history, consume_pending_intent
+					try:
+						effective_query = await resolve_query(user_input)
+						effective_query = await resolve_action_query(effective_query)
+						from skills.conversation.skill import set_pending_intent
+						pending = consume_pending_intent()
+						if pending:
+							logger.debug(f"[router] pending intent lock: {pending}")
+							intent = pending
+							confidence = 1.0
+						else:
+							intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
+							if confidence < 0.75 and intent != "CHAT":
+								logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
+								intent = "CHAT"
+						result = await route(intent, effective_query, on_token=on_token)
+						if not done.done():
+							done.set_result(result)
+					except Exception as e:
+						if not done.done():
+							done.set_exception(e)
 
-			enqueue("query", _queued_generate())
+				enqueue("query", _queued_generate())
 
-			_start = time.time()
-			response = await done
-			_elapsed = time.time() - _start
+				_start = time.time()
+				response = await done
+				_elapsed = time.time() - _start
+
+				if streamed:
+					print("\033[0m")  # reset color + newline
+				else:
+					spinner.stop()  # ensure cleared before the logged fallback
+					logger.newline()
+					logger.info(response)
+					logger.newline()
 
 			enqueue("journal", _journal(user_input, response))
-
-			if streamed:
-				print("\033[0m")  # reset color + newline
-			else:
-				logger.newline()
-				logger.info(response)
-				logger.newline()
 
 			if speak:
 				from tts.tts import speak as tts_speak, active_voice_id

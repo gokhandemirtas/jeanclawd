@@ -112,8 +112,33 @@ async def _call_skill(tool: str, query: str) -> str:
     return skill.handle(query=query)
 
 
+# Cap to keep the synthesis prompt within the model's context window.
+# Search/information results can include Tavily raw_content which is
+# 5-30K chars per result; without truncation, 3+ steps can blow past
+# 50K tokens and llama.cpp rejects with "tokens to keep from the initial
+# prompt is greater than the context length".
+_MAX_STEP_CHARS = 2_000      # ~500 tokens per step
+_MAX_RESEARCH_CHARS = 18_000  # ~4.5K tokens of research total
+
+
 async def _synthesize(task: str, steps: list[tuple[str, str, str]]) -> str:
-    data = "\n\n".join(f"[{tool} — {query}]\n{result}" for tool, query, result in steps)
+    parts: list[str] = []
+    total = 0
+    for tool, query, result in steps:
+        truncated = (
+            result if len(result) <= _MAX_STEP_CHARS
+            else result[:_MAX_STEP_CHARS] + "\n[...truncated to fit context window...]"
+        )
+        part = f"[{tool} — {query}]\n{truncated}"
+        if total + len(part) > _MAX_RESEARCH_CHARS:
+            remaining = len(steps) - len(parts)
+            parts.append(f"[...{remaining} more step(s) omitted to fit context window...]")
+            break
+        parts.append(part)
+        total += len(part)
+    data = "\n\n".join(parts)
+    logger.debug(f"[planner] synthesis input: {total:,} chars from {len(parts)}/{len(steps)} step(s)")
+
     llm = create_llm(temperature=0.5).bind(max_tokens=3072)
     response = await llm.ainvoke([
         SystemMessage(content=_SYNTHESIZE_PROMPT),
