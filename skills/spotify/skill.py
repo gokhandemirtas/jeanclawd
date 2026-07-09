@@ -22,6 +22,7 @@ Actions:
 - PLAY: play a song, artist, or album
 - PLAY_PLAYLIST: play one of the user's saved playlists by name
 - PAUSE: pause playback
+- STOP: pause playback (alias for PAUSE — Spotify has no separate stop endpoint)
 - RESUME: resume playback
 - SKIP: skip to the next track
 - NEXT: skip to the next track
@@ -47,6 +48,7 @@ class _SpotifyAction(BaseModel):
 		"PLAY",
 		"PLAY_PLAYLIST",
 		"PAUSE",
+		"STOP",
 		"RESUME",
 		"SKIP",
 		"NEXT",
@@ -102,18 +104,22 @@ async def handle_spotify(query: str) -> str:
 		f"Recent conversation:\n{context}\n\nUser's request: {query}" if context else query
 	)
 
-	with Live(
-		Spinner("dots", text=Text("Spotifying...", style="dim")),
-		console=_console,
-		transient=True,
-	):
-		action = generate_structured_output(
-			model_name=os.environ["MODEL_GENERALIST"],
-			user_prompt=enriched,
-			system_prompt=_SPOTIFY_PROMPT,
-			pydantic_model=_SpotifyAction,
-			max_tokens=300,
-		)
+	try:
+		with Live(
+			Spinner("dots", text=Text("Spotifying...", style="dim")),
+			console=_console,
+			transient=True,
+		):
+			action = generate_structured_output(
+				model_name=os.environ["MODEL_GENERALIST"],
+				user_prompt=enriched,
+				system_prompt=_SPOTIFY_PROMPT,
+				pydantic_model=_SpotifyAction,
+				max_tokens=300,
+			)
+	except Exception as e:
+		logger.error(f"Spotify action classification failed: {e}")
+		return "I couldn't understand that as a Spotify command. Try 'play [song]', 'pause', 'what's playing?', or 'next'."
 
 	logger.debug(f"Spotify action: {action}")
 
@@ -161,6 +167,12 @@ async def handle_spotify(query: str) -> str:
 			best_idx = int(scores.argmax())
 			match = playlists[best_idx] if scores[best_idx] > 0 else playlists[0]
 			await client.play_playlist(device_id, match["uri"])
+			import asyncio
+
+			await asyncio.sleep(0.4)
+			state = await client.now_playing()
+			if not state or not state.get("is_playing"):
+				return f"Couldn't start playlist '{match['name']}' — check that a device is active and try again."
 			return f"Playing playlist: {match['name']}."
 
 		if action.action == "NOW_PLAYING":
@@ -175,6 +187,14 @@ async def handle_spotify(query: str) -> str:
 			if not tracks:
 				return f"Couldn't find anything on Spotify for: {', '.join(queries)}"
 			await client.play(device_id, [t["uri"] for t in tracks])
+			import asyncio
+
+			await asyncio.sleep(0.5)
+			state = await client.now_playing()
+			if not state or not state.get("is_playing"):
+				return "Couldn't start playback on Spotify — check that a device is active and try again."
+			if state.get("uri") and state["uri"] != tracks[0]["uri"]:
+				return f"Playback started, but '{state['name']}' is playing instead of '{tracks[0]['name']}'."
 			if len(tracks) == 1:
 				return f"Playing {tracks[0]['name']} by {tracks[0]['artist']}."
 			return f"Playing {len(tracks)} tracks, starting with {tracks[0]['name']} by {tracks[0]['artist']}."
@@ -187,30 +207,54 @@ async def handle_spotify(query: str) -> str:
 			await client.queue(track["uri"], device_id)
 			return f"Added {track['name']} by {track['artist']} to the queue."
 
-		if action.action == "PAUSE":
+		if action.action in ("PAUSE", "STOP"):
 			await client.pause(device_id)
-			return "Paused Spotify."
+			import asyncio
+
+			await asyncio.sleep(0.4)
+			state = await client.now_playing()
+			if state and state.get("is_playing"):
+				return "Couldn't stop Spotify — playback is still running on the active device."
+			return "Stopped Spotify." if action.action == "STOP" else "Paused Spotify."
 
 		if action.action == "RESUME":
 			await client.resume(device_id)
-			return "Resumed Spotify."
+			import asyncio
+
+			await asyncio.sleep(0.4)
+			state = await client.now_playing()
+			if not state or not state.get("is_playing"):
+				return "Couldn't resume Spotify — check that a device is active and try again."
+			return f"Resumed Spotify. Now playing: {state['name']} by {state['artist']}."
 
 		if action.action in ("SKIP", "NEXT"):
 			await client.skip(device_id)
 			import asyncio
 			await asyncio.sleep(0.6)
 			track = await client.now_playing()
-			if track:
-				return f"Now playing: {track['name']} by {track['artist']}."
-			return "Skipped to the next track."
+			if not track:
+				return "Couldn't skip — no track is playing or the device is inactive."
+			return f"Skipped to: {track['name']} by {track['artist']}."
 
 		if action.action == "PREVIOUS":
 			await client.previous(device_id)
-			return "Going back to the previous track."
+			import asyncio
+			await asyncio.sleep(0.6)
+			track = await client.now_playing()
+			if not track:
+				return "Couldn't go back — no track is playing or the device is inactive."
+			return f"Now playing: {track['name']} by {track['artist']}."
 
 		if action.action == "VOLUME":
 			level = action.volume if action.volume is not None else 50
 			await client.set_volume(level, device_id)
+			import asyncio
+			await asyncio.sleep(0.3)
+			current = await client.get_volume()
+			if current is None:
+				return f"Couldn't change volume — no active Spotify device. Tried to set {level}%."
+			if current != level:
+				return f"Tried to set volume to {level}% but Spotify reports {current}% — something went wrong."
 			return f"Volume set to {level}%."
 
 	except aiohttp.ClientResponseError as e:

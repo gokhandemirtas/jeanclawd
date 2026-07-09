@@ -62,6 +62,21 @@ def _is_list_query(query: str) -> bool:
   return bool(words & _LIST_KEYWORDS)
 
 
+async def _verify_state(
+  hue_client: HueBridgeClient, target_type: str, target_id: Optional[int], expected_on: bool
+) -> bool:
+  """Wait briefly then confirm the actual light state matches what we asked for.
+
+  Catches cases where the Hue API call returned success but the physical state
+  didn't change (wrong target, stale config, bridge hiccup, etc.). Returns True
+  if the state matches; False if it still shows the opposite.
+  """
+  import asyncio
+
+  await asyncio.sleep(0.3)
+  return await hue_client.are_lights_on(target_type, target_id) == expected_on
+
+
 async def _execute_home_control(hue_client: HueBridgeClient, query: str, force_sync: bool = False) -> str:
   """Fetch config, classify intent, and execute the light control command.
 
@@ -126,13 +141,23 @@ async def _execute_home_control(hue_client: HueBridgeClient, query: str, force_s
   if target_type == "GROUP":
     if target_id is None:
       return f"Couldn't identify which group to control. Available groups: {groups_list}"
-    return await hue_client.control_group(target_id, turn_on)
+    result = await hue_client.control_group(target_id, turn_on)
+    if not await _verify_state(hue_client, "GROUP", target_id, turn_on):
+      return f"Tried to {'turn on' if turn_on else 'turn off'} the lights but the state didn't change — the action may not have worked. Check the Hue bridge."
+    return result
   elif target_type == "LIGHT":
     if target_id is None:
       return f"Couldn't identify which light to control. Available lights: {lights_list}"
-    return await hue_client.control_light(target_id, turn_on)
+    result = await hue_client.control_light(target_id, turn_on)
+    if not await _verify_state(hue_client, "LIGHT", target_id, turn_on):
+      return f"Tried to {'turn on' if turn_on else 'turn off'} the light but the state didn't change — the action may not have worked. Check the Hue bridge."
+    return result
   else:
     results = [await hue_client.control_group(group.id, turn_on) for group in config.groups]
+    if not await _verify_state(hue_client, "ALL", None, turn_on):
+      verb = "turn on" if turn_on else "turn off"
+      state = "on" if turn_on else "off"
+      return f"Tried to {verb} all lights but some are still {state} — the action may not have worked. Check the Hue bridge."
     return "\n".join(results)
 
 

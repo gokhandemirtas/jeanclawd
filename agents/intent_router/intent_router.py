@@ -11,7 +11,12 @@ async def route(
     on_token: Callable[[str], None] | None = None,
     voice_mode: bool = False,
 ) -> str:
-    from skills.conversation.skill import handle_conversation
+    from skills.conversation.skill import (
+        append_to_history,
+        handle_conversation,
+        set_pending_intent,
+    )
+
     skill = get_skill(intent)
     sig = inspect.signature(skill.handle)
     kwargs: dict = {}
@@ -26,7 +31,16 @@ async def route(
     if inspect.isawaitable(result):
         result = await result
     if skill.needs_wrapping:
-        return await handle_conversation(user_input, result, on_token=on_token, voice_mode=voice_mode)
-    from skills.conversation.skill import append_to_history
-    append_to_history(user_input, result)
-    return result
+        final = await handle_conversation(user_input, result, on_token=on_token, voice_mode=voice_mode)
+    else:
+        append_to_history(user_input, result)
+        final = result
+
+    # Auto-lock the next turn to this intent when the response ends with a question
+    # (e.g. "Which playlist?", "What time?"). The lock is single-use: consumed and
+    # cleared by consume_pending_intent() on the next turn. If the user's reply
+    # also ends with "?", a fresh lock is set; otherwise the chain breaks.
+    if final.rstrip().endswith("?"):
+        set_pending_intent(intent)
+
+    return final

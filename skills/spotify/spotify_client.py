@@ -51,7 +51,7 @@ class SpotifyClient:
         return devices[0]["id"] if devices else None
 
     async def now_playing(self) -> Optional[dict]:
-        """Returns {"name": ..., "artist": ...} or None if nothing playing."""
+        """Returns {"name": ..., "artist": ..., "is_playing": bool, "uri": str} or None if nothing playing."""
         data = await self._get("/me/player")
         if not data or not data.get("item"):
             return None
@@ -59,6 +59,8 @@ class SpotifyClient:
         return {
             "name": item["name"],
             "artist": ", ".join(a["name"] for a in item["artists"]),
+            "is_playing": data.get("is_playing", False),
+            "uri": item.get("uri"),
         }
 
     async def search_track(self, query: str) -> Optional[dict]:
@@ -105,6 +107,14 @@ class SpotifyClient:
         if device_id:
             params["device_id"] = device_id
         await self._put("/me/player/volume", params=params)
+
+    async def get_volume(self) -> Optional[int]:
+        """Returns the active device's current volume (0-100), or None if no active device."""
+        data = await self._get("/me/player")
+        if not data:
+            return None
+        device = data.get("device") or {}
+        return device.get("volume_percent")
 
     async def get_user_playlists(self, limit: int = 50) -> list[dict]:
         """Returns list of {"name": ..., "uri": ..., "track_count": ...}."""

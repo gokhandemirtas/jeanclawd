@@ -18,23 +18,26 @@ NEWSFEED — fetch today's news headlines
 INFORMATION_QUERY — real-time lookup of something a language model could NOT know: current date, time, or day of week, obscure niche facts, very recent events, specific URLs, local business info
 NOTES — create or retrieve personal notes
 SEARCH — user wants to search or research a topic. Triggers: "search for", "look up", "google", "research", "deep dive", "deep research", "tell me everything about", "find everything about", "comprehensive overview", "in depth", "in-depth", "full breakdown", "use the search skill", "use it" when referring to search
-SPOTIFY — music playback or device management
+SPOTIFY — music playback control: play, pause, stop, resume, skip, next, previous, volume, now playing, queue, device management. Bare imperative words like "pause", "stop", "skip", "next", "resume" with no other context refer to media playback → SPOTIFY.
 PLANNER — build a multi-step plan or itinerary
 NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
 CHAT — everything else: general knowledge, history, explanations, science, comparisons, opinions, follow-ups on anything already in the conversation
 
 Critical rules — apply in order, stop at first match:
 1. Short agreements, continuations, or confirmations ("yes", "no", "ok", "sure", "yes all", "sounds good", "go ahead", "tell me more", "please", "exactly") → always CHAT.
-2. If the answer can be derived from data already in the conversation history → CHAT. Never re-fetch.
+2. If the answer can be derived from ACTUAL SKILL DATA in the conversation history (e.g. a previous weather response, stock price, song title) → CHAT. Never re-fetch. CHAT RESPONSES DO NOT COUNT as skill data — they are conversational only and CANNOT represent executed actions. If the previous turn was CHAT, the new query is a fresh request, not a follow-up to executed data.
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
 6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
 6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
-7. Reactions, opinions, follow-ups on something just said → CHAT.
+7. Reactions, opinions, follow-ups on something just said → CHAT. EXCEPTION: a follow-up that contains an explicit imperative action command (verb + object, e.g. "turn them off", "skip it", "stop that") is NOT a reaction — it's a new action and must be routed to the relevant domain intent.
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
 9. INFORMATION_QUERY / SEARCH only for things the model cannot know: breaking news, real-time events, local business info.
-10. When in doubt → CHAT.
+10. Bare media-control imperatives EXACTLY matching one of these single words — "pause", "stop", "skip", "next", "resume", "play" — with no other words in the query and no light/device keyword → SPOTIFY. Multi-word phrases like "turn off", "switch off", "shut off" are NOT covered by this rule. Do not extend this rule to synonyms of "off" — the LLM tendency to do that is the exact bug this rule exists to prevent.
+11. "turn on", "turn off", "switch on", "switch off", "shut on", "shut off", or just "on"/"off" with no light/device keyword and no clear media context → CHAT (ambiguous — could be media, lights, or anything else; ask what to turn on/off).
+12. Explicit imperative action commands with a device or object keyword ("lights off", "lights on", "lamp on", "kitchen lights off", "play X", "pause", "stop", "set a timer", "set an alarm", "volume to 50", "next", "skip") ALWAYS go to the relevant domain intent (HOME_CONTROL, SPOTIFY, REMINDER, etc.), even after a CHAT response in history. Resolve pronouns ("them", "it") using recent history. This overrides rules 2 and 7.
+13. When in doubt → CHAT.
 
 Examples:
   history: [microsoft stock → $406, tesla stock → $450]
