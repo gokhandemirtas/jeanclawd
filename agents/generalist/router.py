@@ -3,7 +3,7 @@ import asyncio
 from pydantic import BaseModel
 
 from agents.intent_classifier.intent_classifier import IntentLiteral
-from providers import get_provider
+from providers import get_intent_provider
 from utils.log import logger
 
 _ROUTER_PROMPT = """You are a query router. Given a conversation history and the user's latest message, return the single best intent.
@@ -38,6 +38,7 @@ Critical rules — apply in order, stop at first match:
 11. "turn on", "turn off", "switch on", "switch off", "shut on", "shut off", or just "on"/"off" with no light/device keyword and no clear media context → CHAT (ambiguous — could be media, lights, or anything else; ask what to turn on/off).
 12. Explicit imperative action commands with a device or object keyword ("lights off", "lights on", "lamp on", "kitchen lights off", "play X", "pause", "stop", "set a timer", "set an alarm", "volume to 50", "next", "skip") ALWAYS go to the relevant domain intent (HOME_CONTROL, SPOTIFY, REMINDER, etc.), even after a CHAT response in history. Resolve pronouns ("them", "it") using recent history. This overrides rules 2 and 7.
 13. When in doubt → CHAT.
+14. Queries with a demonstrative that points at the most recent assistant turn ("what is this song called", "what is that movie about", "who made this", "how long is this one", "is this any good") → CHAT. The answer is almost always in the conversation history; searching would be wasteful and confusing. Treat the demonstrative as a strong signal that the user is asking about something the assistant just mentioned.
 
 Examples:
   history: [microsoft stock → $406, tesla stock → $450]
@@ -75,6 +76,9 @@ Examples:
   "what time is it?" → INFORMATION_QUERY  (the model cannot know the current time)
   "what day is it?" → INFORMATION_QUERY  (the model cannot know the current day)
 
+  history: [spotify → now playing Down for Life by Testament]
+  "what is this song called?" → CHAT  (demonstrative points at the just-mentioned song — answer is in history)
+
 Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
 
 confidence: how certain you are this is the right domain intent (1.0 = unambiguous action, 0.5 = could be CHAT). Use < 0.7 when the query is conversational, emotional, or ambiguous."""
@@ -99,7 +103,10 @@ def _route_sync(
 		{"role": "system", "content": _ROUTER_PROMPT},
 		{"role": "user", "content": content},
 	]
-	result = get_provider().complete(messages, _RouteDecision)
+	# Routing is pure classification over a 14-rule prompt — uses the lean
+	# MODEL_INTENT model (e.g. 8B) rather than the chat-tuned generalist.
+	# 4-8x faster, better at rule-following structured output.
+	result = get_intent_provider().complete(messages, _RouteDecision)
 	return result.intent, result.confidence
 
 

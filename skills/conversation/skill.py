@@ -102,11 +102,16 @@ class _TopicResponse(BaseModel):
 
 
 _TOPIC_SYSTEM_PROMPT = (
-	"Extract the primary named entity being discussed (a specific title, name, or place — "
-	"e.g. 'Bring Her Back', 'Tesla', 'Paris'). "
-	"If the current message is clearly about the same entity as the previous topic, return that entity name unchanged. "
-	"If the current message is a command, action, or activity with no clear named entity (e.g. 'lights on', 'set a timer', 'play music'), return an empty string. "
-	"Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'. "
+	"Extract the primary named entity that the exchange is about — a specific title, name, or place "
+	"(e.g. 'Bring Her Back', 'Tesla', 'Paris', 'Fade To Black', 'Chicken Tikka Masala'). "
+	"Look at the ASSISTANT'S ANSWER first — that's where the actual subject lives. A status response "
+	"like 'Fade To Black - Remastered by Metallica is currently playing' or 'The S&P 500 closed at 5,400' "
+	"or 'It's 12°C in London' has a clear subject; extract it using the exact name the assistant used. "
+	"Do NOT shorten a song/album/movie title to just the artist unless the assistant itself did so. "
+	"Only return an empty string if the exchange has no specific named entity — e.g. generic greetings, "
+	"yes/no exchanges, or bare commands like 'lights on' or 'set a timer' where nothing specific is being discussed. "
+	"Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices' and platform/service "
+	"names like 'Spotify', 'YouTube', 'Google'. "
 	"Return a JSON object with a single 'topic' key."
 )
 
@@ -118,7 +123,9 @@ async def _safe_extract_topic(query: str, answer: str) -> None:
 		prev = f"Previous topic: {_current_topic}\n" if _current_topic else ""
 		result = await asyncio.to_thread(
 			generate_structured_output,
-			model_name=os.environ["MODEL_GENERALIST"],
+			# Topic extraction is a single-string classification task — runs on the
+			# lean MODEL_INTENT (e.g. 8B) rather than the chat-tuned generalist.
+			model_name=os.environ.get("MODEL_INTENT") or os.environ["MODEL_GENERALIST"],
 			user_prompt=f"{prev}User asked: {query}\nAnswer: {answer[:300]}",
 			system_prompt=_TOPIC_SYSTEM_PROMPT,
 			pydantic_model=_TopicResponse,
@@ -234,7 +241,16 @@ def _is_followup(text: str) -> bool:
 		return True
 	# Only rewrite if the query is mostly pronouns with little other content
 	non_pronoun = [w for w in words if w not in _PURE_PRONOUN_WORDS]
-	return len(non_pronoun) <= 2 and any(w in _PURE_PRONOUN_WORDS for w in words)
+	if len(non_pronoun) <= 2 and any(w in _PURE_PRONOUN_WORDS for w in words):
+		return True
+	# Definite references like "the lyrics", "the recipe", "the album" almost
+	# always point back to a prior context (e.g. "find the lyrics", "play the
+	# album", "tell me the story"). Self-contained cases like "what's the weather"
+	# or "set the timer" are protected by the rewrite prompt, which returns them
+	# unchanged when no clear reference to the topic exists.
+	if len(words) <= 12 and re.search(r"\bthe\s+\w+", text.lower()):
+		return True
+	return False
 
 
 async def resolve_query(user_input: str) -> str:

@@ -1,5 +1,6 @@
 from typing import Type, TypeVar
 from pydantic import BaseModel
+import os
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -15,10 +16,17 @@ def generate_structured_output(
 	top_p: float = 0.9,
 	top_k: int = 40,
 ) -> T:
-	from providers import get_provider
+	from providers import get_intent_provider, get_provider
+
+	intent_model = os.getenv("MODEL_INTENT", "").strip()
+	provider = (
+		get_intent_provider()
+		if intent_model and model_name.strip() == intent_model
+		else get_provider()
+	)
 
 	messages = [
 		{"role": "system", "content": system_prompt},
 		{"role": "user", "content": user_prompt},
 	]
-	return get_provider().complete(messages, pydantic_model)
+	return provider.complete(messages, pydantic_model)
