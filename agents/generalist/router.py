@@ -35,8 +35,8 @@ Critical rules — apply in order, stop at first match:
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
 9. INFORMATION_QUERY / SEARCH only for things the model cannot know: breaking news, real-time events, local business info.
 10. Bare media-control imperatives EXACTLY matching one of these single words — "pause", "stop", "skip", "next", "resume", "play" — with no other words in the query and no light/device keyword → SPOTIFY. Multi-word phrases like "turn off", "switch off", "shut off" are NOT covered by this rule. Do not extend this rule to synonyms of "off" — the LLM tendency to do that is the exact bug this rule exists to prevent.
-11. "turn on", "turn off", "switch on", "switch off", "shut on", "shut off", or just "on"/"off" with no light/device keyword and no clear media context → CHAT (ambiguous — could be media, lights, or anything else; ask what to turn on/off).
-12. Explicit imperative action commands with a device or object keyword ("lights off", "lights on", "lamp on", "kitchen lights off", "play X", "pause", "stop", "set a timer", "set an alarm", "volume to 50", "next", "skip") ALWAYS go to the relevant domain intent (HOME_CONTROL, SPOTIFY, REMINDER, etc.), even after a CHAT response in history. Resolve pronouns ("them", "it") using recent history. This overrides rules 2 and 7.
+11. Explicit imperative action commands containing a device, object, or location keyword anywhere in the query — "lights on", "lights off", "turn the lights on", "turn the lights off", "turn the bedroom lights on", "lamp on", "kitchen lights off", "play X", "pause", "stop", "set a timer", "set an alarm", "volume to 50", "next", "skip" — ALWAYS go to the relevant domain intent (HOME_CONTROL, SPOTIFY, REMINDER, etc.), even after a CHAT response in history. Resolve pronouns ("them", "it") using recent history. This overrides rules 2, 7, and 12. The rule fires on presence of ANY device / object / location keyword, including but not limited to: lights, lamp, fan, tv, heater, humidifier, plug, switch, radio, speaker, kitchen, bedroom, living room, office, bathroom, hallway, garage, music, song, playlist, timer, alarm, reminder, note, volume. When uncertain whether a word is a device / object / location, route to the domain intent — those skills can always ask a clarifying question if truly ambiguous. This rule fires BEFORE rule 12.
+12. BARE "turn on" / "turn off" / "switch on" / "switch off" / "shut on" / "shut off", or just "on" / "off" as the entire query — with NO device, object, or location keyword and no clear media context → CHAT (ambiguous; ask what to turn on/off). The entire query must consist of just the phrase plus stopwords like "the" / "a" / "please" / "it" — any content word beyond the phrase disqualifies this rule and pushes the query to rule 11. Examples that match: "turn on" → CHAT, "turn off" → CHAT, "switch off" → CHAT, "on" → CHAT, "off" → CHAT, "turn it off" → CHAT. Examples that do NOT match (rule 11 wins): "turn the lights on" → HOME_CONTROL, "switch the lamp off" → HOME_CONTROL, "turn off the fan" → HOME_CONTROL, "turn on the bedroom" → HOME_CONTROL. This rule is strict: any noun / device / location / room name disqualifies the query from this rule.
 13. When in doubt → CHAT.
 14. Queries with a demonstrative that points at the most recent assistant turn ("what is this song called", "what is that movie about", "who made this", "how long is this one", "is this any good") → CHAT. The answer is almost always in the conversation history; searching would be wasteful and confusing. Treat the demonstrative as a strong signal that the user is asking about something the assistant just mentioned.
 
@@ -78,6 +78,11 @@ Examples:
 
   history: [spotify → now playing Down for Life by Testament]
   "what is this song called?" → CHAT  (demonstrative points at the just-mentioned song — answer is in history)
+
+  "turn the lights on" → HOME_CONTROL  (device keyword "lights" present, rule 11)
+  "switch the lamp off" → HOME_CONTROL  (device keyword "lamp" present, rule 11)
+  "turn on" → CHAT  (bare phrase, no device keyword, rule 12)
+  "turn it off" → CHAT  (bare phrase, pronoun with no resolvable device from history, rule 12)
 
 Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
 
