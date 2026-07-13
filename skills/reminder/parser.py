@@ -2,16 +2,25 @@
 
 from datetime import datetime
 
-import fuzzydate as fd
+import dateparser
 from utils.log import logger
 
+_DATEPARSER_SETTINGS = {
+  "RELATIVE_BASE": datetime.now(),
+  "PREFER_DATES_FROM": "future",
+  "PREFER_DAY_OF_MONTH": "current",
+  "RETURN_AS_TIMEZONE_AWARE": False,
+}
 
-def parse_time(date_input: str) -> int:
+
+def parse_time(date_input: str) -> int | None:
+  """Parse a natural-language duration/date into seconds from now (for timers)."""
   try:
-    parsed_time = fd.to_seconds(date_input)
-    if parsed_time:
-      logger.debug(f"Parsed '{date_input}' to '{parsed_time}'")
-      return parsed_time
+    parsed_dt = dateparser.parse(date_input, settings=_DATEPARSER_SETTINGS)
+    if parsed_dt:
+      delta = (parsed_dt - datetime.now()).total_seconds()
+      logger.debug(f"Parsed '{date_input}' to '{delta:.0f}s from now")
+      return int(delta)
     else:
       logger.warning(f"Could not parse time: {date_input}")
       return None
@@ -23,10 +32,10 @@ def parse_time(date_input: str) -> int:
 def parse_reminder_date(date_input: str) -> datetime | None:
   """Parse natural language date/time string into a datetime object."""
   try:
-    parsed_datetime = fd.to_datetime(date_input)
-    if parsed_datetime:
-      logger.debug(f"Parsed '{date_input}' to '{parsed_datetime.isoformat()}'")
-      return parsed_datetime
+    parsed_dt = dateparser.parse(date_input, settings=_DATEPARSER_SETTINGS)
+    if parsed_dt:
+      logger.debug(f"Parsed '{date_input}' to '{parsed_dt.isoformat()}'")
+      return parsed_dt
     else:
       logger.warning(f"Could not parse date: {date_input}")
       return None

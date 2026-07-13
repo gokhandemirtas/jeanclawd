@@ -5,7 +5,7 @@ reminderIntentPrompt = """Extract reminder or timer information from the user's 
    - "REMINDER": User wants to create a reminder for future dates
    - "TIMER": User wants to start a timer for immediate/short countdowns
 
-2. DATETIME: Extract ONLY the date/time expression from the query. Use fuzzy-date format. Leave EMPTY if not mentioned or if LIST type.
+2. DATETIME: Extract ONLY the date/time expression from the query. Leave EMPTY if not mentioned or if LIST type.
    - For REMINDER/TIMER: Extract when the reminder should trigger
    - For LIST: Leave EMPTY (listing only shows today's reminders)
    - DO NOT convert to ISO format - keep the natural language expression
