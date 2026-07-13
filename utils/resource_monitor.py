@@ -38,6 +38,87 @@ CHAT_HISTORY_MAX = 20
 
 
 @lru_cache(maxsize=1)
+def _get_encoder():
+  """tiktoken encoder. Cached at module level — first call pays the ~50ms load.
+
+  cl100k_base is the same encoding the /ctx command uses (commands.py:167).
+  It's an approximation for non-OpenAI models (Qwen3 has its own BPE) but is
+  good enough for a real-time meter and stays consistent with /ctx.
+  """
+  import tiktoken
+  return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str) -> int:
+  """Approximate token count of a string using cl100k_base."""
+  if not text:
+    return 0
+  return len(_get_encoder().encode(text))
+
+
+# Updated by LLM-consuming code (e.g. skills/conversation/skill.py) just before
+# issuing a request. The background monitor thread reads this each tick and
+# appends a used/available meter to its status line. Plain int — single GIL
+# write is atomic, no lock needed.
+_context_used_tokens: int = 0
+_context_max_tokens: int | None = None
+
+
+def set_context_used(used: int) -> None:
+  """Push the current context-window token count for display in the monitor line."""
+  global _context_used_tokens
+  _context_used_tokens = max(0, used)
+
+
+def get_context_max() -> int | None:
+  """Best-effort lookup of the model's max context length (cached after first call)."""
+  global _context_max_tokens
+  if _context_max_tokens is not None:
+    return _context_max_tokens
+  try:
+    from providers import get_provider
+    _context_max_tokens = get_provider().context_length()
+  except Exception:
+    return None
+  return _context_max_tokens
+
+
+CONTEXT_FILE = "logs/context.json"
+
+
+def push_context_to_file() -> None:
+  """Write the current context state to logs/context.json for monitor.py to read.
+
+  Uses a temp file + os.replace for atomicity so the Textual monitor (which
+  polls at 1Hz) never sees a half-written file. Failures are swallowed — the
+  meter is observability, not correctness.
+  """
+  import json
+  import tempfile
+
+  try:
+    payload = {
+      "used": _context_used_tokens,
+      "max": _context_max_tokens,
+      "ts": __import__("time").time(),
+    }
+    dir_name = os.path.dirname(CONTEXT_FILE) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_name, prefix=".context.", suffix=".tmp")
+    try:
+      with os.fdopen(fd, "w") as f:
+        json.dump(payload, f)
+      os.replace(tmp, CONTEXT_FILE)
+    except Exception:
+      try:
+        os.unlink(tmp)
+      except OSError:
+        pass
+      raise
+  except Exception as e:
+    logger.debug(f"[resource_monitor] context push failed: {e}")
+
+
+@lru_cache(maxsize=1)
 def compute_chat_history_limit() -> int:
   """Return how many history messages to pass to the chat model.
 

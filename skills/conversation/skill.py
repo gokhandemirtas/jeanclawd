@@ -90,14 +90,14 @@ class _ConversationResponse(BaseModel):
 
 class _ChatResponse(BaseModel):
 	topic: str = Field(
-		description="The primary named entity being discussed — a specific title, name, or place (e.g. 'Bring Her Back', 'Tesla', 'Paris'). Used to resolve follow-up queries like 'find similar ones' or 'who made it'. Avoid generic category labels like 'Movie Recommendation' or 'Stock Prices'."
+		description="The specific title, name, or place the exchange is about. Use the exact name the assistant used (e.g. 'Microsoft', 'London', 'Tesla', 'Fade To Black'). Empty string if nothing specific. Avoid generic category labels like 'Movie Recommendation' and avoid platform names like 'Spotify' or 'Google'."
 	)
 	answer: str = Field(description="Your conversational response to the user")
 
 
 class _TopicResponse(BaseModel):
 	topic: str = Field(
-		description="The primary named entity being discussed — a specific title, name, or place (e.g. 'Bring Her Back', 'Tesla', 'Paris'). Used to resolve follow-up queries. Avoid generic category labels."
+		description="The specific title, name, or place the exchange is about. Use the exact name the assistant used (e.g. 'Microsoft', 'London', 'Tesla', 'Fade To Black'). Empty string if nothing specific. Avoid generic category labels like 'Movie Recommendation' and avoid platform names like 'Spotify' or 'Google'."
 	)
 
 
@@ -685,7 +685,7 @@ async def handle_chat(
 		if memories:
 			logger.debug(f"[CHAT] Injecting memories: {memories[:120]}")
 			system = system + "\n\n" + memories
-		from utils.resource_monitor import compute_chat_history_limit
+		from utils.resource_monitor import compute_chat_history_limit, count_tokens, set_context_used, push_context_to_file
 
 		history_lines = []
 		for msg in list(_history)[-compute_chat_history_limit() :]:
@@ -694,6 +694,8 @@ async def handle_chat(
 		if history_lines:
 			system = system + "\n\n## Conversation so far:\n" + "\n".join(history_lines)
 		user_prompt = query
+		set_context_used(count_tokens(system) + count_tokens(user_prompt))
+		push_context_to_file()
 		llm = _get_llm(temperature=0.3, max_tokens=512 if voice_mode else 1024)
 		messages = [SystemMessage(content=system), HumanMessage(content=user_prompt)]
 		full_text = ""
@@ -764,7 +766,7 @@ async def handle_chat(
 		logger.debug(f"[CHAT] Injecting memories: {memories[:120]}")
 		system = system + "\n\n" + memories
 
-	from utils.resource_monitor import compute_chat_history_limit
+	from utils.resource_monitor import compute_chat_history_limit, count_tokens, set_context_used, push_context_to_file
 
 	history_lines = []
 	for msg in list(_history)[-compute_chat_history_limit() :]:
@@ -772,6 +774,8 @@ async def handle_chat(
 		history_lines.append(f"{role}: {msg.content}")
 	if history_lines:
 		system = system + "\n\n## Conversation so far:\n" + "\n".join(history_lines)
+	set_context_used(count_tokens(system) + count_tokens(query))
+	push_context_to_file()
 
 	result = await asyncio.to_thread(
 		generate_structured_output,
