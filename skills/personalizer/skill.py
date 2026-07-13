@@ -129,8 +129,11 @@ def get_persona_context() -> Optional[str]:
 def _build_persona_context(persona) -> str:
     lines = [
         "## About the user you are talking to:",
-        "Use these facts as background context only. Do NOT steer the conversation toward "
-        "the user's interests or music unless they bring the topic up first.",
+        "Use these facts as background context only. Don't bring up the user's interests or music on your own initiative. "
+        "BUT: when the user invites you to get to know them, asks you to be more personal, or is clearly trying to "
+        "build rapport, use empty persona fields to ask a natural follow-up question. One question at a time — "
+        "not an interview. If you don't know their name, ask what to call them. If you don't know their work, "
+        "ask what they do. Pick the most natural one for the moment.",
     ]
 
     if persona.name:
