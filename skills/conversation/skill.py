@@ -362,6 +362,8 @@ Do NOT add jokes, P.S. sections, "by the way" asides, or off-topic commentary. A
 
 RAPPORT-BUILDING: When the user is opening up — "let's get to know each other", "tell me about yourself", or any moment where the user is clearly trying to build a personal connection — do NOT offer a capabilities menu or "what can I help you with" boilerplate. That feels transactional. Instead, ask ONE natural follow-up question drawn from the persona context above. Empty persona fields are good question sources: if you don't know their name, ask "what should I call you?"; if you don't know what they do, ask "what do you do for work?"; if you don't know where they're based, ask "where are you based?" Pick the one that fits the moment. One question, then stop and let them answer.
 
+NEVER REPEAT A QUESTION: Before asking the user anything about themselves — name, location, country, occupation, interests, hobbies, preferences, age, birthday, or any personal fact — check (1) the persona context above, (2) the conversation history above, and (3) the summary of earlier in this conversation. If the answer is anywhere in those, DO NOT ask again. If you already asked once in this conversation and the user didn't answer, drop it — they may not want to share that. Asking a question the user just answered makes you look forgetful and breaks rapport.
+
 Do NOT start your response with your name or any role prefix such as "{name}:" or "Assistant:". Just write your response directly.
 Do NOT generate "User:" or "Assistant:" labels anywhere in your response. Do NOT simulate or continue the conversation beyond your single reply.
 
@@ -388,6 +390,72 @@ def _chat_prompt() -> str:
 	if _emote_enabled:
 		return base + _EMOTE_INSTRUCTION
 	return base
+
+
+# ---------------------------------------------------------------------------
+# Debounced background personalizer
+# ---------------------------------------------------------------------------
+# Runs the personalizer 60s after the user stops chatting. Each new CHAT turn
+# cancels and reschedules the timer, so the personalizer only fires during
+# inactivity. Manual /analyze is unaffected.
+_PERSONALIZER_DELAY_SECONDS = 60
+_personalizer_timer: asyncio.Task | None = None
+
+
+def _schedule_personalizer() -> None:
+	"""Schedule (or reschedule) a background personalizer run 60s from now.
+
+	Each call cancels any pending timer and starts a new one. The personalizer
+	therefore fires only after a period of inactivity — not after every turn.
+	"""
+	global _personalizer_timer
+	if _personalizer_timer is not None and not _personalizer_timer.done():
+		_personalizer_timer.cancel()
+	_personalizer_timer = asyncio.create_task(_personalizer_fire())
+
+
+async def _personalizer_fire() -> None:
+	"""Sleep for the debounce window, then run the personalizer.
+
+	Cancelled if a new CHAT turn reschedules. Swallows all exceptions so a
+	personalizer failure never surfaces to the user.
+	"""
+	try:
+		await asyncio.sleep(_PERSONALIZER_DELAY_SECONDS)
+	except asyncio.CancelledError:
+		return
+	try:
+		await _run_personalizer_on_recent()
+	except Exception as e:
+		logger.debug(f"[chat] debounced personalizer failed: {e}")
+
+
+async def _run_personalizer_on_recent() -> None:
+	"""Run the personalizer against the in-memory session _history."""
+	from db.schemas import ConversationExchange
+	from datetime import datetime
+	from skills.personalizer.skill import analyze_persona_from_log
+
+	msgs = list(_history)
+	exchanges: list[ConversationExchange] = []
+	i = 0
+	while i + 1 < len(msgs):
+		q = msgs[i]
+		a = msgs[i + 1]
+		if isinstance(q, HumanMessage) and isinstance(a, AIMessage):
+			exchanges.append(
+				ConversationExchange(
+					timestamp=datetime.now(),
+					question=q.content,
+					answer=a.content,
+				)
+			)
+		i += 2
+
+	if not exchanges:
+		return
+	logger.debug(f"[chat] debounced personalizer: running on {len(exchanges)} exchange(s)")
+	await analyze_persona_from_log(exchanges)
 
 
 # Shared rolling history of all exchanges (CHAT + wrapped skill responses).
@@ -640,6 +708,7 @@ async def handle_chat(
 		_history.append(HumanMessage(content=query))
 		_history.append(AIMessage(content=final))
 		await _safe_extract_topic(query, final)
+		_schedule_personalizer()
 		return final
 
 	# Check if query needs multi-step reasoning
@@ -659,6 +728,7 @@ async def handle_chat(
 
 		_history.append(HumanMessage(content=query))
 		_history.append(AIMessage(content=final))
+		_schedule_personalizer()
 		return final
 
 	# Compress oldest history before it gets evicted
@@ -718,6 +788,7 @@ async def handle_chat(
 
 	_history.append(HumanMessage(content=query))
 	_history.append(AIMessage(content=final))
+	_schedule_personalizer()
 
 	return final
 

@@ -17,9 +17,8 @@ from rich.text import Text
 
 from agents.action_resolver.agent import resolve_action_query
 from agents.generalist.router import generalist_route
-from agents.greeting.greeting_agent import greet
 from agents.intent_router.intent_router import route
-from skills.conversation.skill import resolve_query
+from skills.conversation.skill import generate_greeting, resolve_query
 from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
@@ -177,7 +176,8 @@ async def main(
 		},
 	)
 
-	await asyncio.to_thread(greet)
+	greeting = await generate_greeting()
+	console.print(greeting)
 
 	while True:
 		try:
