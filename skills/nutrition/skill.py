@@ -5,6 +5,7 @@ import aiohttp
 from pydantic import BaseModel
 from utils.log import logger
 
+from skills.information.skill import handle_information_query
 from skills.nutrition.nutrition_client import (
     get_recipe_by_id,
     lookup_nutrition,
@@ -96,6 +97,17 @@ def _format_by_ingredient(meals: list[dict]) -> str:
     return "\n".join(lines)
 
 
+async def _fallback_to_information(query: str, reason: str) -> str:
+    """Hand off to INFORMATION_QUERY when the nutrition/recipe APIs can't answer.
+
+    INFORMATION_QUERY has its own web-search → LLM-with-disclaimer fallback chain
+    (see skills/information/skill.py:handle_information_query), so this gives the
+    user a real answer instead of a hard 'not found' dead end.
+    """
+    logger.debug(f"[nutrition] {reason} for {query!r}, falling back to INFORMATION_QUERY")
+    return await handle_information_query(query)
+
+
 async def handle_nutrition(query: str) -> str:
     intent = _classify_intent(query)
     logger.debug(f"[nutrition] query_type={intent.query_type}, query={intent.query!r}")
@@ -112,26 +124,28 @@ async def handle_nutrition(query: str) -> str:
                     full = await get_recipe_by_id(meals[0]["idMeal"])
                     if full:
                         return _format_recipe(full)
-                return f"I couldn't find nutrition data for '{intent.query}'. Try a more specific food name."
+                return await _fallback_to_information(intent.query, "no nutrition or recipe data found")
             return _format_nutrition(data, intent.query)
 
         elif intent.query_type == "RECIPE_BY_INGREDIENTS":
             first_ingredient = intent.query.split(",")[0].strip()
             meals = await search_by_ingredient(first_ingredient)
+            if not meals:
+                return await _fallback_to_information(intent.query, "no recipes matched those ingredients")
             return _format_by_ingredient(meals)
 
         else:  # RECIPE_SEARCH
             meals = await search_recipes(intent.query)
             if not meals:
-                return f"I couldn't find a recipe for '{intent.query}'. Try a different dish name."
+                return await _fallback_to_information(intent.query, "no recipe match")
             full = await get_recipe_by_id(meals[0]["idMeal"])
             if not full:
-                return f"I found a match but couldn't load the full recipe for '{intent.query}'."
+                return await _fallback_to_information(intent.query, "matched recipe but lookup failed")
             return _format_recipe(full)
 
     except aiohttp.ClientResponseError as e:
         logger.warning(f"[nutrition] API error: {e.status} {e.message}")
-        return "The nutrition service is temporarily unavailable. Please try again in a moment."
+        return await _fallback_to_information(intent.query, f"API error {e.status}")
     except aiohttp.ClientError as e:
         logger.warning(f"[nutrition] Network error: {e}")
-        return "I couldn't reach the nutrition service. Please check your connection."
+        return await _fallback_to_information(intent.query, "network error")

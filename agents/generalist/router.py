@@ -39,6 +39,7 @@ Critical rules — apply in order, stop at first match:
 12. BARE "turn on" / "turn off" / "switch on" / "switch off" / "shut on" / "shut off", or just "on" / "off" as the entire query — with NO device, object, or location keyword and no clear media context → CHAT (ambiguous; ask what to turn on/off). The entire query must consist of just the phrase plus stopwords like "the" / "a" / "please" / "it" — any content word beyond the phrase disqualifies this rule and pushes the query to rule 11. Examples that match: "turn on" → CHAT, "turn off" → CHAT, "switch off" → CHAT, "on" → CHAT, "off" → CHAT, "turn it off" → CHAT. Examples that do NOT match (rule 11 wins): "turn the lights on" → HOME_CONTROL, "switch the lamp off" → HOME_CONTROL, "turn off the fan" → HOME_CONTROL, "turn on the bedroom" → HOME_CONTROL. This rule is strict: any noun / device / location / room name disqualifies the query from this rule.
 13. When in doubt → CHAT.
 14. Queries with a demonstrative that points at the most recent assistant turn ("what is this song called", "what is that movie about", "who made this", "how long is this one", "is this any good") → CHAT. The answer is almost always in the conversation history; searching would be wasteful and confusing. Treat the demonstrative as a strong signal that the user is asking about something the assistant just mentioned.
+15. Explicit note-taking triggers at or near the start of the query — "take a note", "take notes", "note:", "note -", "save a note", "save a note about", "add a note", "make a note", "make a note of", "jot down", "jot this down", "write down", "write this down" — → NOTES, even when the note content mentions cooking / recipes, stocks, calendar items, or any other domain-intent keyword. The note-taking prefix is a save command and takes priority over the content of the note itself. This overrides rule 4 (NUTRITION) and any other content-based domain intent. The NOTES skill's sub-classifier decides CREATE / LIST / READ / DELETE.
 
 Examples:
   history: [microsoft stock → $406, tesla stock → $450]
@@ -83,6 +84,11 @@ Examples:
   "switch the lamp off" → HOME_CONTROL  (device keyword "lamp" present, rule 11)
   "turn on" → CHAT  (bare phrase, no device keyword, rule 12)
   "turn it off" → CHAT  (bare phrase, pronoun with no resolvable device from history, rule 12)
+
+  "take a note to cook italian for my friends" → NOTES  (note trigger "take a note" prefix wins over "cook italian" content, rule 15)
+  "note: I will cook tiramisu for my friends" → NOTES  ("note:" prefix wins over "cook tiramisu" content, rule 15)
+  "save a note about my flight on Friday" → NOTES  (explicit "save a note about" trigger, rule 15)
+  "jot down: buy milk" → NOTES  (note trigger, rule 15)
 
 Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
 

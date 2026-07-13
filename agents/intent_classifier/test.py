@@ -49,6 +49,9 @@ TEST_CASES = [
 	("show my notes", "NOTES"),
 	("take a note for me", "NOTES"),
 	("read my note on Dune", "NOTES"),
+	("take a note to cook italian for my friends", "NOTES"),
+	("note: I will cook tiramisu for my friends", "NOTES"),
+	("jot down: buy milk", "NOTES"),
 	# SEARCH
 	("search hellraiser", "SEARCH"),
 	("look up Blade Runner", "SEARCH"),
