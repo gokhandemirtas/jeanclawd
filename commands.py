@@ -361,6 +361,103 @@ async def cmd_flush_memory() -> None:
         logger.error(f"flush-memory failed: {e}")
 
 
+async def cmd_apocalypse() -> None:
+    """Wipe memories, conversations, journal, and user persona — start a clean slate.
+
+    Destructive. Cannot be undone. The agent will re-learn everything from scratch
+    as new conversations are analysed.
+
+    Clears:
+      - mem0 memories (Qdrant collection `langbox_memories`)
+      - Conversations (raw daily exchanges)
+      - Journal entries (daily summaries)
+      - UserPersona document (name, location, interests, etc.)
+      - AgentPersona with persona_id="adaptive" (derived from journal)
+      - In-memory personalizer cache
+      - Session conversation history
+      - Adaptive persona in-memory state (reset to factory defaults)
+
+    Does NOT touch: notes, reminders, plans, weather cache, newsfeed, credentials,
+    preferences, voice settings, or non-adaptive agent personas.
+    """
+    try:
+        from db.schemas import UserPersona, Conversations, Journal, AgentPersona
+
+        # 1. Memories (Qdrant)
+        mem_count = 0
+        try:
+            import os
+            from qdrant_client import QdrantClient
+
+            host = os.environ.get("QDRANT_HOST", "localhost")
+            port = int(os.environ.get("QDRANT_PORT", "6333"))
+            client = QdrantClient(host=host, port=port)
+            existing = {c.name for c in client.get_collections().collections}
+            if "langbox_memories" in existing:
+                info = client.get_collection("langbox_memories")
+                mem_count = info.points_count or 0
+                client.delete_collection("langbox_memories")
+            import utils.memory_client as _mc
+            _mc._memory = None
+        except Exception as e:
+            logger.warning(f"[apocalypse] memory flush skipped: {e}")
+
+        # 2-4. MongoDB collections
+        conv_count = await Conversations.delete_all()
+        jour_count = await Journal.delete_all()
+
+        persona = await UserPersona.find_one()
+        persona_deleted = persona is not None
+        if persona:
+            await persona.delete()
+
+        adaptive = await AgentPersona.find_one(AgentPersona.persona_id == "adaptive")
+        adaptive_deleted = adaptive is not None
+        if adaptive:
+            await adaptive.delete()
+
+        # 5. In-memory caches
+        import skills.personalizer.skill as _ps
+        _ps._cached_persona_context = None
+
+        from skills.conversation.skill import _history
+        _history.clear()
+
+        # 6. Reset adaptive persona in-memory state to factory defaults
+        switched_persona = False
+        try:
+            from agents.persona import (
+                PERSONAS,
+                load_adaptive_persona,
+                set_active_persona,
+                get_active_persona_id,
+            )
+            load_adaptive_persona(
+                description=PERSONAS["adaptive"]["description"],
+                greeting_style=PERSONAS["adaptive"]["greeting_style"],
+                voice_id=None,
+            )
+            # If user is currently on adaptive, switch back to jean (the safe default)
+            if get_active_persona_id() == "adaptive":
+                set_active_persona("jean")
+                switched_persona = True
+        except Exception as e:
+            logger.warning(f"[apocalypse] adaptive persona reset skipped: {e}")
+
+        parts = []
+        if mem_count:          parts.append(f"{mem_count} memory/memories")
+        if conv_count:         parts.append(f"{conv_count} conversation day(s)")
+        if jour_count:         parts.append(f"{jour_count} journal entry/entries")
+        if persona_deleted:    parts.append("user persona")
+        if adaptive_deleted:   parts.append("adaptive persona")
+        summary = ", ".join(parts) if parts else "nothing to wipe — already clean"
+        logger.info(f"☢  Apocalypse: wiped {summary}. Clean slate.")
+        if switched_persona:
+            logger.info("Active persona was 'adaptive' — switched to 'jean'.")
+    except Exception as e:
+        logger.error(f"apocalypse failed: {e}")
+
+
 async def cmd_model(args: str) -> None:
     """Switch the active generalist model.
 
@@ -664,6 +761,7 @@ async def cmd_help() -> None:
         "  /compact-memory    — deduplicate and merge memories using the LLM\n"
         "  /pluck-memory <n>  — delete memory #n from the /memories list\n"
         "  /flush-memory      — delete all mem0 memories\n"
+        "  /apocalypse        — wipe memories, conversations, journal, and user persona\n"
         "  /ctx               — show context window usage for the current session\n"
         "  /note [title]      — save a note from the current conversation context\n"
         "  /planner <task>    — run an autonomous multi-step planning agent\n"
@@ -685,6 +783,7 @@ _COMMANDS = {
     "/compact-memory": cmd_compact_memory,
     "/pluck-memory": cmd_pluck_memory,
     "/flush-memory": cmd_flush_memory,
+    "/apocalypse": cmd_apocalypse,
     "/ctx": cmd_ctx,
     "/note": cmd_note,
     "/planner": cmd_planner,

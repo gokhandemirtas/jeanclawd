@@ -55,6 +55,31 @@ class PersonaUpdate(BaseModel):
         return None if v in (None, "", "unknown") else v
 
 
+class _FilteredInterests(BaseModel):
+    """Second-pass judge output: a list of interests that survive filtering."""
+    interests: list[str] = []
+
+
+_INTEREST_JUDGE_PROMPT = """You are filtering items extracted from a conversation to keep only genuine personal interests.
+
+A genuine personal interest is something the user themselves does, likes, enjoys, identifies with, or is passionate about as part of their identity or regular life.
+
+Drop anything that is:
+- A search query or lookup (e.g. "barber shops", "Italian restaurants near me", "plumbers in London")
+- A specific instance, place, or one-off mention
+- A location, address, or place name (unless the user explicitly says they love / are passionate about that place)
+- Something the user asked about, discussed as a topic, or wanted information about
+- A request, question, or task
+
+Original conversation:
+{context}
+
+Items the first-pass extractor flagged as interests:
+{raw_items}
+
+Return ONLY the genuine personal interests as a JSON list. Empty list [] if none pass."""
+
+
 _EXTRACT_PROMPT = """You are a silent observer analysing a conversation log between a user and their AI assistant.
 
 IMPORTANT: The assistant may be wrong or hallucinating. Only extract facts the USER themselves expressed.
@@ -65,7 +90,12 @@ Rules:
 - country: country only if explicitly mentioned.
 - occupation: job or profession only if the user states it.
 - diet: e.g. "vegan", "vegetarian", "pescatarian", "omnivore" — only if stated.
-- interests: concrete hobbies or interests the user mentioned. Empty list if none.
+- interests: concrete hobbies, pastimes, or personal preferences the user THEMSELVES
+  does, likes, enjoys, or identifies with. NOT topics they asked about, looked up, or
+  discussed as a one-off. Examples: "I'm into jazz" → "jazz"; "I love hiking" → "hiking";
+  "I asked about barber shops" → do NOT extract "barber shops"; "find me a good
+  restaurant" → do NOT extract "restaurants". Locations are not interests unless the
+  user explicitly says they love / are passionate about that place. Empty list if none.
 - music: music genres or artists the user listens to or likes (e.g. "heavy metal", "jazz", "The Beatles"). Use this field — NOT likes — for anything music-related. Empty list if none.
 - age: numeric age only if stated. null otherwise.
 - gender: only if the user explicitly states how they identify.
@@ -228,14 +258,16 @@ def _build_changes(existing, update: PersonaUpdate) -> dict:
 # ---------------------------------------------------------------------------
 
 _PERSONAL_SIGNAL = re.compile(
-    r"\b(i('m| am| was| were| have| had| work| worked| like| love| hate| enjoy| prefer|"
-    r" believe| think| feel| vote| practice| follow| play| read| watch| listen|"
-    r" speak| eat| drink| identify)|"
-    r"my (name|birthday|birth|age|job|wife|husband|partner|kids?|children|family|religion|"
-    r"faith|politics?|hobby|hobbies|interest|passion|fav(ou?rite)?|diet|language|nationality|"
-    r"education|background|degree|career|occupation)|"
-    r"i('m| am) (a |an |into |from )|born (in|on)|i don'?t (like|enjoy|eat|drink|believe|support))\b",
-    re.IGNORECASE,
+	r"\b(i('m| am| was| were| have| had| work| worked| live| lived| reside| resided|"
+	r" stay| stayed| grew| grow| like| love| hate| enjoy| prefer|"
+	r" believe| think| feel| vote| practice| follow| play| read| watch| listen|"
+	r" speak| eat| drink| identify)|"
+	r"my (name|birthday|birth|age|job|wife|husband|partner|kids?|children|family|religion|"
+	r"faith|politics?|hobby|hobbies|interest|passion|fav(ou?rite)?|diet|language|nationality|"
+	r"education|background|degree|career|occupation|home|city|town|hometown)|"
+	r"i('m| am) (a |an |into |from |in )|born (in|on)|"
+	r"i don'?t (like|enjoy|eat|drink|believe|support))\b",
+	re.IGNORECASE,
 )
 
 
@@ -255,6 +287,46 @@ def _extract_sync(log: str) -> PersonaUpdate:
         pydantic_model=PersonaUpdate,
         max_tokens=1024,
     )
+
+
+def _filter_interests_sync(raw: list[str], context: str) -> list[str]:
+    """Second-pass LLM-as-judge: keep only genuine personal interests.
+
+    The first-pass extractor sometimes confuses search queries / one-off topics
+    with genuine personal interests (e.g. extracting "barber shops" from the
+    exchange "find me a barber shop"). This pass hands the LLM the original
+    conversation context plus the raw extracted items, and asks it to return
+    only items that represent hobbies, pastimes, or personal preferences the
+    user actually does / likes / identifies with.
+
+    Safety: only items the judge returns that were in the original raw list
+    are kept, so the judge cannot introduce new items via hallucination.
+    """
+    if not raw:
+        return []
+    import os
+    from utils.llm_structured_output import generate_structured_output
+
+    prompt = _INTEREST_JUDGE_PROMPT.format(
+        context=context[:2000],
+        raw_items="\n".join(f"- {x}" for x in raw),
+    )
+    result = generate_structured_output(
+        model_name=os.environ["MODEL_GENERALIST"],
+        user_prompt=prompt,
+        system_prompt="You are a precise filter. Return only the JSON list.",
+        pydantic_model=_FilteredInterests,
+        max_tokens=256,
+    )
+    raw_lower = {x.lower() for x in raw}
+    return [x for x in result.interests if x.lower() in raw_lower]
+
+
+async def _filter_interests(raw: list[str], context: str) -> list[str]:
+    if not raw:
+        return []
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: _filter_interests_sync(raw, context))
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +356,12 @@ async def analyze_persona_from_log(exchanges: list) -> None:
 
         loop = asyncio.get_running_loop()
         update = await loop.run_in_executor(None, lambda: _extract_sync(log))
+
+        if update.interests:
+            raw_interests = list(update.interests)
+            update.interests = await _filter_interests(raw_interests, log)
+            if set(raw_interests) != set(update.interests):
+                logger.info(f"[personalizer] Interests filtered: {raw_interests} -> {update.interests}")
 
         existing = await UserPersona.find_one()
         if existing is None:
@@ -333,6 +411,12 @@ async def analyze_persona_from_memories() -> int:
 
         loop = asyncio.get_running_loop()
         update = await loop.run_in_executor(None, lambda: _extract_sync(log))
+
+        if update.interests:
+            raw_interests = list(update.interests)
+            update.interests = await _filter_interests(raw_interests, log)
+            if set(raw_interests) != set(update.interests):
+                logger.info(f"[personalizer] Interests filtered (memories): {raw_interests} -> {update.interests}")
 
         existing = await UserPersona.find_one()
         if existing is None:
