@@ -20,8 +20,9 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Label, RichLog, Static
 
 LOG_FILE_DEFAULT = Path(__file__).parent / "logs" / "app.log"
-CONTEXT_FILE = Path(__file__).parent / "logs" / "context.json"
-CONTEXT_STALE_SEC = 30.0  # hide the meter if the chat process hasn't pushed in 30s
+# Imported from utils.resource_monitor so the writer (chat process) and reader
+# (this monitor) always agree on the path, regardless of CWD.
+from utils.resource_monitor import CONTEXT_FILE  # noqa: E402
 
 # ------------------------------------------------------------------ resource helpers
 
@@ -84,25 +85,33 @@ def _resource_markup() -> str:
 		pass
 
 	# LLM context — written by utils/resource_monitor.py:push_context_to_file
-	# from the chat process. Hides the meter if the file is missing or stale
-	# (chat not running, or hasn't issued a request in 30s).
+	# from the chat process. ALWAYS rendered so the meter has a stable position
+	# in the layout. Shows last-known values (even if stale); only shows a
+	# placeholder when the file has never been written.
+	used, max_ = 0, 0
+	has_data = False
 	try:
 		if CONTEXT_FILE.exists():
-			age = time.time() - CONTEXT_FILE.stat().st_mtime
-			if age <= CONTEXT_STALE_SEC:
-				with open(CONTEXT_FILE) as f:
-					ctx = json.loads(f.read())
-				used = int(ctx.get("used", 0))
-				max_ = int(ctx.get("max", 0)) or 0
-				if max_ > 0:
-					bar = _rbar(used, max_)
-					pct = used / max_ * 100
-					lines.append("[bold cyan]Context[/bold cyan] [dim]LLM[/dim]")
-					lines.append(f"[{bar}]")
-					lines.append(f"[bold]{used:,}[/bold] / {max_:,} ({pct:.0f}%)")
-					lines.append("")
+			with open(CONTEXT_FILE) as f:
+				ctx = json.loads(f.read())
+			used = int(ctx.get("used", 0))
+			max_ = int(ctx.get("max", 0)) or 0
+			has_data = True
 	except Exception:
 		pass
+
+	lines.append("[bold cyan]Context[/bold cyan] [dim]LLM[/dim]")
+	if not has_data or max_ <= 0:
+		# Never written yet, or max unknown — empty bar with dim placeholder
+		bar = _rbar(0, 1)
+		lines.append(f"[{bar}]")
+		lines.append("[dim]— / — (waiting for chat)[/dim]")
+	else:
+		bar = _rbar(used, max_)
+		pct = used / max_ * 100
+		lines.append(f"[{bar}]")
+		lines.append(f"[bold]{used:,}[/bold] / {max_:,} ({pct:.0f}%)")
+	lines.append("")
 
 	return "\n".join(lines)
 

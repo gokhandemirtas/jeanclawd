@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from functools import lru_cache
+from pathlib import Path
 
 import psutil
 
@@ -83,31 +84,41 @@ def get_context_max() -> int | None:
   return _context_max_tokens
 
 
-CONTEXT_FILE = "logs/context.json"
+CONTEXT_FILE = Path(__file__).resolve().parent.parent / "logs" / "context.json"
 
 
 def push_context_to_file() -> None:
   """Write the current context state to logs/context.json for monitor.py to read.
 
   Uses a temp file + os.replace for atomicity so the Textual monitor (which
-  polls at 1Hz) never sees a half-written file. Failures are swallowed — the
-  meter is observability, not correctness.
+  polls at 1Hz) never sees a half-written file. The path is anchored to this
+  module's location, so it works regardless of CWD (supervisord, `uv run` from
+  a subdirectory, etc.). Failures log at WARNING so they're visible — the
+  meter is observability but the user should know if it's broken.
   """
   import json
   import tempfile
 
   try:
+    # Self-populate the max cache (lru_cache makes this free on subsequent calls)
+    # so the file always has a complete payload even if no other code path
+    # has queried the model context length yet.
+    max_tokens = get_context_max()
     payload = {
       "used": _context_used_tokens,
-      "max": _context_max_tokens,
+      "max": max_tokens,
       "ts": __import__("time").time(),
     }
-    dir_name = os.path.dirname(CONTEXT_FILE) or "."
-    fd, tmp = tempfile.mkstemp(dir=dir_name, prefix=".context.", suffix=".tmp")
+    CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+      dir=str(CONTEXT_FILE.parent),
+      prefix=".context.",
+      suffix=".tmp",
+    )
     try:
       with os.fdopen(fd, "w") as f:
         json.dump(payload, f)
-      os.replace(tmp, CONTEXT_FILE)
+      os.replace(tmp, str(CONTEXT_FILE))
     except Exception:
       try:
         os.unlink(tmp)
@@ -115,7 +126,7 @@ def push_context_to_file() -> None:
         pass
       raise
   except Exception as e:
-    logger.debug(f"[resource_monitor] context push failed: {e}")
+    logger.warning(f"[resource_monitor] context push failed: {e}")
 
 
 @lru_cache(maxsize=1)

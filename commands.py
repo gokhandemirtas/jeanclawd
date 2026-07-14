@@ -458,6 +458,43 @@ async def cmd_apocalypse() -> None:
         logger.error(f"apocalypse failed: {e}")
 
 
+async def cmd_reflect(args: str) -> None:
+    """Self-reflect on recent conversation exchanges.
+
+    Reviews the most recent N exchanges (default 3) and stores any self-critique
+    notes (routing mistakes, incomplete answers, factual errors, etc.) to the
+    `Reflections` collection. For now these are stored only — the future override
+    mechanism will retrieve high-signal reflections and inject them into the
+    router/CHAT prompts to nudge future behavior.
+
+    Usage:
+      /reflect         — review the last 3 exchanges
+      /reflect 10      — review the last 10 exchanges
+    """
+    from skills.reflection.skill import get_recent_exchanges, reflect_on_exchanges
+
+    n = 3
+    if args.strip():
+        try:
+            n = int(args.strip().split()[0])
+        except ValueError:
+            logger.info("Usage: /reflect [N]  (default N=3)")
+            return
+    n = max(1, min(n, 20))
+
+    exchanges = await get_recent_exchanges(n)
+    if not exchanges:
+        logger.info("No recent exchanges to reflect on.")
+        return
+
+    logger.info(f"Reflecting on the last {len(exchanges)} exchange(s)...")
+    saved = await reflect_on_exchanges(exchanges, source="manual /reflect")
+    if saved:
+        logger.info(f"Saved {saved} reflection(s) to the Reflections collection.")
+    else:
+        logger.info("No misfires detected — no reflections saved.")
+
+
 async def cmd_model(args: str) -> None:
     """Switch the active generalist model.
 
@@ -765,6 +802,7 @@ async def cmd_help() -> None:
         "  /ctx               — show context window usage for the current session\n"
         "  /note [title]      — save a note from the current conversation context\n"
         "  /planner <task>    — run an autonomous multi-step planning agent\n"
+        "  /reflect [N]      — self-critique the last N exchanges (default 3) and save reflections\n"
         "  /look <path> [q]   — describe an image via the VLM and inject into context\n"
         "  /help              — show this message"
     )
@@ -784,6 +822,7 @@ _COMMANDS = {
     "/pluck-memory": cmd_pluck_memory,
     "/flush-memory": cmd_flush_memory,
     "/apocalypse": cmd_apocalypse,
+    "/reflect": cmd_reflect,
     "/ctx": cmd_ctx,
     "/note": cmd_note,
     "/planner": cmd_planner,

@@ -3,6 +3,7 @@ import os
 import re
 from collections import deque
 from collections.abc import Callable
+from datetime import datetime
 
 from utils.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -428,6 +429,66 @@ async def _personalizer_fire() -> None:
 		await _run_personalizer_on_recent()
 	except Exception as e:
 		logger.debug(f"[chat] debounced personalizer failed: {e}")
+	# Piggyback the self-reflection on the same idle signal. Gated to avoid
+	# LLM cost on every 60s idle — only fires if 5+ min since last reflection
+	# AND 3+ new exchanges have happened. Skipped silently on any failure.
+	try:
+		await _maybe_reflect_on_idle()
+	except Exception as e:
+		logger.debug(f"[chat] debounced reflection failed: {e}")
+
+
+# Reflection is much more expensive than the personalizer (always an LLM call,
+# no regex pre-filter), so it needs stricter gating. The personalizer fires on
+# every 60s idle; the reflection piggybacks on that signal but only runs if
+# enough new material has accumulated since the last run.
+_REFLECTION_MIN_INTERVAL_SECONDS = 300  # 5 min between auto-reflections
+_REFLECTION_MIN_NEW_EXCHANGES = 3
+_last_reflection_at: datetime | None = None
+_last_reflection_exchange_count: int = 0
+
+
+async def _maybe_reflect_on_idle() -> None:
+	"""Run reflection if the gating conditions are met. Best-effort, never raises."""
+	global _last_reflection_at, _last_reflection_exchange_count
+
+	now = datetime.now()
+	if _last_reflection_at and (now - _last_reflection_at).total_seconds() < _REFLECTION_MIN_INTERVAL_SECONDS:
+		return
+
+	# Each exchange is 2 messages in _history (HumanMessage + AIMessage).
+	current_exchange_count = len(_history) // 2
+	new_exchanges = current_exchange_count - _last_reflection_exchange_count
+	if new_exchanges < _REFLECTION_MIN_NEW_EXCHANGES:
+		return
+
+	# Build the last 3 ConversationExchanges from _history.
+	from db.schemas import ConversationExchange
+	from skills.reflection.skill import reflect_on_exchanges
+
+	msgs = list(_history)
+	exchanges: list[ConversationExchange] = []
+	i = 0
+	while i + 1 < len(msgs):
+		q = msgs[i]
+		a = msgs[i + 1]
+		if isinstance(q, HumanMessage) and isinstance(a, AIMessage):
+			exchanges.append(
+				ConversationExchange(
+					timestamp=datetime.now(),
+					question=q.content,
+					answer=a.content,
+				)
+			)
+		i += 2
+	if not exchanges:
+		return
+	exchanges = exchanges[-3:]
+
+	logger.debug(f"[chat] auto-reflecting on {len(exchanges)} new exchange(s)")
+	await reflect_on_exchanges(exchanges, source="auto-on-idle")
+	_last_reflection_at = now
+	_last_reflection_exchange_count = current_exchange_count
 
 
 async def _run_personalizer_on_recent() -> None:

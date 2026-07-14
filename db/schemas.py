@@ -5,6 +5,7 @@ from beanie import Document
 from pydantic import BaseModel, Field
 
 NoteCategory = Literal["read", "listen", "watch", "eat", "visit"]
+ReflectionCategory = Literal["routing", "factual", "tone", "completeness", "other"]
 
 
 class HueLight(BaseModel):
@@ -83,6 +84,33 @@ class Journal(Document):
 
 	class Settings:
 		name = "Journal"
+
+
+class Reflection(Document):
+	"""Self-critique note produced by the assistant reviewing its own past responses.
+
+	Stored for the future override mechanism: high-signal reflections
+	(especially `category="routing"`) will be retrieved and injected into the
+	router/CHAT prompts to nudge future behavior. `use_count` and `last_used_at`
+	support decay — reflections that stop being relevant get deprioritised.
+
+	`embedding` is the vector representation of `lesson`, populated on save via
+	`get_provider().embed()` so the future override retrieval can do MongoDB
+	Atlas `$vectorSearch` directly against the collection.
+	"""
+
+	observation: str  # 1 sentence: what went wrong, including the user query and the wrong response
+	lesson: str  # 1-2 sentences: what to do next time, specific and actionable
+	category: ReflectionCategory
+	source_query: str  # the user query that triggered the reflection
+	source_response: str  # truncated assistant response (first 300 chars)
+	created_at: datetime
+	embedding: Optional[list[float]] = None  # vector over `lesson`, for $vectorSearch
+	use_count: int = 0  # how many times injected (populated by future override logic)
+	last_used_at: Optional[datetime] = None
+
+	class Settings:
+		name = "Reflections"
 
 
 class Note(Document):
