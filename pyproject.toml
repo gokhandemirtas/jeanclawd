@@ -45,6 +45,7 @@ dependencies = [
     "webrtcvad>=2.0.10",
     "supervisor>=4.3.0",
     "dateparser>=1.4.1",
+    "mcp[cli]>=1.0",
 ]
 
 [project.optional-dependencies]
