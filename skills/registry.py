@@ -8,11 +8,12 @@ from skills.information import information_skill
 from skills.newsfeed import newsfeed_skill
 from skills.notes import notes_skill
 from skills.reminder import reminder_skill
-from skills.search import search_skill
 from skills.spotify import spotify_skill
 from skills.transportation import transportation_skill
 from skills.nutrition import nutrition_skill
 from skills.weather import weather_skill
+from agents.search import search_skill
+from agents.planner import planner_skill
 
 # CHAT is handled directly by the conversation skill (no intermediate handler,
 # no post-processing wrap needed — handle_chat already produces final output).
@@ -36,6 +37,7 @@ SKILLS: list[Skill] = [
     notes_skill,
     search_skill,
     spotify_skill,
+    planner_skill,
     chat_skill,
 ]
 

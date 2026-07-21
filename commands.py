@@ -74,7 +74,7 @@ async def cmd_history() -> None:
 
 
 async def cmd_planner(args: str) -> None:
-    from skills.planner import run_planner
+    from agents.planner import run_planner
 
     task = args.strip()
     if not task:

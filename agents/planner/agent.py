@@ -1,4 +1,17 @@
-"""Reliable outlines-based planner — constrained tool selection loop."""
+"""Planner agent — ReAct loop that picks tools, gathers information, then synthesises a plan.
+
+Unlike the search agent, the planner has a tool registry (WEATHER, SEARCH,
+INFORMATION_QUERY, FINANCE_STOCKS, NEWSFEED, REMINDER, DONE) and delegates
+each tool call back through the Skill registry. HOME_CONTROL is intentionally
+excluded — it has real-world side effects that should not fire autonomously.
+
+The agent owns: its own system prompt, the tool descriptions, the step
+selection LLM call, the synthesis LLM call, the per-task asyncio.Lock, and
+the budget cap. The plan result is persisted to Plans collection.
+
+This module is the implementation. The Skill registration that lets the
+intent router dispatch to it lives in `__init__.py`.
+"""
 
 import asyncio
 import inspect
@@ -18,23 +31,23 @@ MAX_STEPS = 10
 # Skills exposed to the planner. HOME_CONTROL is excluded — it has real-world
 # side effects (turns lights on/off) that should not happen autonomously.
 _PLANNER_TOOLS = Literal[
-    "WEATHER",
-    "SEARCH",
-    "INFORMATION_QUERY",
-    "FINANCE_STOCKS",
-    "NEWSFEED",
-    "REMINDER",
-    "DONE",
+	"WEATHER",
+	"SEARCH",
+	"INFORMATION_QUERY",
+	"FINANCE_STOCKS",
+	"NEWSFEED",
+	"REMINDER",
+	"DONE",
 ]
 
 _TOOL_DESCRIPTIONS = {
-    "WEATHER": "Get weather forecasts and current conditions for a location",
-    "SEARCH": "Web search for any topic, person, place, product, or event",
-    "INFORMATION_QUERY": "Look up factual knowledge via Wikipedia",
-    "FINANCE_STOCKS": "Get stock prices and financial market data",
-    "NEWSFEED": "Get latest news headlines and current events",
-    "REMINDER": "Set a reminder or timer",
-    "DONE": "Stop gathering information — enough data has been collected to write the plan",
+	"WEATHER": "Get weather forecasts and current conditions for a location",
+	"SEARCH": "Web search for any topic, person, place, product, or event",
+	"INFORMATION_QUERY": "Look up factual knowledge via Wikipedia",
+	"FINANCE_STOCKS": "Get stock prices and financial market data",
+	"NEWSFEED": "Get latest news headlines and current events",
+	"REMINDER": "Set a reminder or timer",
+	"DONE": "Stop gathering information — enough data has been collected to write the plan",
 }
 
 _SELECT_TOOL_PROMPT = """You are a planning agent working step by step to complete a task.

@@ -30,7 +30,7 @@ try:
 	from prompt_toolkit.completion import WordCompleter
 
 	_completer = WordCompleter(
-		sorted(_COMMANDS.keys()) + ["/quit", "/exit", "/bye"],
+		sorted(_COMMANDS.keys()) + ["/quit"],
 		sentence=True,
 	)
 	_prompt_session: PromptSession | None = PromptSession(completer=_completer)
@@ -42,6 +42,28 @@ load_dotenv()
 console = Console()
 _spinner_console = Console(stderr=True, force_terminal=True)
 
+# Whimsical one-word "thinking" verbs that rotate while the spinner is
+# pending. Real words and made-up ones, mixed for flavour. Order is the
+# display order — it cycles from the top.
+_THINKING_WORDS: list[str] = [
+	"flummoxing",
+	"jimmijamming",
+	"bumbershooting",
+	"kerfuffling",
+	"galumphing",
+	"razzmatazzing",
+	"whirligigging",
+	"widdershining",
+	"flibbertigibbeting",
+	"thingamajigging",
+	"fribbling",
+	"fudgulating",
+	"boggling",
+	"coggling",
+	"mumbojumboing",
+]
+_WORD_INTERVAL_S = 2.0
+
 
 class _ProgressSpinner:
 	"""Threaded progress spinner that renders to stderr.
@@ -51,9 +73,14 @@ class _ProgressSpinner:
 	`rich.live.Live` context has fully exited and the spinner line is
 	cleared — safe to call from a callback right before writing the first
 	token to stdout, with no garbled output.
+
+	Without an explicit `message`, the spinner text rotates through a list
+	of whimsical "thinking" verbs, changing every `_WORD_INTERVAL_S`
+	seconds. Pass a `message` to use a static label instead (for call
+	sites that need a specific status).
 	"""
 
-	def __init__(self, message: str = "Thinking…") -> None:
+	def __init__(self, message: str | None = None) -> None:
 		self._message = message
 		self._stop_event = threading.Event()
 		self._thread: threading.Thread | None = None
@@ -66,9 +93,23 @@ class _ProgressSpinner:
 		self._thread.start()
 
 	def _spin(self) -> None:
-		spinner = Spinner("dots", text=Text(self._message, style="dim"))
-		with Live(spinner, console=_spinner_console, transient=True):
-			self._stop_event.wait()
+		def _renderable(idx: int) -> Spinner:
+			if self._message is not None:
+				word = self._message
+			else:
+				word = _THINKING_WORDS[idx % len(_THINKING_WORDS)]
+			return Spinner("dots", text=Text(word, style="dim"))
+
+		idx = 0
+		with Live(
+			_renderable(idx),
+			console=_spinner_console,
+			transient=True,
+			refresh_per_second=10,
+		) as live:
+			while not self._stop_event.wait(_WORD_INTERVAL_S):
+				idx += 1
+				live.update(_renderable(idx))
 
 	def stop(self) -> None:
 		self._stop_event.set()
@@ -211,7 +252,7 @@ async def main(
 			if not user_input:
 				continue
 			if user_input.startswith("/"):
-				if user_input in ("/quit", "/exit", "/bye"):
+				if user_input in ("/quit",):
 					console.print("\nGoodbye! Have a great day!")
 					break
 				await handle_command(user_input)

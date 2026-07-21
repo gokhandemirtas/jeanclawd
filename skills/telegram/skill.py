@@ -71,7 +71,7 @@ async def _process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, use
 
     try:
         if user_text.startswith("@planner"):
-            from skills.planner import run_planner
+            from agents.planner import run_planner
             task = user_text[len("@planner"):].strip()
             if not task:
                 await update.message.reply_text("Please provide a task. Example: @planner check the weather and set a reminder for 8am")

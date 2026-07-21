@@ -1,13 +1,26 @@
+"""Search agent — LLM-driven entry point for SEARCH intent.
+
+Two modes:
+  - Quick search: Wikipedia with web_search fallback, single-shot.
+  - Deep research: ReAct loop (see deep_research.py) that lets the model decide
+    when it has enough information to answer comprehensively.
+
+The quick path is a deterministic two-step lookup; the deep path is a true
+agent with its own state, tool calls, and step budget. Both live here because
+the dispatch key is the same (SEARCH intent) and the model decides between
+them based on the user's phrasing.
+"""
+
 import asyncio
 import os
 import re
 
 from pydantic import BaseModel
 
+from agents.search.deep_research import deep_research
 from utils.llm_structured_output import generate_structured_output
 from utils.log import logger
 from utils.search import search_wikipedia, web_search
-from skills.search.deep_research import deep_research
 
 _DEEP_RESEARCH_TRIGGERS = {
 	"research",
@@ -86,7 +99,7 @@ def _is_deep_research(query: str) -> bool:
 	return any(trigger in q for trigger in _DEEP_RESEARCH_TRIGGERS)
 
 
-async def handle_search(query: str) -> str:
+async def run_search(query: str) -> str:
 	from skills.conversation.skill import get_current_topic
 
 	topic_hint = get_current_topic() or ""

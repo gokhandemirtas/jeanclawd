@@ -419,8 +419,8 @@ async def web_search(query: str) -> str:
     Args:
         query: Natural language search query.
     """
-    from skills.search.skill import handle_search
-    return await handle_search(query)
+    from agents.search import run_search
+    return await run_search(query)
 
 
 @mcp.tool()
@@ -433,8 +433,8 @@ async def deep_research(query: str) -> str:
     Args:
         query: The topic to research in depth.
     """
-    from skills.search.skill import handle_search
-    return await handle_search(f"research {query}")
+    from agents.search import run_search
+    return await run_search(f"research {query}")
 
 
 @mcp.tool()
@@ -499,7 +499,7 @@ async def plan(task: str) -> str:
     Args:
         task: Description of the task to plan (e.g. "plan a weekend trip to Paris", "organize my work week").
     """
-    from skills.planner.skill import run_planner
+    from agents.planner import run_planner
     return await run_planner(task)
 
 

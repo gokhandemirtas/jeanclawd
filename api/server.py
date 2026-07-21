@@ -56,7 +56,7 @@ async def handle_query(request: web.Request) -> web.Response:
 			return web.json_response(
 				{"error": "task is required. Usage: /planner <task>"}, status=400
 			)
-		from skills.planner import run_planner
+		from agents.planner import run_planner
 
 		response = await run_planner(task)
 		return web.json_response({"response": response})
@@ -123,7 +123,7 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 					queue.put_nowait({"stage": "error", "error": "task is required"})
 					return
 				on_status("Building your plan")
-				from skills.planner import run_planner
+				from agents.planner import run_planner
 
 				response = await run_planner(task)
 			else:
