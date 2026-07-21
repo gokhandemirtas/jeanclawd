@@ -744,6 +744,34 @@ async def cmd_persona(args: str) -> None:
     )
 
 
+_NEWS_LENGTHS: tuple[str, ...] = ("short", "medium", "long")
+
+
+async def cmd_news_length(args: str) -> None:
+    """Set how detailed the news briefing should be.
+
+    Usage:
+      /news-length              — show current setting and available options
+      /news-length <short|medium|long>
+    """
+    from db.preferences import get_preferences, update_preferences
+
+    target = args.strip().lower()
+    if not target:
+        prefs = await get_preferences()
+        options = " | ".join(_NEWS_LENGTHS)
+        logger.info(f"News length: {prefs.newsLength}  (options: {options})")
+        return
+
+    if target not in _NEWS_LENGTHS:
+        options = " | ".join(_NEWS_LENGTHS)
+        logger.info(f"Unknown length '{target}'. Options: {options}")
+        return
+
+    await update_preferences(newsLength=target)
+    logger.info(f"News length → {target}  (saved)")
+
+
 async def cmd_look(args: str) -> None:
     """Describe an image via the VLM and inject the description into conversation context."""
     from utils.vlm import describe_image
@@ -792,6 +820,7 @@ async def cmd_help() -> None:
         "  /analyze           — extract personal facts from this session into your persona profile\n"
         "  /persona [id] [v]  — switch persona and voice; 'adaptive' evolves from your journal history\n"
         "  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
+        "  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
         "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
         "  /connect <service> — authenticate a service (spotify | hue)\n"
         "  /memories [q]      — list all mem0 memories, or search with a query\n"
@@ -815,6 +844,7 @@ _COMMANDS = {
     "/analyze": cmd_analyze,
     "/persona": cmd_persona,
     "/voice": cmd_voice,
+    "/news-length": cmd_news_length,
     "/model": cmd_model,
     "/connect": cmd_connect,
     "/memories": cmd_memories,

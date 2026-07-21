@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from db.schemas import Preferences, UserPersona
 from utils.log import logger
@@ -41,6 +41,7 @@ async def update_preferences(
     agentPersona: Optional[str] = None,
     agentVoiceId: Optional[str] = None,
     favSpotifyDevice: Optional[str] = None,
+    newsLength: Optional[Literal["short", "medium", "long"]] = None,
 ) -> Preferences:
     persona = await _get_persona()
     current = persona.preferences
@@ -48,6 +49,7 @@ async def update_preferences(
         agentPersona=agentPersona if agentPersona is not None else current.agentPersona,
         agentVoiceId=agentVoiceId if agentVoiceId is not None else current.agentVoiceId,
         favSpotifyDevice=favSpotifyDevice if favSpotifyDevice is not None else current.favSpotifyDevice,
+        newsLength=newsLength if newsLength is not None else current.newsLength,
     )
     persona.last_updated = datetime.now()
     await persona.save()

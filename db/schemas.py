@@ -145,6 +145,7 @@ class Preferences(BaseModel):
 	agentPersona: str = "jean"
 	agentVoiceId: str = "azelma"
 	favSpotifyDevice: Optional[str] = None
+	newsLength: Literal["short", "medium", "long"] = "medium"
 
 
 class UserPersona(Document):
