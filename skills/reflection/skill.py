@@ -118,12 +118,12 @@ async def reflect_on_exchanges(
             created_at=datetime.now(),
             embedding=embedding,
         )
-		try:
-			await doc.insert()
-			saved += 1
-			logger.debug(
-				f"[reflection] saved [{item.category}]: {item.observation[:100]}"
-			)
+        try:
+            await doc.insert()
+            saved += 1
+            logger.debug(
+                f"[reflection] saved [{item.category}]: {item.observation[:100]}"
+            )
         except Exception as e:
             logger.warning(f"[reflection] insert failed: {e}")
 
