@@ -23,7 +23,7 @@ from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
 from utils.boot_info import boot, check_inference
-from utils.task_queue import enqueue, pending_count, drain, worker
+from utils.task_queue import drain, enqueue, pending_count, worker
 
 try:
 	from prompt_toolkit import PromptSession
@@ -196,9 +196,9 @@ async def main(
 		sys.exit(1)
 
 	from db.preferences import apply_preferences
-	from skills.personalizer import start_personalizer
 	await apply_preferences()
-	await start_personalizer()
+	from utils.memory_service import start_memory_worker
+	start_memory_worker()
 
 	from agents.persona import get_active_persona_id, get_active_voice_id
 	boot(
@@ -270,24 +270,28 @@ async def main(
 
 				loop = asyncio.get_running_loop()
 				done: asyncio.Future[str] = loop.create_future()
+				resolved_intent: str | None = None
 
 				async def _queued_generate() -> None:
+					nonlocal resolved_intent
 					from skills.conversation.skill import get_recent_history, consume_pending_intent
+					from utils.inference_gate import foreground_inference
 					try:
-						effective_query = await resolve_query(user_input)
-						effective_query = await resolve_action_query(effective_query)
-						from skills.conversation.skill import set_pending_intent
-						pending = consume_pending_intent()
-						if pending:
-							logger.debug(f"[router] pending intent lock: {pending}")
-							intent = pending
-							confidence = 1.0
-						else:
-							intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
-							if confidence < 0.75 and intent != "CHAT":
-								logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
-								intent = "CHAT"
-						result = await route(intent, effective_query, on_token=on_token)
+						async with foreground_inference():
+							effective_query = await resolve_query(user_input)
+							effective_query = await resolve_action_query(effective_query)
+							pending = consume_pending_intent()
+							if pending:
+								logger.debug(f"[router] pending intent lock: {pending}")
+								intent = pending
+								confidence = 1.0
+							else:
+								intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
+								if confidence < 0.75 and intent != "CHAT":
+									logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
+									intent = "CHAT"
+							resolved_intent = intent
+							result = await route(intent, effective_query, on_token=on_token)
 						if not done.done():
 							done.set_result(result)
 					except Exception as e:
@@ -308,7 +312,8 @@ async def main(
 					logger.info(response)
 					logger.newline()
 
-			enqueue("journal", _journal(user_input, response))
+			# Interaction persistence is cheap and must not depend on the old queue.
+			await _record_interaction(user_input, response, intent=resolved_intent)
 
 			if speak:
 				from tts.tts import speak as tts_speak, active_voice_id
@@ -340,9 +345,9 @@ async def main(
 			console.print("\nSorry, I encountered an error. Let's try again.\n")
 
 
-async def _journal(question: str, answer: str) -> None:
-	from skills.journal import append_to_journal
-	await append_to_journal(question, answer)
+async def _record_interaction(question: str, answer: str, *, intent: str | None = None) -> None:
+	from utils.memory_service import record_interaction
+	await record_interaction(question, answer, intent=intent)
 
 
 def _keepalive_loop(forwarded_args: list[str]) -> None:

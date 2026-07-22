@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from db.schemas import Weather
 from skills.weather.prompts import weatherIntentPrompt
-from skills.weather.weather_client import WeatherForecast, fetch_weather_forecast
+from skills.weather.weather_client import fetch_weather_forecast
 from utils.llm_structured_output import generate_structured_output
 
 
@@ -110,11 +110,11 @@ async def handle_weather(query: str) -> str:
 
   if location == "unknown_location" or not location:
     try:
-      from db.schemas import UserPersona
-      persona = await UserPersona.find_one()
-      if persona and persona.location:
-        location = persona.location
-        logger.debug(f"[weather] No location in query — falling back to persona location: {location}")
+      from utils.memory_service import get_fact_value
+      saved_location = await get_fact_value("location")
+      if saved_location:
+        location = saved_location
+        logger.debug(f"[weather] No location in query — falling back to saved location: {location}")
       else:
         return "I'd be happy to check the weather for you! Which location would you like the forecast for?"
     except Exception:

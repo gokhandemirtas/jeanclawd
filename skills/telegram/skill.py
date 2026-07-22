@@ -72,11 +72,16 @@ async def _process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, use
     try:
         if user_text.startswith("@planner"):
             from agents.planner import run_planner
+            from utils.inference_gate import foreground_inference
+            from utils.memory_service import record_interaction
+
             task = user_text[len("@planner"):].strip()
             if not task:
                 await update.message.reply_text("Please provide a task. Example: @planner check the weather and set a reminder for 8am")
                 return
-            response = await run_planner(task)
+            async with foreground_inference():
+                response = await run_planner(task)
+            await record_interaction(task, response, intent="PLANNER")
         else:
             response = await run_intent_classifier(user_text)
 

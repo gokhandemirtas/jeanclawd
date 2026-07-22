@@ -1,56 +1,51 @@
-from datetime import datetime
 from typing import Literal, Optional
 
-from db.schemas import Preferences, UserPersona
+from db.schemas import UserSettings
 from utils.log import logger
 
 
-async def _get_persona() -> UserPersona:
-    persona = await UserPersona.find_one()
-    if persona is None:
-        persona = UserPersona(last_updated=datetime.now())
-        await persona.insert()
-    return persona
+async def _get_settings() -> UserSettings:
+	settings = await UserSettings.find_one(UserSettings.user_id == "default")
+	if settings is None:
+		settings = UserSettings()
+		await settings.insert()
+	return settings
 
 
-async def get_preferences() -> Preferences:
-    persona = await _get_persona()
-    return persona.preferences
+async def get_preferences() -> UserSettings:
+	return await _get_settings()
 
 
 async def apply_preferences() -> None:
-    """Load stored preferences and apply active persona and voice at startup."""
-    try:
-        prefs = await get_preferences()
+	"""Apply explicit runtime settings at startup."""
+	try:
+		settings = await _get_settings()
+		from agents.persona import set_active_persona
+		from tts.tts import set_active_voice_id
 
-        from agents.adaptive_persona import load_adaptive_persona_from_db
-        await load_adaptive_persona_from_db()
-
-        from agents.persona import set_active_persona
-        set_active_persona(prefs.agentPersona)
-
-        from tts.tts import set_active_voice_id
-        set_active_voice_id(prefs.agentVoiceId)
-
-        logger.debug(f"[preferences] Applied persona={prefs.agentPersona} voice={prefs.agentVoiceId}")
-    except Exception as e:
-        logger.warning(f"[preferences] Could not apply preferences: {e}")
+		set_active_persona(settings.agent_persona)
+		set_active_voice_id(settings.agent_voice_id)
+		logger.debug(
+			f"[preferences] Applied persona={settings.agent_persona} voice={settings.agent_voice_id}"
+		)
+	except Exception as exc:
+		logger.warning(f"[preferences] Could not apply preferences: {exc}")
 
 
 async def update_preferences(
-    agentPersona: Optional[str] = None,
-    agentVoiceId: Optional[str] = None,
-    favSpotifyDevice: Optional[str] = None,
-    newsLength: Optional[Literal["short", "medium", "long"]] = None,
-) -> Preferences:
-    persona = await _get_persona()
-    current = persona.preferences
-    persona.preferences = Preferences(
-        agentPersona=agentPersona if agentPersona is not None else current.agentPersona,
-        agentVoiceId=agentVoiceId if agentVoiceId is not None else current.agentVoiceId,
-        favSpotifyDevice=favSpotifyDevice if favSpotifyDevice is not None else current.favSpotifyDevice,
-        newsLength=newsLength if newsLength is not None else current.newsLength,
-    )
-    persona.last_updated = datetime.now()
-    await persona.save()
-    return persona.preferences
+	agent_persona: Optional[str] = None,
+	agent_voice_id: Optional[str] = None,
+	fav_spotify_device: Optional[str] = None,
+	news_length: Optional[Literal["short", "medium", "long"]] = None,
+) -> UserSettings:
+	settings = await _get_settings()
+	if agent_persona is not None:
+		settings.agent_persona = agent_persona
+	if agent_voice_id is not None:
+		settings.agent_voice_id = agent_voice_id
+	if fav_spotify_device is not None:
+		settings.fav_spotify_device = fav_spotify_device
+	if news_length is not None:
+		settings.news_length = news_length
+	await settings.save()
+	return settings

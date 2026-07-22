@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +47,7 @@ async def resolve_action_query(user_input: str) -> str:
     """
     import os
 
-    from utils.memory_client import search_memories
+    from utils.memory_service import search_relevant_memories
     from utils.llm_structured_output import generate_structured_output
 
     if not _ACTION_PREFIX.search(user_input.strip()):
@@ -61,7 +60,7 @@ async def resolve_action_query(user_input: str) -> str:
     pref_type = match.group(1)  # e.g. "band", "genre", "artist"
     memory_query = f"favourite {pref_type}"
 
-    memories = await asyncio.to_thread(search_memories, memory_query, limit=3)
+    memories = await search_relevant_memories(memory_query, limit=3)
     if not memories:
         logger.debug(f"[action_resolver] no memory for '{memory_query}' — passing through")
         return user_input

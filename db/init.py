@@ -2,26 +2,24 @@ import asyncio
 import os
 
 from beanie import init_beanie
-from utils.log import logger
 from pymongo import AsyncMongoClient
 
 from db.schemas import (
-  AgentPersona,
-  Conversations,
   Credentials,
   HueConfiguration,
-  Journal,
+  Interaction,
+  MemoryFact,
+  MemoryWorkItem,
   Newsfeed,
   Note,
   Plans,
-  Reflection,
   Reminders,
   ServiceCredentials,
-  UserPersona,
+  UserSettings,
   Weather,
 )
 
-collections = [AgentPersona, Conversations, Credentials, HueConfiguration, Journal, Newsfeed, Note, Plans, Reflection, Reminders, ServiceCredentials, UserPersona, Weather]
+collections = [Credentials, HueConfiguration, Interaction, MemoryFact, MemoryWorkItem, Newsfeed, Note, Plans, Reminders, ServiceCredentials, UserSettings, Weather]
 
 
 async def db_init() -> str | None:

@@ -95,7 +95,7 @@ async def _fetch_news() -> str:
 async def handle_newsfeed(query: str) -> str:
   """Handle newsfeed queries by fetching and presenting BBC daily headlines."""
   prefs = await get_preferences()
-  length: Literal["short", "medium", "long"] = prefs.newsLength
+  length: Literal["short", "medium", "long"] = prefs.news_length
   max_tokens = _NEWS_LENGTH_MAX_TOKENS[length]
 
   with Live(Spinner("dots", text=Text("fetching news...", style="dim")), console=_console, transient=True):

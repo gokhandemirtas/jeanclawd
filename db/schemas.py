@@ -5,7 +5,6 @@ from beanie import Document
 from pydantic import BaseModel, Field
 
 NoteCategory = Literal["read", "listen", "watch", "eat", "visit"]
-ReflectionCategory = Literal["routing", "factual", "tone", "completeness", "other"]
 
 
 class HueLight(BaseModel):
@@ -65,52 +64,52 @@ class Plans(Document):
 	plan: str
 
 
-class ConversationExchange(BaseModel):
-	timestamp: datetime
-	question: str
-	answer: str
-
-
-class Conversations(Document):
-	date: date
-	exchanges: list[ConversationExchange] = []
-	compacted: Optional[str] = None
-	compact_status: Literal["idle", "pending", "complete", "error"] = "idle"
-
-
-class Journal(Document):
-	datestamp: date
-	summary: str
-
-	class Settings:
-		name = "Journal"
-
-
-class Reflection(Document):
-	"""Self-critique note produced by the assistant reviewing its own past responses.
-
-	Stored for the future override mechanism: high-signal reflections
-	(especially `category="routing"`) will be retrieved and injected into the
-	router/CHAT prompts to nudge future behavior. `use_count` and `last_used_at`
-	support decay — reflections that stop being relevant get deprioritised.
-
-	`embedding` is the vector representation of `lesson`, populated on save via
-	`get_provider().embed()` so the future override retrieval can do MongoDB
-	Atlas `$vectorSearch` directly against the collection.
-	"""
-
-	observation: str  # 1 sentence: what went wrong, including the user query and the wrong response
-	lesson: str  # 1-2 sentences: what to do next time, specific and actionable
-	category: ReflectionCategory
-	source_query: str  # the user query that triggered the reflection
-	source_response: str  # truncated assistant response (first 300 chars)
+class Interaction(Document):
+	"""Immutable record of one completed user/assistant turn."""
+	user_id: str = "default"
+	session_id: str = "default"
 	created_at: datetime
-	embedding: Optional[list[float]] = None  # vector over `lesson`, for $vectorSearch
-	use_count: int = 0  # how many times injected (populated by future override logic)
-	last_used_at: Optional[datetime] = None
+	user_message: str
+	assistant_message: str
+	intent: Optional[str] = None
 
 	class Settings:
-		name = "Reflections"
+		name = "Interactions"
+
+
+MemoryNamespace = Literal["identity", "preference", "interest", "relationship", "context"]
+MemoryStatus = Literal["active", "superseded", "forgotten"]
+MemoryWorkStatus = Literal["pending", "processing", "complete", "error"]
+
+
+class MemoryFact(Document):
+	"""A curated, attributable fact used for cross-session recall."""
+	user_id: str = "default"
+	namespace: MemoryNamespace
+	key: str
+	value: str
+	confidence: float = 0.8
+	source_interaction_ids: list[str] = Field(default_factory=list)
+	status: MemoryStatus = "active"
+	first_observed_at: datetime
+	last_confirmed_at: datetime
+	expires_at: Optional[datetime] = None
+
+	class Settings:
+		name = "MemoryFacts"
+
+
+class MemoryWorkItem(Document):
+	"""Durable outbox item for deferred memory extraction."""
+	user_id: str = "default"
+	interaction_id: str
+	created_at: datetime
+	status: MemoryWorkStatus = "pending"
+	attempts: int = 0
+	error: Optional[str] = None
+
+	class Settings:
+		name = "MemoryWorkItems"
 
 
 class Note(Document):
@@ -123,125 +122,13 @@ class Note(Document):
 		name = "Notes"
 
 
-class AgentPersona(Document):
-	"""Evolved agent persona synthesised from journal history. One document per persona_id."""
-
-	persona_id: str = "adaptive"
-	description: str
-	greeting_style: str
-	voice_id: Optional[str] = None
-	last_evolved: datetime
-	journal_count: int = 0
+class UserSettings(Document):
+	"""Explicit application settings, deliberately separate from learned memory."""
+	user_id: str = "default"
+	agent_persona: str = "jean"
+	agent_voice_id: str = "azelma"
+	fav_spotify_device: Optional[str] = None
+	news_length: Literal["short", "medium", "long"] = "medium"
 
 	class Settings:
-		name = "AgentPersona"
-
-
-class VoiceSettings(Document):
-	active_voice_id: str = "azelma"
-
-
-class Preferences(BaseModel):
-	agentPersona: str = "jean"
-	agentVoiceId: str = "azelma"
-	favSpotifyDevice: Optional[str] = None
-	newsLength: Literal["short", "medium", "long"] = "medium"
-
-
-class UserPersona(Document):
-	last_updated: datetime
-	preferences: Preferences = Field(default_factory=Preferences)
-
-	# Tier 1 — ask freely
-	name: Optional[str] = Field(
-		default=None,
-		json_schema_extra={"tier": 1, "question": "what's your name, by the way?"},
-	)
-	location: Optional[str] = Field(
-		default=None,
-		json_schema_extra={"tier": 1, "question": "whereabouts are you based?"},
-	)
-	country: Optional[str] = Field(
-		default=None, json_schema_extra={"tier": 1, "question": "which country are you in?"}
-	)
-	occupation: Optional[str] = Field(
-		default=None, json_schema_extra={"tier": 1, "question": "what do you do for work?"}
-	)
-	diet: Optional[str] = Field(
-		default=None,
-		json_schema_extra={"tier": 1, "question": "do you follow any particular diet?"},
-	)
-	interests: list[str] = Field(
-		default_factory=list,
-		json_schema_extra={
-			"tier": 1,
-			"question": "what are your main hobbies or interests?",
-		},
-	)
-	music: list[str] = Field(
-		default_factory=list,
-		json_schema_extra={
-			"tier": 1,
-			"question": "what type of music tickles your ears?",
-		},
-	)
-
-	# Tier 2 — ask after some rapport
-	age: Optional[int] = Field(
-		default=None,
-		json_schema_extra={
-			"tier": 2,
-			"question": "roughly how old are you, if you don't mind me asking?",
-		},
-	)
-	gender: Optional[str] = Field(
-		default=None,
-		json_schema_extra={"tier": 2, "question": "how do you identify, gender-wise?"},
-	)
-	relationship_status: Optional[str] = Field(
-		default=None,
-		json_schema_extra={
-			"tier": 2,
-			"question": "are you in a relationship or living solo these days?",
-		},
-	)
-	has_children: Optional[bool] = Field(
-		default=None, json_schema_extra={"tier": 2, "question": "do you have any kids?"}
-	)
-	languages: list[str] = Field(
-		default_factory=list,
-		json_schema_extra={"tier": 2, "question": "what languages do you speak?"},
-	)
-	nationality: Optional[str] = Field(
-		default=None, json_schema_extra={"tier": 2, "question": "what's your nationality?"}
-	)
-
-	# Tier 3 — ask only when naturally relevant
-	political_leaning: Optional[str] = Field(
-		default=None,
-		json_schema_extra={
-			"tier": 3,
-			"question": "how would you describe your political views, if you're comfortable sharing?",
-		},
-	)
-	religion: Optional[str] = Field(
-		default=None,
-		json_schema_extra={
-			"tier": 3,
-			"question": "do you follow any religion or spiritual practice?",
-		},
-	)
-	education: Optional[str] = Field(
-		default=None,
-		json_schema_extra={"tier": 3, "question": "what's your educational background?"},
-	)
-
-	# Tier 0 — inferred from conversation, never directly asked
-	communication_style: Optional[str] = Field(
-		default=None, json_schema_extra={"tier": 0}
-	)
-	character_traits: list[str] = Field(
-		default_factory=list, json_schema_extra={"tier": 0}
-	)
-	likes: list[str] = Field(default_factory=list, json_schema_extra={"tier": 0})
-	dislikes: list[str] = Field(default_factory=list, json_schema_extra={"tier": 0})
+		name = "UserSettings"

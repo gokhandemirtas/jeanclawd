@@ -1,19 +1,9 @@
-"""Built-in slash commands for the assistant CLI.
-
-Available commands:
-  /save           — summarise the current session
-  /clear          — wipe the in-memory conversation history
-  /history        — print the current session history to the terminal
-  /analyze        — extract personal facts from this session into your persona profile
-  /planner <task> — run an autonomous multi-step planning agent
-  /help           — list available commands
-"""
+"""Built-in slash commands for the assistant CLI."""
 
 import asyncio
 
 from utils.log import logger
 
-from agents.persona import get_active_identity
 from skills.conversation.skill import _history
 
 # ---------------------------------------------------------------------------
@@ -36,30 +26,6 @@ def _format_history() -> str:
 # Command implementations
 # ---------------------------------------------------------------------------
 
-async def cmd_save() -> None:
-    if not _history:
-        logger.info("Nothing to save — conversation history is empty.")
-        return
-
-    history_text = _format_history()
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-    from skills.conversation.skill import _get_llm
-
-    llm = _get_llm()
-    summary_prompt = (
-        f"{get_active_identity()} Summarise the following conversation between you and the user. "
-        "Write in first person — 'I told the user...', 'the user asked me...'. "
-        "Capture the key topics discussed and any conclusions or answers given. Be concise."
-    )
-    response = await llm.ainvoke([
-        SystemMessage(content=summary_prompt),
-        HumanMessage(content=history_text),
-    ])
-    summary = response.content.strip()
-    logger.info(f"Summary:\n{summary}")
-
-
 async def cmd_clear() -> None:
     _history.clear()
     logger.info("Conversation history cleared.")
@@ -75,6 +41,8 @@ async def cmd_history() -> None:
 
 async def cmd_planner(args: str) -> None:
     from agents.planner import run_planner
+    from utils.inference_gate import foreground_inference
+    from utils.memory_service import record_interaction
 
     task = args.strip()
     if not task:
@@ -82,76 +50,10 @@ async def cmd_planner(args: str) -> None:
         return
 
     logger.info(f"Running agent on: {task}")
-    response = await run_planner(task)
+    async with foreground_inference():
+        response = await run_planner(task)
+    await record_interaction(task, response, intent="PLANNER")
     logger.info(response)
-
-
-async def cmd_analyze() -> None:
-    from skills.personalizer.skill import analyze_persona_from_log, analyze_persona_from_memories, get_persona_context
-    from skills.journal.compact import compact_conversations
-    from skills.journal.journal_writer import write_journal_entry
-    from db.schemas import Conversations, Journal
-
-    all_docs = await Conversations.find_all().to_list()
-
-    # Step 1: build user persona from all raw conversation exchanges
-    all_exchanges = [ex for doc in all_docs if doc.exchanges for ex in doc.exchanges]
-    if all_exchanges:
-        logger.info(f"Building user persona from {len(all_exchanges)} exchange(s) across {len(all_docs)} day(s)…")
-        await analyze_persona_from_log(all_exchanges)
-    else:
-        logger.info("No conversation exchanges found.")
-
-    # Step 2: build user persona from mem0 memories (fills remaining gaps)
-    logger.info("Analysing mem0 memories for persona gaps…")
-    mem_updates = await analyze_persona_from_memories()
-    if mem_updates:
-        logger.info(f"Memory pass filled {mem_updates} additional field(s).")
-    else:
-        logger.info("Memory pass found nothing new.")
-
-    # Step 3: compact any uncompacted days
-    uncompacted = [d for d in all_docs if d.exchanges and d.compact_status != "complete"]
-    if uncompacted:
-        logger.info(f"Compacting {len(uncompacted)} day(s)…")
-        for doc in uncompacted:
-            try:
-                await compact_conversations(doc.date)
-                logger.info(f"  ✓ {doc.date} ({len(doc.exchanges)} exchange(s))")
-            except Exception as e:
-                logger.warning(f"  ✗ {doc.date}: {e}")
-    else:
-        logger.info("All days already compacted.")
-
-    # Step 4: write journal entries for compacted days that don't have one yet
-    all_docs = await Conversations.find_all().to_list()
-    existing_journal_dates = {e.datestamp for e in await Journal.find_all().to_list()}
-    needs_journal = [d for d in all_docs if d.compacted and d.date not in existing_journal_dates]
-    if needs_journal:
-        logger.info(f"Writing {len(needs_journal)} journal entry/entries…")
-        for doc in needs_journal:
-            try:
-                await write_journal_entry(doc.date)
-                logger.info(f"  ✓ Journal written for {doc.date}")
-            except Exception as e:
-                logger.warning(f"  ✗ Journal failed for {doc.date}: {e}")
-    else:
-        logger.info("All compacted days already have journal entries.")
-
-    # Step 5: synthesise the Adaptive persona from the full journal history
-    from agents.adaptive_persona import evolve_adaptive_persona
-    logger.info("Synthesising adaptive persona from journal history…")
-    evolved = await evolve_adaptive_persona()
-    if evolved:
-        logger.info("Adaptive persona updated. Switch to it with: /persona adaptive")
-    else:
-        logger.info("Adaptive persona not updated (not enough journal entries or synthesis failed).")
-
-    context = get_persona_context()
-    if context:
-        logger.info(f"Done.\n{context}")
-    else:
-        logger.info("Done. No personal facts found.")
 
 
 async def cmd_ctx() -> None:
@@ -234,265 +136,71 @@ async def cmd_note(args: str) -> None:
 
 
 async def cmd_memories(args: str) -> None:
-    """List or search mem0 memories.
+    """List or search canonical user memories.
 
     Usage:
       /memories           — list all stored memories
       /memories <query>   — semantic search for relevant memories
     """
     try:
-        from utils.memory_client import _get_memory, search_memories
+        from utils.memory_service import list_memories
 
         query = args.strip()
-        if query:
-            results = search_memories(query, limit=10)
-            if not results:
-                logger.info(f"No memories found for '{query}'.")
-                return
-            lines = "\n".join(f"  {i}. {text}" for i, text in enumerate(results, 1))
-            logger.info(f"Top memories for '{query}':\n{lines}")
-        else:
-            mem = _get_memory()
-            raw = mem.get_all(filters={"user_id": "default"}, top_k=1000)
-            results = raw.get("results", raw) if isinstance(raw, dict) else raw
-            if not results:
-                logger.info("No memories stored yet.")
-                return
-            lines = "\n".join(
-                f"  {i}. {r.get('memory') or r.get('text') if isinstance(r, dict) else str(r)}"
-                for i, r in enumerate(results, 1)
-            )
-            logger.info(f"{len(results)} stored memory/memories:\n{lines}")
+        results = await list_memories(query)
+        if not results:
+            logger.info(f"No memories found{f' for {query!r}' if query else ''}.")
+            return
+        lines = "\n".join(
+            f"  {str(item.id)[:8]}  {item.key}: {item.value} [{item.namespace}]"
+            for item in results
+        )
+        logger.info(f"{len(results)} active memory fact(s):\n{lines}")
     except Exception as e:
         logger.error(f"memories failed: {e}")
 
 
-async def cmd_pluck_memory(args: str) -> None:
-    """Delete a single memory by its list number.
-
-    Usage:
-      /pluck-memory 13   — delete memory #13 from /memories output
-    """
+async def cmd_forget(args: str) -> None:
+    """Mark one canonical fact as forgotten using its ID prefix."""
     try:
-        from utils.memory_client import _get_memory
+        from db.schemas import MemoryFact
 
-        arg = args.strip()
-        if not arg.isdigit():
-            logger.info("Usage: /pluck-memory <number>")
+        prefix = args.strip()
+        if len(prefix) < 4:
+            logger.info("Usage: /forget <memory-id-prefix>  (use /memories to list IDs)")
             return
-
-        index = int(arg)
-        if index < 1:
-            logger.info("Number must be 1 or greater.")
+        matches = [fact for fact in await MemoryFact.find(MemoryFact.status == "active").to_list()
+                   if str(fact.id).startswith(prefix)]
+        if not matches:
+            logger.info("No active memory matches that ID.")
             return
-
-        mem = _get_memory()
-        raw = mem.get_all(filters={"user_id": "default"}, top_k=1000)
-        results = raw.get("results", raw) if isinstance(raw, dict) else raw
-
-        if not results:
-            logger.info("No memories stored.")
+        if len(matches) > 1:
+            logger.info("That prefix is ambiguous; use more characters from /memories.")
             return
-
-        if index > len(results):
-            logger.info(f"Only {len(results)} memories exist.")
-            return
-
-        entry = results[index - 1]
-        memory_id = entry.get("id") if isinstance(entry, dict) else None
-        text = entry.get("memory") or entry.get("text") if isinstance(entry, dict) else str(entry)
-
-        if not memory_id:
-            logger.error(f"Could not find ID for memory #{index}.")
-            return
-
-        mem.delete(memory_id)
-        logger.info(f"Deleted #{index}: {text}")
+        fact = matches[0]
+        fact.status = "forgotten"
+        await fact.save()
+        from utils.memory_index import index_fact
+        await asyncio.to_thread(index_fact, fact)
+        logger.info(f"Forgot: {fact.key}: {fact.value}")
     except Exception as e:
-        logger.error(f"pluck-memory failed: {e}")
-
-
-async def cmd_compact_memory() -> None:
-    """Deduplicate and merge mem0 memories using the LLM, then replace the store."""
-    from rich.console import Console
-
-    console = Console()
-    try:
-        from utils.memory_client import compact_memories
-
-        with console.status("[bold cyan]Compacting memories…[/bold cyan]", spinner="dots"):
-            before, after = compact_memories()
-
-        if before == 0:
-            logger.info("No memories stored yet.")
-        else:
-            removed = before - after
-            logger.info(f"Done. {before} → {after} memories ({removed} removed).")
-    except Exception as e:
-        logger.error(f"compact-memory failed: {e}")
-
-
-async def cmd_flush_memory() -> None:
-    """Delete all mem0 memories by dropping the Qdrant collection (mem0 recreates it on next use)."""
-    import os
-
-    try:
-        from qdrant_client import QdrantClient
-
-        host = os.environ.get("QDRANT_HOST", "localhost")
-        port = int(os.environ.get("QDRANT_PORT", "6333"))
-        client = QdrantClient(host=host, port=port)
-
-        existing = {c.name for c in client.get_collections().collections}
-        count = 0
-        if "langbox_memories" in existing:
-            info = client.get_collection("langbox_memories")
-            count = info.points_count or 0
-            client.delete_collection("langbox_memories")
-
-        import utils.memory_client as _mc
-        _mc._memory = None
-
-        if count:
-            logger.info(f"{count} memories deleted.")
-        else:
-            logger.info("No memories to delete.")
-    except Exception as e:
-        logger.error(f"flush-memory failed: {e}")
+        logger.error(f"forget failed: {e}")
 
 
 async def cmd_apocalypse() -> None:
-    """Wipe memories, conversations, journal, and user persona — start a clean slate.
-
-    Destructive. Cannot be undone. The agent will re-learn everything from scratch
-    as new conversations are analysed.
-
-    Clears:
-      - mem0 memories (Qdrant collection `langbox_memories`)
-      - Conversations (raw daily exchanges)
-      - Journal entries (daily summaries)
-      - UserPersona document (name, location, interests, etc.)
-      - AgentPersona with persona_id="adaptive" (derived from journal)
-      - In-memory personalizer cache
-      - Session conversation history
-      - Adaptive persona in-memory state (reset to factory defaults)
-
-    Does NOT touch: notes, reminders, plans, weather cache, newsfeed, credentials,
-    preferences, voice settings, or non-adaptive agent personas.
-    """
+    """Wipe interactions and learned memory facts; preserve explicit settings."""
     try:
-        from db.schemas import UserPersona, Conversations, Journal, AgentPersona
+        from db.schemas import Interaction, MemoryFact, MemoryWorkItem
 
-        # 1. Memories (Qdrant)
-        mem_count = 0
-        try:
-            import os
-            from qdrant_client import QdrantClient
-
-            host = os.environ.get("QDRANT_HOST", "localhost")
-            port = int(os.environ.get("QDRANT_PORT", "6333"))
-            client = QdrantClient(host=host, port=port)
-            existing = {c.name for c in client.get_collections().collections}
-            if "langbox_memories" in existing:
-                info = client.get_collection("langbox_memories")
-                mem_count = info.points_count or 0
-                client.delete_collection("langbox_memories")
-            import utils.memory_client as _mc
-            _mc._memory = None
-        except Exception as e:
-            logger.warning(f"[apocalypse] memory flush skipped: {e}")
-
-        # 2-4. MongoDB collections
-        conv_count = await Conversations.delete_all()
-        jour_count = await Journal.delete_all()
-
-        persona = await UserPersona.find_one()
-        persona_deleted = persona is not None
-        if persona:
-            await persona.delete()
-
-        adaptive = await AgentPersona.find_one(AgentPersona.persona_id == "adaptive")
-        adaptive_deleted = adaptive is not None
-        if adaptive:
-            await adaptive.delete()
-
-        # 5. In-memory caches
-        import skills.personalizer.skill as _ps
-        _ps._cached_persona_context = None
-
+        interaction_count = await Interaction.delete_all()
+        fact_count = await MemoryFact.delete_all()
+        await MemoryWorkItem.delete_all()
+        from utils.memory_index import reset_index
+        await asyncio.to_thread(reset_index)
         from skills.conversation.skill import _history
         _history.clear()
-
-        # 6. Reset adaptive persona in-memory state to factory defaults
-        switched_persona = False
-        try:
-            from agents.persona import (
-                PERSONAS,
-                load_adaptive_persona,
-                set_active_persona,
-                get_active_persona_id,
-            )
-            load_adaptive_persona(
-                description=PERSONAS["adaptive"]["description"],
-                greeting_style=PERSONAS["adaptive"]["greeting_style"],
-                voice_id=None,
-            )
-            # If user is currently on adaptive, switch back to jean (the safe default)
-            if get_active_persona_id() == "adaptive":
-                set_active_persona("jean")
-                switched_persona = True
-        except Exception as e:
-            logger.warning(f"[apocalypse] adaptive persona reset skipped: {e}")
-
-        parts = []
-        if mem_count:          parts.append(f"{mem_count} memory/memories")
-        if conv_count:         parts.append(f"{conv_count} conversation day(s)")
-        if jour_count:         parts.append(f"{jour_count} journal entry/entries")
-        if persona_deleted:    parts.append("user persona")
-        if adaptive_deleted:   parts.append("adaptive persona")
-        summary = ", ".join(parts) if parts else "nothing to wipe — already clean"
-        logger.info(f"☢  Apocalypse: wiped {summary}. Clean slate.")
-        if switched_persona:
-            logger.info("Active persona was 'adaptive' — switched to 'jean'.")
+        logger.info(f"☢  Apocalypse: wiped {interaction_count} interaction(s) and {fact_count} memory fact(s).")
     except Exception as e:
         logger.error(f"apocalypse failed: {e}")
-
-
-async def cmd_reflect(args: str) -> None:
-    """Self-reflect on recent conversation exchanges.
-
-    Reviews the most recent N exchanges (default 3) and stores any self-critique
-    notes (routing mistakes, incomplete answers, factual errors, etc.) to the
-    `Reflections` collection. For now these are stored only — the future override
-    mechanism will retrieve high-signal reflections and inject them into the
-    router/CHAT prompts to nudge future behavior.
-
-    Usage:
-      /reflect         — review the last 3 exchanges
-      /reflect 10      — review the last 10 exchanges
-    """
-    from skills.reflection.skill import get_recent_exchanges, reflect_on_exchanges
-
-    n = 3
-    if args.strip():
-        try:
-            n = int(args.strip().split()[0])
-        except ValueError:
-            logger.info("Usage: /reflect [N]  (default N=3)")
-            return
-    n = max(1, min(n, 20))
-
-    exchanges = await get_recent_exchanges(n)
-    if not exchanges:
-        logger.info("No recent exchanges to reflect on.")
-        return
-
-    logger.info(f"Reflecting on the last {len(exchanges)} exchange(s)...")
-    saved = await reflect_on_exchanges(exchanges, source="manual /reflect")
-    if saved:
-        logger.info(f"Saved {saved} reflection(s) to the Reflections collection.")
-    else:
-        logger.info("No misfires detected — no reflections saved.")
 
 
 async def cmd_model(args: str) -> None:
@@ -652,7 +360,7 @@ async def cmd_voice(args: str) -> None:
     
     # Apply voice change
     set_active_voice_id(selected_voice)
-    await update_preferences(agentVoiceId=selected_voice)
+    await update_preferences(agent_voice_id=selected_voice)
     
     # Get current persona for display
     from agents.persona import PERSONAS
@@ -674,7 +382,7 @@ async def cmd_persona(args: str) -> None:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
-    from agents.persona import PERSONAS, set_active_persona, get_active_persona_id, get_active_voice_id
+    from agents.persona import PERSONAS, set_active_persona, get_active_voice_id
     from tts.tts import voice_ids, set_active_voice_id
     from db.preferences import update_preferences
 
@@ -738,7 +446,7 @@ async def cmd_persona(args: str) -> None:
     # --- Apply + persist ---
     set_active_persona(selected_persona)
     set_active_voice_id(selected_voice)
-    await update_preferences(agentPersona=selected_persona, agentVoiceId=selected_voice)
+    await update_preferences(agent_persona=selected_persona, agent_voice_id=selected_voice)
     logger.info(
         f"Persona → {PERSONAS[selected_persona]['name']}  |  Voice → {selected_voice}  (saved)"
     )
@@ -760,7 +468,7 @@ async def cmd_news_length(args: str) -> None:
     if not target:
         prefs = await get_preferences()
         options = " | ".join(_NEWS_LENGTHS)
-        logger.info(f"News length: {prefs.newsLength}  (options: {options})")
+        logger.info(f"News length: {prefs.news_length}  (options: {options})")
         return
 
     if target not in _NEWS_LENGTHS:
@@ -768,7 +476,7 @@ async def cmd_news_length(args: str) -> None:
         logger.info(f"Unknown length '{target}'. Options: {options}")
         return
 
-    await update_preferences(newsLength=target)
+    await update_preferences(news_length=target)
     logger.info(f"News length → {target}  (saved)")
 
 
@@ -814,45 +522,35 @@ async def cmd_look(args: str) -> None:
 async def cmd_help() -> None:
     logger.info(
         "Available commands:\n"
-        "  /save              — summarise and save the current session to the database\n"
         "  /clear             — wipe the in-memory conversation history\n"
         "  /history           — print session history to the terminal\n"
-        "  /analyze           — extract personal facts from this session into your persona profile\n"
-        "  /persona [id] [v]  — switch persona and voice; 'adaptive' evolves from your journal history\n"
+        "  /persona [id] [v]  — switch persona and voice\n"
         "  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
         "  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
         "  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
         "  /connect <service> — authenticate a service (spotify | hue)\n"
-        "  /memories [q]      — list all mem0 memories, or search with a query\n"
-        "  /compact-memory    — deduplicate and merge memories using the LLM\n"
-        "  /pluck-memory <n>  — delete memory #n from the /memories list\n"
-        "  /flush-memory      — delete all mem0 memories\n"
-        "  /apocalypse        — wipe memories, conversations, journal, and user persona\n"
+        "  /memories [q]      — list/search canonical user memory facts\n"
+        "  /forget <id>       — forget one fact (ID prefix from /memories)\n"
+        "  /apocalypse        — wipe interactions and learned memory facts\n"
         "  /ctx               — show context window usage for the current session\n"
         "  /note [title]      — save a note from the current conversation context\n"
         "  /planner <task>    — run an autonomous multi-step planning agent\n"
-        "  /reflect [N]      — self-critique the last N exchanges (default 3) and save reflections\n"
         "  /look <path> [q]   — describe an image via the VLM and inject into context\n"
         "  /help              — show this message"
     )
 
 
 _COMMANDS = {
-    "/save": cmd_save,
     "/clear": cmd_clear,
     "/history": cmd_history,
-    "/analyze": cmd_analyze,
     "/persona": cmd_persona,
     "/voice": cmd_voice,
     "/news-length": cmd_news_length,
     "/model": cmd_model,
     "/connect": cmd_connect,
     "/memories": cmd_memories,
-    "/compact-memory": cmd_compact_memory,
-    "/pluck-memory": cmd_pluck_memory,
-    "/flush-memory": cmd_flush_memory,
+    "/forget": cmd_forget,
     "/apocalypse": cmd_apocalypse,
-    "/reflect": cmd_reflect,
     "/ctx": cmd_ctx,
     "/note": cmd_note,
     "/planner": cmd_planner,

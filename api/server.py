@@ -11,10 +11,6 @@ Endpoints:
   POST /voice              — audio file → synthesised response (optional ?voice_id=)
   GET  /voice/{job_id}     — poll for voice job result (pending | done | error)
   DEL  /voice/{job_id}     — cancel an in-flight voice job
-  WS   /compact            — compact a day's conversations, then auto-writes journal; pushes pending → complete/error (?date=YYYY-MM-DD)
-  GET  /conversations      — list all dates that have conversation records (newest first)
-  GET  /conversation/{date} — exchanges + compact state for a specific date (YYYY-MM-DD)
-  GET  /journal            — list journal entries (?date= or ?limit=)
   GET  /plans              — list saved planner plans
   GET  /notes              — list all notes from MongoDB
   GET  /reminders          — list reminders from MongoDB
@@ -23,7 +19,6 @@ Endpoints:
 """
 
 import asyncio
-import base64
 import json
 import os
 import tempfile
@@ -57,8 +52,12 @@ async def handle_query(request: web.Request) -> web.Response:
 				{"error": "task is required. Usage: /planner <task>"}, status=400
 			)
 		from agents.planner import run_planner
+		from utils.inference_gate import foreground_inference
+		from utils.memory_service import record_interaction
 
-		response = await run_planner(task)
+		async with foreground_inference():
+			response = await run_planner(task)
+		await record_interaction(task, response, intent="PLANNER")
 		return web.json_response({"response": response})
 
 	from agents.intent_classifier import run_intent_classifier
@@ -104,7 +103,6 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 		await ws.close()
 		return ws
 
-	loop = asyncio.get_running_loop()
 	queue: asyncio.Queue = asyncio.Queue()
 
 	def on_status(message: str) -> None:
@@ -124,8 +122,12 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 					return
 				on_status("Building your plan")
 				from agents.planner import run_planner
+				from utils.inference_gate import foreground_inference
+				from utils.memory_service import record_interaction
 
-				response = await run_planner(task)
+				async with foreground_inference():
+					response = await run_planner(task)
+				await record_interaction(task, response, intent="PLANNER")
 			else:
 				response = await run_intent_classifier(
 					query, on_token=on_token, on_status=on_status
@@ -394,144 +396,6 @@ async def handle_vision(request: web.Request) -> web.Response:
 	return web.json_response({"description": description, "context_injected": True})
 
 
-async def handle_compact_ws(request: web.Request) -> web.WebSocketResponse:
-	from datetime import date
-	from db.schemas import Conversations
-	from skills.journal.compact import compact_conversations
-
-	date_str = request.rel_url.query.get("date")
-	ws = web.WebSocketResponse()
-	await ws.prepare(request)
-
-	try:
-		for_date = date.fromisoformat(date_str) if date_str else date.today()
-	except ValueError:
-		await ws.send_json(
-			{"status": "error", "error": "invalid date format, use YYYY-MM-DD"}
-		)
-		await ws.close()
-		return ws
-
-	doc = await Conversations.find_one(Conversations.date == for_date)
-	if doc is None:
-		await ws.send_json(
-			{"status": "error", "error": f"no conversations found for {for_date}"}
-		)
-		await ws.close()
-		return ws
-	if not doc.exchanges:
-		await ws.send_json({"status": "error", "error": "no exchanges to compact"})
-		await ws.close()
-		return ws
-	if doc.compact_status == "pending":
-		await ws.send_json({"status": "error", "error": "compact already in progress"})
-		await ws.close()
-		return ws
-
-	doc.compact_status = "pending"
-	await doc.save()
-	await ws.send_json({"status": "pending", "date": for_date.isoformat()})
-
-	try:
-		summary = await compact_conversations(for_date)
-		if not ws.closed:
-			await ws.send_json(
-				{"status": "complete", "date": for_date.isoformat(), "compacted": summary}
-			)
-		from skills.journal.journal_writer import write_journal_entry
-
-		asyncio.create_task(write_journal_entry(for_date))
-	except Exception as e:
-		# Reset status so the endpoint is not stuck at "pending" on any failure path.
-		# compact_conversations handles this internally for LLM errors, but early
-		# ValueErrors (e.g. race on doc state) bubble up without touching the DB.
-		try:
-			fresh = await Conversations.find_one(Conversations.date == for_date)
-			if fresh and fresh.compact_status == "pending":
-				fresh.compact_status = "error"
-				await fresh.save()
-		except Exception:
-			pass
-		if not ws.closed:
-			await ws.send_json({"status": "error", "error": str(e)})
-	finally:
-		if not ws.closed:
-			await ws.close()
-
-	return ws
-
-
-async def handle_conversations(request: web.Request) -> web.Response:
-	from db.schemas import Conversations
-
-	docs = await Conversations.find().sort(-Conversations.date).to_list()
-	return web.json_response({"dates": [doc.date.isoformat() for doc in docs]})
-
-
-async def handle_conversation_detail(request: web.Request) -> web.Response:
-	from datetime import date
-	from db.schemas import Conversations
-
-	date_str = request.match_info["date"]
-	try:
-		for_date = date.fromisoformat(date_str)
-	except ValueError:
-		return web.json_response(
-			{"error": "invalid date format, use YYYY-MM-DD"}, status=400
-		)
-
-	doc = await Conversations.find_one(Conversations.date == for_date)
-	if doc is None:
-		return web.json_response(
-			{
-				"date": for_date.isoformat(),
-				"exchanges": [],
-			}
-		)
-
-	exchanges = sorted(doc.exchanges, key=lambda ex: ex.timestamp)
-	return web.json_response(
-		{
-			"date": for_date.isoformat(),
-			"exchanges": [
-				{
-					"timestamp": ex.timestamp.isoformat(),
-					"question": ex.question,
-					"answer": ex.answer,
-				}
-				for ex in exchanges
-			],
-		}
-	)
-
-
-async def handle_journal_list(request: web.Request) -> web.Response:
-	from datetime import date
-	from db.schemas import Journal
-
-	date_str = request.rel_url.query.get("date")
-	if date_str:
-		try:
-			for_date = date.fromisoformat(date_str)
-		except ValueError:
-			return web.json_response(
-				{"error": "invalid date format, use YYYY-MM-DD"}, status=400
-			)
-		entry = await Journal.find_one(Journal.datestamp == for_date)
-		entries = [entry] if entry else []
-	else:
-		limit = int(request.rel_url.query.get("limit", "10"))
-		entries = await Journal.find().sort(-Journal.datestamp).limit(limit).to_list()
-
-	return web.json_response(
-		{
-			"entries": [
-				{"datestamp": e.datestamp.isoformat(), "summary": e.summary} for e in entries
-			]
-		}
-	)
-
-
 async def handle_plans(request: web.Request) -> web.Response:
 	from db.schemas import Plans
 
@@ -653,7 +517,7 @@ async def handle_set_persona(request: web.Request) -> web.Response:
 	persona = PERSONAS[persona_id]
 	resolved_voice = persona["voice_id"] or active_voice_id
 	set_active_voice_id(resolved_voice)
-	await update_preferences(agentPersona=persona_id, agentVoiceId=resolved_voice)
+	await update_preferences(agent_persona=persona_id, agent_voice_id=resolved_voice)
 	logger.info(f"[api/persona] active persona set to '{persona_id}' voice='{resolved_voice}'")
 	return web.json_response(
 		{
@@ -678,7 +542,7 @@ async def handle_set_voice(request: web.Request) -> web.Response:
 			status=400,
 		)
 	set_active_voice_id(voice_id)
-	await update_preferences(agentVoiceId=voice_id)
+	await update_preferences(agent_voice_id=voice_id)
 	logger.info(f"[api/voice] active voice set to '{voice_id}'")
 	return web.json_response({"voice_id": voice_id})
 
@@ -755,10 +619,6 @@ def create_app() -> web.Application:
 	app.router.add_post("/vision", handle_vision)
 	app.router.add_get("/voice/{job_id}", handle_voice_result)
 	app.router.add_delete("/voice/{job_id}", handle_voice_cancel)
-	app.router.add_get("/compact", handle_compact_ws)
-	app.router.add_get("/conversations", handle_conversations)
-	app.router.add_get("/conversation/{date}", handle_conversation_detail)
-	app.router.add_get("/journal", handle_journal_list)
 	app.router.add_get("/plans", handle_plans)
 	app.router.add_get("/notes", handle_notes)
 	app.router.add_get("/reminders", handle_reminders)
@@ -768,6 +628,9 @@ def create_app() -> web.Application:
 
 
 async def start_api_server(host: str = "0.0.0.0", port: int = 8000) -> web.AppRunner:
+	from utils.memory_service import start_memory_worker
+
+	start_memory_worker()
 	app = create_app()
 	runner = web.AppRunner(app)
 	await runner.setup()

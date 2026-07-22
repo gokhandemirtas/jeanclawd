@@ -3,7 +3,6 @@ import os
 import re
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime
 
 from utils.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -11,7 +10,7 @@ from utils.log import logger
 
 from agents.agent_factory import create_llm
 from agents.persona import get_active_identity, get_active_name, get_active_preamble
-from skills.personalizer.skill import get_persona_context
+from utils.memory_service import get_profile_context
 from utils.llm_structured_output import generate_structured_output
 
 
@@ -144,13 +143,6 @@ _current_topic: str | None = None
 # When a non-CHAT skill asks a clarifying question, lock the next turn to that skill
 # so the user's answer routes back correctly instead of being reclassified from scratch.
 _pending_intent: str | None = None
-
-# Persona question throttle — ask at most once every N exchanges, after a warmup period.
-_PERSONA_QUESTION_INTERVAL = 5
-_PERSONA_WARMUP = 3
-_exchanges_since_question: int = 0
-_total_exchanges: int = 0
-
 
 def set_pending_intent(intent: str) -> None:
 	global _pending_intent
@@ -393,132 +385,6 @@ def _chat_prompt() -> str:
 	return base
 
 
-# ---------------------------------------------------------------------------
-# Debounced background personalizer
-# ---------------------------------------------------------------------------
-# Runs the personalizer 60s after the user stops chatting. Each new CHAT turn
-# cancels and reschedules the timer, so the personalizer only fires during
-# inactivity. Manual /analyze is unaffected.
-_PERSONALIZER_DELAY_SECONDS = 60
-_personalizer_timer: asyncio.Task | None = None
-
-
-def _schedule_personalizer() -> None:
-	"""Schedule (or reschedule) a background personalizer run 60s from now.
-
-	Each call cancels any pending timer and starts a new one. The personalizer
-	therefore fires only after a period of inactivity — not after every turn.
-	"""
-	global _personalizer_timer
-	if _personalizer_timer is not None and not _personalizer_timer.done():
-		_personalizer_timer.cancel()
-	_personalizer_timer = asyncio.create_task(_personalizer_fire())
-
-
-async def _personalizer_fire() -> None:
-	"""Sleep for the debounce window, then run the personalizer.
-
-	Cancelled if a new CHAT turn reschedules. Swallows all exceptions so a
-	personalizer failure never surfaces to the user.
-	"""
-	try:
-		await asyncio.sleep(_PERSONALIZER_DELAY_SECONDS)
-	except asyncio.CancelledError:
-		return
-	try:
-		await _run_personalizer_on_recent()
-	except Exception as e:
-		logger.debug(f"[chat] debounced personalizer failed: {e}")
-	# Piggyback the self-reflection on the same idle signal. Gated to avoid
-	# LLM cost on every 60s idle — only fires if 5+ min since last reflection
-	# AND 3+ new exchanges have happened. Skipped silently on any failure.
-	try:
-		await _maybe_reflect_on_idle()
-	except Exception as e:
-		logger.debug(f"[chat] debounced reflection failed: {e}")
-
-
-# Reflection is much more expensive than the personalizer (always an LLM call,
-# no regex pre-filter), so it needs stricter gating. The personalizer fires on
-# every 60s idle; the reflection piggybacks on that signal but only runs if
-# enough new material has accumulated since the last run.
-_REFLECTION_MIN_INTERVAL_SECONDS = 300  # 5 min between auto-reflections
-_REFLECTION_MIN_NEW_EXCHANGES = 3
-_last_reflection_at: datetime | None = None
-_last_reflection_exchange_count: int = 0
-
-
-async def _maybe_reflect_on_idle() -> None:
-	"""Run reflection if the gating conditions are met. Best-effort, never raises."""
-	global _last_reflection_at, _last_reflection_exchange_count
-
-	now = datetime.now()
-	if _last_reflection_at and (now - _last_reflection_at).total_seconds() < _REFLECTION_MIN_INTERVAL_SECONDS:
-		return
-
-	# Each exchange is 2 messages in _history (HumanMessage + AIMessage).
-	current_exchange_count = len(_history) // 2
-	new_exchanges = current_exchange_count - _last_reflection_exchange_count
-	if new_exchanges < _REFLECTION_MIN_NEW_EXCHANGES:
-		return
-
-	# Build the last 3 ConversationExchanges from _history.
-	from db.schemas import ConversationExchange
-	from skills.reflection.skill import reflect_on_exchanges
-
-	msgs = list(_history)
-	exchanges: list[ConversationExchange] = []
-	i = 0
-	while i + 1 < len(msgs):
-		q = msgs[i]
-		a = msgs[i + 1]
-		if isinstance(q, HumanMessage) and isinstance(a, AIMessage):
-			exchanges.append(
-				ConversationExchange(
-					timestamp=datetime.now(),
-					question=q.content,
-					answer=a.content,
-				)
-			)
-		i += 2
-	if not exchanges:
-		return
-	exchanges = exchanges[-3:]
-
-	logger.debug(f"[chat] auto-reflecting on {len(exchanges)} new exchange(s)")
-	await reflect_on_exchanges(exchanges, source="auto-on-idle")
-	_last_reflection_at = now
-	_last_reflection_exchange_count = current_exchange_count
-
-
-async def _run_personalizer_on_recent() -> None:
-	"""Run the personalizer against the in-memory session _history."""
-	from db.schemas import ConversationExchange
-	from datetime import datetime
-	from skills.personalizer.skill import analyze_persona_from_log
-
-	msgs = list(_history)
-	exchanges: list[ConversationExchange] = []
-	i = 0
-	while i + 1 < len(msgs):
-		q = msgs[i]
-		a = msgs[i + 1]
-		if isinstance(q, HumanMessage) and isinstance(a, AIMessage):
-			exchanges.append(
-				ConversationExchange(
-					timestamp=datetime.now(),
-					question=q.content,
-					answer=a.content,
-				)
-			)
-		i += 2
-
-	if not exchanges:
-		return
-	logger.debug(f"[chat] debounced personalizer: running on {len(exchanges)} exchange(s)")
-	await analyze_persona_from_log(exchanges)
-
-
 # Shared rolling history of all exchanges (CHAT + wrapped skill responses).
 # Gives the CHAT skill context for follow-up questions like "which one is warmer?",
 # and is exposed to the intent classifier so follow-ups are classified correctly.
@@ -648,54 +514,14 @@ async def handle_conversation(
 	return final
 
 
-_PERSONA_INVITE = re.compile(
-	r"\b(get to know|know (each other|me better|more about me)|tell me about (your|you)|"
-	r"ask me (something|anything|a question|questions|about me)|"
-	r"curious about me|learn about me|what do you want to know)\b",
-	re.IGNORECASE,
-)
-
-
-async def _get_persona_question(force: bool = False) -> str | None:
-	"""Return the next persona question to weave in, or None if not yet due.
-
-	Pass force=True to bypass the counter (e.g. when the user explicitly invites questions).
-	When a question is returned, _pending_intent is set to CHAT so the user's answer
-	routes back here instead of being classified as a domain intent.
-	"""
-	global _exchanges_since_question, _total_exchanges
-	_total_exchanges += 1
-	_exchanges_since_question += 1
-	if not force and (
-		_total_exchanges < _PERSONA_WARMUP
-		or _exchanges_since_question < _PERSONA_QUESTION_INTERVAL
-	):
-		return None
-	try:
-		from db.schemas import UserPersona
-		from skills.personalizer.skill import get_next_persona_question
-
-		persona = await UserPersona.find_one()
-		if not persona:
-			return None
-		question = get_next_persona_question(persona)
-		if question:
-			_exchanges_since_question = 0
-			set_pending_intent("CHAT")
-		return question
-	except Exception:
-		logger.exception("[chat] Persona question lookup failed")
-		return None
-
-
 async def _fetch_relevant_memories(query: str) -> str:
 	"""Return semantically relevant memories for this query, or empty string."""
 	if len(query.split()) < 4:
 		return ""
 	try:
-		from utils.memory_client import search_memories
+		from utils.memory_service import search_relevant_memories
 
-		memories = await asyncio.to_thread(search_memories, query)
+		memories = await search_relevant_memories(query)
 		if not memories:
 			return ""
 		lines = "\n".join(f"- {m}" for m in memories)
@@ -718,8 +544,6 @@ async def handle_chat(
 
 	_VOICE_CONSTRAINT = "\n\nYou are responding to a voice message. Reply in a single short paragraph — natural when spoken aloud, no lists or markdown."
 
-	invited = bool(_PERSONA_INVITE.search(query))
-
 	# Streaming path — used by CLI and voice WebSocket
 	if on_token is not None:
 		if len(_history) >= MAX_HISTORY - 2:
@@ -727,20 +551,12 @@ async def handle_chat(
 		system = _chat_prompt()
 		if voice_mode:
 			system += _VOICE_CONSTRAINT
-		persona = get_persona_context()
+		persona = await get_profile_context()
 		if persona:
 			system = system + "\n\n" + persona
 		if _rolling_summary:
 			system = (
 				system + "\n\n## Summary of earlier in this conversation:\n" + _rolling_summary
-			)
-		persona_question = await _get_persona_question(force=invited)
-		if persona_question:
-			logger.debug(f"[chat] Injecting persona question: {persona_question}")
-			system = (
-				system
-				+ f"\n\nAt the end of your response, naturally work in this question as part of the conversation — "
-				f'do not make it feel like a form or survey: "{persona_question}"'
 			)
 		memories = await _fetch_relevant_memories(query)
 		if memories:
@@ -771,7 +587,6 @@ async def handle_chat(
 		_history.append(HumanMessage(content=query))
 		_history.append(AIMessage(content=final))
 		await _safe_extract_topic(query, final)
-		_schedule_personalizer()
 		return final
 
 	# Check if query needs multi-step reasoning
@@ -784,14 +599,13 @@ async def handle_chat(
 			context_lines.append(f"Assistant: {assistant_msg[:400]}")
 		conversation_context = "\n".join(context_lines)
 
-		persona = get_persona_context()
+		persona = await get_profile_context()
 		final = await reason_and_act(query, conversation_context, persona=persona)
 
 		await _safe_extract_topic(query, final)
 
 		_history.append(HumanMessage(content=query))
 		_history.append(AIMessage(content=final))
-		_schedule_personalizer()
 		return final
 
 	# Compress oldest history before it gets evicted
@@ -803,7 +617,7 @@ async def handle_chat(
 	system = _chat_prompt()
 	if voice_mode:
 		system += _VOICE_CONSTRAINT
-	persona = get_persona_context()
+	persona = await get_profile_context()
 	if persona:
 		logger.debug(persona)
 		system = system + "\n\n" + persona
@@ -811,15 +625,6 @@ async def handle_chat(
 	if _rolling_summary:
 		system = (
 			system + "\n\n## Summary of earlier in this conversation:\n" + _rolling_summary
-		)
-
-	persona_question = await _get_persona_question(force=invited)
-	if persona_question:
-		logger.debug(f"[chat] Injecting persona question: {persona_question}")
-		system = (
-			system
-			+ f"\n\nAt the end of your response, naturally work in this question as part of the conversation — "
-			f'do not make it feel like a form or survey: "{persona_question}"'
 		)
 
 	memories = await _fetch_relevant_memories(query)
@@ -853,39 +658,19 @@ async def handle_chat(
 
 	_history.append(HumanMessage(content=query))
 	_history.append(AIMessage(content=final))
-	_schedule_personalizer()
-
 	return final
 
 
 async def generate_greeting() -> str:
 	"""Generate a short session-opening greeting in the active persona's voice.
 
-	Checks UserPersona for the user's name first, then falls back to memory search.
+	Uses the canonical memory facts for the user's name when available.
 	Falls back to a generic greeting on any failure.
 	"""
 	try:
-		# Prefer the structured UserPersona record — populated by the personalizer on startup
-		user_name: str | None = None
-		try:
-			from db.schemas import UserPersona
+		from utils.memory_service import get_fact_value
 
-			persona_doc = await UserPersona.find_one()
-			if persona_doc and persona_doc.name:
-				user_name = persona_doc.name
-		except Exception:
-			pass
-
-		# Fall back to semantic memory search if persona has no name yet
-		if not user_name:
-			try:
-				from utils.memory_client import search_memories
-
-				memories = await asyncio.to_thread(search_memories, "user name")
-				if memories:
-					user_name = memories[0]  # use the top hit as a rough name hint
-			except Exception:
-				pass
+		user_name = await get_fact_value("name")
 
 		name_instruction = (
 			f" The user's name is {user_name}. Use it naturally." if user_name else ""

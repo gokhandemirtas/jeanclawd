@@ -20,8 +20,7 @@ Add to claude_desktop_config.json (~Library/Application Support/Claude/...):
       }
     }
 
-Destructive tools (apocalypse, flush-memory, pluck-memory, compact-memory)
-are intentionally NOT exposed — LLM clients can accidentally invoke them.
+Destructive tools are intentionally not exposed — LLM clients can accidentally invoke them.
 
 Heavy skill modules are lazy-imported inside each tool function so the
 MCP handshake stays fast (the client lists tools before any are called).
@@ -31,7 +30,6 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -87,8 +85,6 @@ def _print_banner() -> None:
 		"notes": [],
 		"reminders": [],
 		"skills": [],
-		"reflection": [],
-		"journal": [],
 		"general": [],
 	}
 	for t in tools:
@@ -101,10 +97,6 @@ def _print_banner() -> None:
 			groups["notes"].append(n)
 		elif n in {"set_reminder", "set_timer", "list_reminders"}:
 			groups["reminders"].append(n)
-		elif n in {"reflect", "list_reflections"}:
-			groups["reflection"].append(n)
-		elif n in {"read_journal", "compact_conversations"}:
-			groups["journal"].append(n)
 		elif n in {"send_query"}:
 			groups["general"].append(n)
 		else:
@@ -172,9 +164,11 @@ async def set_persona(persona_id: str) -> str:
                     Use list_personas to see available IDs.
     """
     from agents.persona import PERSONAS, set_active_persona
+    from db.preferences import update_preferences
     if persona_id not in PERSONAS:
         return f"Unknown persona '{persona_id}'. Use list_personas to see valid IDs."
     set_active_persona(persona_id)
+    await update_preferences(agent_persona=persona_id)
     return f"Switched active persona to **{persona_id}** ({PERSONAS[persona_id]['name']})."
 
 
@@ -201,9 +195,11 @@ async def set_voice(voice_id: str) -> str:
     """
     from tts.tts import voice_ids
     from tts.tts import set_active_voice_id
+    from db.preferences import update_preferences
     if voice_id not in voice_ids:
         return f"Unknown voice '{voice_id}'. Use list_voices to see valid IDs."
     set_active_voice_id(voice_id)
+    await update_preferences(agent_voice_id=voice_id)
     return f"Switched active voice to **{voice_id}**."
 
 
@@ -239,21 +235,19 @@ async def list_memories(query: Optional[str] = None, limit: int = 20) -> str:
                If omitted, returns the most recent memories.
         limit: Maximum number of memories to return (default 20).
     """
-    from utils.memory_client import _get_memory
+    from utils.memory_service import list_memories as get_memories, search_relevant_memories
 
-    memory = _get_memory()
     if query:
-        results = memory.search(query=query, user_id="default", limit=limit)
-        items = results.get("results", []) if isinstance(results, dict) else results
-        if not items:
+        memories = await search_relevant_memories(query, limit=limit)
+        if not memories:
             return f"No memories matching '{query}'."
-        lines = [f"- {m.get('memory', m)}" for m in items]
+        lines = [f"- {memory}" for memory in memories]
         return f"Memories matching '{query}':\n" + "\n".join(lines)
     else:
-        items = memory.get_all(user_id="default", limit=limit).get("results", [])
+        items = await get_memories(limit=limit)
         if not items:
             return "No memories stored yet."
-        lines = [f"- {m.get('memory', m)}" for m in items]
+        lines = [f"- {item.key}: {item.value}" for item in items]
         return "Recent memories:\n" + "\n".join(lines)
 
 
@@ -500,7 +494,13 @@ async def plan(task: str) -> str:
         task: Description of the task to plan (e.g. "plan a weekend trip to Paris", "organize my work week").
     """
     from agents.planner import run_planner
-    return await run_planner(task)
+    from utils.inference_gate import foreground_inference
+    from utils.memory_service import record_interaction
+
+    async with foreground_inference():
+        response = await run_planner(task)
+    await record_interaction(task, response, intent="PLANNER")
+    return response
 
 
 @mcp.tool()
@@ -513,111 +513,8 @@ async def send_query(query: str) -> str:
     Args:
         query: Any natural language request.
     """
-    from agents.intent_router.intent_router import route
-    from agents.intent_classifier.intent_classifier import classify
-    intent = classify(query)
-    return await route(intent, query)
-
-
-# ===========================================================================
-# Self-reflection
-# ===========================================================================
-
-
-@mcp.tool()
-async def reflect(n: int = 3) -> str:
-    """Run self-reflection on the most recent conversation exchanges.
-
-    Stores any self-critique notes (routing mistakes, incomplete answers, etc.)
-    to the Reflections collection. Use to feed the future self-correction
-    mechanism with structured misfires.
-
-    Args:
-        n: Number of recent exchanges to review (default 3, max 20).
-    """
-    from skills.reflection.skill import get_recent_exchanges, reflect_on_exchanges
-    n = max(1, min(n, 20))
-    exchanges = await get_recent_exchanges(n)
-    if not exchanges:
-        return "No recent exchanges to reflect on."
-    saved = await reflect_on_exchanges(exchanges, source="mcp /reflect")
-    if saved:
-        return f"Saved {saved} reflection(s) to the Reflections collection."
-    return "No misfires detected — no reflections saved."
-
-
-@mcp.tool()
-async def list_reflections(category: Optional[str] = None, limit: int = 20) -> str:
-    """List stored self-reflections, optionally filtered by category.
-
-    Args:
-        category: Optional filter — one of: routing, factual, tone, completeness, other.
-        limit: Maximum number to return (default 20).
-    """
-    from db.schemas import Reflection
-    query = Reflection.find()
-    if category:
-        if category not in ("routing", "factual", "tone", "completeness", "other"):
-            return f"Invalid category '{category}'."
-        query = Reflection.find(Reflection.category == category)
-    items = await query.sort(-Reflection.created_at).limit(limit).to_list()
-    if not items:
-        return f"No reflections{' ['+category+']' if category else ''} found."
-    lines = []
-    for r in items:
-        ts = r.created_at.strftime("%Y-%m-%d %H:%M")
-        lines.append(f"- [{ts}] ({r.category}) {r.observation}\n    → Lesson: {r.lesson}")
-    return f"Reflections{' ['+category+']' if category else ''} ({len(items)}):\n" + "\n".join(lines)
-
-
-# ===========================================================================
-# Journal
-# ===========================================================================
-
-
-@mcp.tool()
-async def read_journal(for_date: Optional[str] = None) -> str:
-    """Read the journal entry for a given date. Defaults to the most recent.
-
-    Args:
-        for_date: ISO date string (YYYY-MM-DD). Omit for the most recent entry.
-    """
-    from db.schemas import Journal
-    if for_date:
-        try:
-            d = date.fromisoformat(for_date)
-        except ValueError:
-            return f"Invalid date '{for_date}'. Use YYYY-MM-DD."
-        doc = await Journal.find_one(Journal.datestamp == d)
-        if not doc:
-            return f"No journal entry for {for_date}."
-        return f"Journal entry for {for_date}:\n\n{doc.summary}"
-    else:
-        doc = await Journal.find().sort(-Journal.datestamp).limit(1).first_or_none()
-        if not doc:
-            return "No journal entries yet."
-        return f"Most recent journal entry ({doc.datestamp.isoformat()}):\n\n{doc.summary}"
-
-
-@mcp.tool()
-async def compact_conversations(for_date: Optional[str] = None) -> str:
-    """Compact and journal a day's conversations.
-
-    Use to force a daily summary instead of waiting for the end-of-day cron.
-    Skips destructive apocalypse/flush operations.
-
-    Args:
-        for_date: ISO date string (YYYY-MM-DD). Omit for today.
-    """
-    if for_date:
-        try:
-            d = date.fromisoformat(for_date)
-        except ValueError:
-            return f"Invalid date '{for_date}'. Use YYYY-MM-DD."
-    else:
-        d = date.today()
-    from skills.journal.compact import compact_conversations as _compact
-    return await _compact(d)
+    from agents.intent_classifier import run_intent_classifier
+    return await run_intent_classifier(query)
 
 
 # ===========================================================================
@@ -675,20 +572,6 @@ async def resource_pending_reminders() -> str:
     return "\n".join(lines)
 
 
-@mcp.resource("reflections://recent")
-async def resource_recent_reflections() -> str:
-    """The 10 most recent self-reflections."""
-    from db.schemas import Reflection
-    items = await Reflection.find().sort(-Reflection.created_at).limit(10).to_list()
-    if not items:
-        return "No reflections stored yet. Run `reflect` to generate some."
-    lines = []
-    for r in items:
-        ts = r.created_at.strftime("%Y-%m-%d %H:%M")
-        lines.append(f"- [{ts}] ({r.category})\n  Observed: {r.observation}\n  Lesson: {r.lesson}")
-    return "\n\n".join(lines)
-
-
 # ===========================================================================
 # Prompts
 # ===========================================================================
@@ -722,18 +605,6 @@ What: {what}
 When: {when}
 
 Call `set_reminder` with the natural-language `when` (dateparser handles it) and the `what` as the description. Confirm back to the user with the parsed date and a friendly acknowledgement."""
-
-
-@mcp.prompt()
-def reflect_prompt(n: int = 3) -> str:
-    """Template for self-reflecting on recent conversation exchanges.
-
-    Args:
-        n: Number of recent exchanges to review.
-    """
-    return f"""Run self-reflection on the most recent {n} exchanges.
-
-Call `reflect` with n={n} and report back what was found — saved reflections and their categories. If no misfires, say so explicitly. Self-reflections feed the future self-correction mechanism."""
 
 
 @mcp.prompt()
