@@ -415,6 +415,59 @@ async def handle_plans(request: web.Request) -> web.Response:
 	)
 
 
+async def handle_sessions(request: web.Request) -> web.Response:
+	from utils.session_service import list_sessions
+
+	limit = max(1, min(int(request.rel_url.query.get("limit", "20")), 100))
+	sessions = await list_sessions(limit=limit)
+	return web.json_response(
+		{
+			"sessions": [
+				{
+					"session_id": str(session.session_id),
+					"title": session.title,
+					"summary": session.summary,
+					"created_at": session.created_at.isoformat(),
+					"last_active_at": session.last_active_at.isoformat(),
+					"status": session.status,
+				}
+				for session in sessions
+			]
+		}
+	)
+
+
+async def handle_session_create(request: web.Request) -> web.Response:
+	from utils.session_service import create_session
+
+	try:
+		data = await request.json() if request.can_read_body else {}
+	except (json.JSONDecodeError, ValueError):
+		data = {}
+	session_id = await create_session(title=data.get("title"))
+	return web.json_response({"session_id": str(session_id)}, status=201)
+
+
+async def handle_session_resume(request: web.Request) -> web.Response:
+	from utils.session_service import resume_session
+
+	try:
+		session_id = await resume_session(request.match_info["session_id"])
+	except (ValueError, TypeError):
+		return web.json_response({"error": "session not found"}, status=404)
+	return web.json_response({"session_id": str(session_id), "resumed": True})
+
+
+async def handle_session_close(request: web.Request) -> web.Response:
+	from utils.session_service import close_session
+
+	try:
+		await close_session(request.match_info["session_id"])
+	except (ValueError, TypeError):
+		return web.json_response({"error": "invalid session ID"}, status=400)
+	return web.json_response({"closed": True})
+
+
 async def handle_notes(request: web.Request) -> web.Response:
 	from db.schemas import Note
 
@@ -622,6 +675,10 @@ def create_app() -> web.Application:
 	app.router.add_get("/plans", handle_plans)
 	app.router.add_get("/notes", handle_notes)
 	app.router.add_get("/reminders", handle_reminders)
+	app.router.add_get("/sessions", handle_sessions)
+	app.router.add_post("/sessions", handle_session_create)
+	app.router.add_post("/sessions/{session_id}/resume", handle_session_resume)
+	app.router.add_post("/sessions/{session_id}/close", handle_session_close)
 	app.router.add_get("/openapi.json", handle_openapi)
 	app.router.add_get("/docs", handle_docs)
 	return app
@@ -629,7 +686,9 @@ def create_app() -> web.Application:
 
 async def start_api_server(host: str = "0.0.0.0", port: int = 8000) -> web.AppRunner:
 	from utils.memory_service import start_memory_worker
+	from utils.session_service import initialize_session
 
+	await initialize_session()
 	start_memory_worker()
 	app = create_app()
 	runner = web.AppRunner(app)

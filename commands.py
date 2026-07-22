@@ -41,6 +41,50 @@ async def cmd_history() -> None:
 		logger.info(f"Session history\n{text}")
 
 
+async def cmd_session(args: str) -> None:
+	"""Create, list, resume, or close resumable conversation sessions."""
+	from utils.session_service import (
+		close_session,
+		create_session,
+		get_active_session_id,
+		list_sessions,
+		resume_session,
+	)
+
+	parts = args.strip().split(maxsplit=1)
+	action = parts[0].lower() if parts else "list"
+	value = parts[1].strip() if len(parts) > 1 else ""
+	if action == "new":
+		session_id = await create_session(title=value or None)
+		logger.info(f"Started new session: {session_id}")
+	elif action == "resume":
+		if not value:
+			logger.info("Usage: /session resume <uuid>")
+			return
+		try:
+			session_id = await resume_session(value)
+		except ValueError:
+			logger.info("Session not found. Check the UUID and try again.")
+			return
+		logger.info(f"Resumed session: {session_id}")
+	elif action == "close":
+		await close_session(value or get_active_session_id())
+		session_id = await create_session()
+		logger.info(f"Closed session and started: {session_id}")
+	else:
+		sessions = await list_sessions()
+		active = get_active_session_id()
+		if not sessions:
+			logger.info("No sessions found.")
+			return
+		lines = []
+		for session in sessions:
+			marker = "*" if session.session_id == active else " "
+			label = session.title or "Untitled session"
+			lines.append(f"{marker} {session.session_id}  {label}  [{session.status}]")
+		logger.info("Sessions:\n" + "\n".join(lines))
+
+
 async def cmd_planner(args: str) -> None:
 	from agents.planner import run_planner
 	from utils.inference_gate import foreground_inference
@@ -551,6 +595,7 @@ async def cmd_help() -> None:
 		"Available commands:\n"
 		"  /clear             — wipe the in-memory conversation history\n"
 		"  /history           — print session history to the terminal\n"
+		"  /session [list|new|resume|close] — manage resumable sessions\n"
 		"  /persona [id] [v]  — switch persona and voice\n"
 		"  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
 		"  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
@@ -570,6 +615,7 @@ async def cmd_help() -> None:
 _COMMANDS = {
 	"/clear": cmd_clear,
 	"/history": cmd_history,
+	"/session": cmd_session,
 	"/persona": cmd_persona,
 	"/voice": cmd_voice,
 	"/news-length": cmd_news_length,

@@ -262,6 +262,41 @@ async def search_memories(query: str, limit: int = 10) -> str:
     return await list_memories(query=query, limit=limit)
 
 
+@mcp.tool()
+async def list_sessions(limit: int = 20) -> str:
+	"""List resumable conversation sessions and their UUIDs."""
+	from utils.session_service import list_sessions as get_sessions
+
+	sessions = await get_sessions(limit=max(1, min(limit, 100)))
+	if not sessions:
+		return "No sessions found."
+	return "Sessions:\n" + "\n".join(
+		f"- {session.session_id} — {session.title or 'Untitled'} [{session.status}]"
+		for session in sessions
+	)
+
+
+@mcp.tool()
+async def new_session(title: Optional[str] = None) -> str:
+	"""Create and activate a new resumable conversation session."""
+	from utils.session_service import create_session
+
+	session_id = await create_session(title=title)
+	return f"Started session: {session_id}"
+
+
+@mcp.tool()
+async def resume_session(session_id: str) -> str:
+	"""Resume a conversation session by UUID."""
+	from utils.session_service import resume_session as resume
+
+	try:
+		active_id = await resume(session_id)
+	except ValueError:
+		return f"Session not found: {session_id}"
+	return f"Resumed session: {active_id}"
+
+
 # ===========================================================================
 # Notes
 # ===========================================================================

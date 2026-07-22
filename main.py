@@ -197,6 +197,8 @@ async def main(
 
 	from db.preferences import apply_preferences
 	await apply_preferences()
+	from utils.session_service import initialize_session
+	await initialize_session()
 	from utils.memory_service import start_memory_worker
 	start_memory_worker()
 

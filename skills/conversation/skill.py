@@ -415,6 +415,20 @@ async def _compress_oldest() -> None:
 	_rolling_summary = _strip_think(response.content)
 	_history.clear()
 	_history.extend(messages[half:])
+	from utils.session_service import update_session_summary
+	await update_session_summary(_rolling_summary)
+
+
+def restore_session_context(summary: str | None, interactions: list) -> None:
+	"""Restore durable session context into the in-process conversation state."""
+	global _rolling_summary, _current_topic, _pending_intent
+	_rolling_summary = summary
+	_current_topic = None
+	_pending_intent = None
+	_history.clear()
+	for interaction in interactions:
+		_history.append(HumanMessage(content=interaction.user_message))
+		_history.append(AIMessage(content=interaction.assistant_message))
 
 
 async def maybe_compress_history() -> None:

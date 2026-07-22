@@ -23,7 +23,9 @@ Package name: `jeanclawd` (see `pyproject.toml`).
   authoritative; Qdrant is a disposable semantic-recall projection.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
-- **API server** — 18 routes (aiohttp), OpenAPI 3.0 spec, Swagger UI at `/docs`.
+- **Resumable sessions** — every turn belongs to a UUID-backed session that can be listed
+  and resumed from the CLI or API.
+- **API server** — 22 routes (aiohttp), OpenAPI 3.0 spec, Swagger UI at `/docs`.
 - **Multi-interface** — CLI REPL, REST/WebSocket API, Telegram bot.
 
 ## Requirements
@@ -141,6 +143,12 @@ Memory facts are deliberately separate from runtime settings. Facts can be forgo
 superseded, searched semantically, or recovered with `rebuild_memory_index()` if Qdrant is
 lost. When Qdrant is unavailable, basic key/value recall falls back to MongoDB.
 
+Sessions are separate from both settings and learned memory. A session stores its UUID,
+title, rolling summary, and recent `Interaction` records. If no title is supplied, the
+first completed turn is given a strict two- or three-word title by the small intent model.
+Resuming a session restores that conversational context without making its facts
+session-specific.
+
 Two-tier routing is a settled design decision — tool-use was explicitly rejected because
 models don't call tools consistently in practice. See
 [`.claude/memory/project_architecture.md`](.claude/memory/project_architecture.md) for
@@ -161,7 +169,7 @@ pydantic-aida/
 ├── providers/               # lmstudio, llamacpp, openai_compatible, openai
 ├── skills/                  # 12 skills + planner + telegram
 ├── db/                      # Beanie ODM + MongoDB
-├── api/                     # aiohttp server (18 routes) + OpenAPI
+├── api/                     # aiohttp server (22 routes) + OpenAPI
 ├── stt/  tts/               # speech I/O providers
 ├── utils/                   # memory_service, memory_index, inference_gate, embedder, ...
 ├── storage/  memory/        # local state + feedback notes

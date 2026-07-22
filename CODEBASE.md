@@ -8,7 +8,7 @@ persona, personalizer, or reflection subsystems.
 
 - `main.py` runs the interactive CLI, optional voice input/output, Telegram, and optional
   HTTP server.
-- `api/server.py` exposes the aiohttp REST and WebSocket API.
+- `api/server.py` exposes the aiohttp REST and WebSocket API, including resumable sessions.
 - `mcp_server.py` exposes selected capabilities through MCP.
 - `commands.py` owns the CLI slash-command surface.
 
@@ -96,6 +96,14 @@ CLI memory controls:
 rolling summary. This state exists for follow-ups inside the running process; persistent
 cross-session knowledge comes only from active `MemoryFact` documents.
 
+### Resumable sessions
+
+`Session` documents provide durable conversation-thread identity. Each session has a UUID,
+optional or automatically generated title, persisted rolling summary, and timestamps. `Interaction.session_id` links
+every completed turn to its session. Resuming a UUID restores the saved summary and the
+most recent interactions into the in-process conversation context. Learned `MemoryFact`
+records remain user-wide rather than session-scoped.
+
 The current named topic is extracted after responses and used to resolve short pronoun or
 demonstrative follow-ups. A pending-intent lock routes answers to skill clarification
 questions back to the requesting skill.
@@ -107,6 +115,7 @@ Beanie registers these documents:
 | Document | Purpose |
 |---|---|
 | `Interaction` | Immutable completed user/assistant turn |
+| `Session` | Resumable conversation thread and persisted summary |
 | `MemoryWorkItem` | Durable deferred-extraction outbox item |
 | `MemoryFact` | Canonical learned fact with provenance and lifecycle |
 | `UserSettings` | Explicit persona, voice, Spotify-device, and news-length settings |
@@ -132,7 +141,7 @@ directly from active memory facts.
 
 ## API
 
-`api/server.py` registers 18 routes:
+`api/server.py` registers 22 routes:
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -150,6 +159,10 @@ directly from active memory facts.
 | GET | `/plans` | Saved plans |
 | GET | `/notes` | Saved notes |
 | GET | `/reminders` | Reminders |
+| GET | `/sessions` | List resumable sessions |
+| POST | `/sessions` | Create a session |
+| POST | `/sessions/{session_id}/resume` | Resume a session |
+| POST | `/sessions/{session_id}/close` | Close a session |
 | GET | `/openapi.json` | OpenAPI specification |
 | GET | `/docs` | Swagger UI |
 

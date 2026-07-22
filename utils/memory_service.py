@@ -60,12 +60,16 @@ async def record_interaction(
 	answer: str,
 	*,
 	user_id: str = "default",
-	session_id: str = "default",
+	session_id: str | None = None,
 	intent: str | None = None,
 ) -> None:
 	"""Persist a completed turn immediately, then add durable deferred work."""
 	from db.schemas import Interaction, MemoryWorkItem
 
+	if session_id is None:
+		from utils.session_service import get_active_session_id
+
+		session_id = str(get_active_session_id() or "default")
 	now = datetime.now()
 	interaction = Interaction(
 		user_id=user_id,
@@ -79,6 +83,12 @@ async def record_interaction(
 	await MemoryWorkItem(
 		user_id=user_id, interaction_id=str(interaction.id), created_at=now
 	).insert()
+	from utils.session_service import touch_session
+
+	await touch_session()
+	from utils.session_service import maybe_generate_session_title
+
+	await maybe_generate_session_title(question, answer)
 
 async def _extract(interactions: list) -> list[_ExtractedFact]:
 	candidates = [i for i in interactions if _PERSONAL_SIGNAL.search(i.user_message)]

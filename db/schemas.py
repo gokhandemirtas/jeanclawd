@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from typing import Literal, Optional
+from uuid import UUID
 
 from beanie import Document
 from pydantic import BaseModel, Field
@@ -62,6 +63,20 @@ class Plans(Document):
 	created_at: datetime
 	ask: str
 	plan: str
+
+
+class Session(Document):
+	"""A resumable conversation thread."""
+	session_id: UUID
+	user_id: str = "default"
+	title: Optional[str] = None
+	summary: Optional[str] = None
+	created_at: datetime
+	last_active_at: datetime
+	status: Literal["active", "closed"] = "active"
+
+	class Settings:
+		name = "Sessions"
 
 
 class Interaction(Document):
