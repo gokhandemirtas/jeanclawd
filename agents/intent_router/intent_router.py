@@ -15,8 +15,10 @@ async def route(
 		_safe_extract_topic,
 		append_to_history,
 		handle_conversation,
+		maybe_compress_history,
 		set_pending_intent,
 	)
+	await maybe_compress_history()
 
 	skill = get_skill(intent)
 	sig = inspect.signature(skill.handle)

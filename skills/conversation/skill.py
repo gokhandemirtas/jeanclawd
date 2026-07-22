@@ -288,23 +288,6 @@ def get_current_topic() -> str | None:
 	return _current_topic
 
 
-def reset_session() -> None:
-	"""Clear in-memory conversation state. Called after compaction so stale topic
-	and history don't bleed into the next session."""
-	global \
-		_current_topic, \
-		_rolling_summary, \
-		_pending_intent, \
-		_exchanges_since_question, \
-		_total_exchanges
-	_current_topic = None
-	_rolling_summary = None
-	_pending_intent = None
-	_exchanges_since_question = 0
-	_total_exchanges = 0
-	_history.clear()
-
-
 # Used when wrapping a skill's raw data output into natural language.
 # Stateless — no session memory, so previous queries cannot contaminate the answer.
 def _data_prompt(handler_response: str) -> str:
@@ -400,7 +383,8 @@ async def _compress_oldest() -> None:
 	global _rolling_summary
 
 	messages = list(_history)
-	half = len(messages) // 2
+	# Keep complete user/assistant pairs in both the summary and remaining history.
+	half = (len(messages) // 2) // 2 * 2
 	to_compress = messages[:half]
 	if not to_compress:
 		return
@@ -429,6 +413,14 @@ async def _compress_oldest() -> None:
 		]
 	)
 	_rolling_summary = _strip_think(response.content)
+	_history.clear()
+	_history.extend(messages[half:])
+
+
+async def maybe_compress_history() -> None:
+	"""Summarise older turns before the in-memory history reaches its limit."""
+	if len(_history) >= MAX_HISTORY - 2:
+		await _compress_oldest()
 
 
 def append_to_history(user_msg: str, assistant_msg: str) -> None:
@@ -546,8 +538,7 @@ async def handle_chat(
 
 	# Streaming path — used by CLI and voice WebSocket
 	if on_token is not None:
-		if len(_history) >= MAX_HISTORY - 2:
-			await _compress_oldest()
+		await maybe_compress_history()
 		system = _chat_prompt()
 		if voice_mode:
 			system += _VOICE_CONSTRAINT
@@ -609,8 +600,7 @@ async def handle_chat(
 		return final
 
 	# Compress oldest history before it gets evicted
-	if len(_history) >= MAX_HISTORY - 2:
-		await _compress_oldest()
+	await maybe_compress_history()
 
 	# Normal CHAT flow (simple conversation, no reasoning needed)
 	logger.debug("[CHAT] Using standard conversation flow")
