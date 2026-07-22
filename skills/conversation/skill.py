@@ -672,9 +672,13 @@ async def generate_greeting() -> str:
 	Falls back to a generic greeting on any failure.
 	"""
 	try:
-		from utils.memory_service import get_fact_value
+		from db.schemas import UserProfile
 
-		user_name = await get_fact_value("name")
+		profile = await UserProfile.find_one(UserProfile.user_id == "default")
+		user_name = profile.display_name if profile else None
+		if not user_name:
+			from utils.memory_service import get_fact_value
+			user_name = await get_fact_value("name")
 
 		name_instruction = (
 			f" The user's name is {user_name}. Use it naturally." if user_name else ""

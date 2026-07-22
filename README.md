@@ -23,6 +23,9 @@ Package name: `jeanclawd` (see `pyproject.toml`).
   authoritative; Qdrant is a disposable semantic-recall projection.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
+- **Fast user profile** — a small `UserProfile` document (one per `user_id`) materializes
+  identity details such as the display name and location for startup and greetings. Detailed
+  knowledge remains in `MemoryFact`.
 - **Resumable sessions** — every turn belongs to a UUID-backed session that can be listed
   and resumed from the CLI or API.
 - **API server** — 22 routes (aiohttp), OpenAPI 3.0 spec, Swagger UI at `/docs`.
@@ -131,6 +134,9 @@ MemoryWorkItem (after 10 minutes idle)
   → local generalist model with structured output
   → MemoryFact upsert and supersession
   → Qdrant projection for semantic recall
+
+MemoryFact identity updates also refresh the matching `UserProfile` read model, so greeting
+generation does not need to scan the full memory collection.
 ```
 
 The interfaces follow the same conceptual stages, while API, Telegram, and MCP use the
@@ -188,6 +194,17 @@ uv run ruff format .                   # format (tab indent by default)
 
 Code style: **ruff with tab indentation** (project default). Lint/format on edited files
 before committing.
+
+## MongoDB inspection
+
+`utils/mongodb_access.py` provides bounded, read-only access using the `MONGODB_*`
+variables in `.env`. The project MCP server exposes this through `mongo_inventory` and
+`mongo_find`; neither tool can insert, update, or delete data.
+
+For a general MongoDB connection available directly to Codex, MongoDB also publishes an
+official Codex Plugin bundling its MCP server and MongoDB agent skills. Add the marketplace
+with `codex plugin marketplace add mongodb/agent-skills`, start a new Codex session, then
+install the MongoDB plugin from `/plugins`. Configure it in read-only mode before use.
 
 ## Known issues
 

@@ -17,10 +17,11 @@ from db.schemas import (
   Session,
   ServiceCredentials,
   UserSettings,
+  UserProfile,
   Weather,
 )
 
-collections = [Credentials, HueConfiguration, Interaction, MemoryFact, MemoryWorkItem, Newsfeed, Note, Plans, Reminders, Session, ServiceCredentials, UserSettings, Weather]
+collections = [Credentials, HueConfiguration, Interaction, MemoryFact, MemoryWorkItem, Newsfeed, Note, Plans, Reminders, Session, ServiceCredentials, UserProfile, UserSettings, Weather]
 
 
 async def db_init() -> str | None:

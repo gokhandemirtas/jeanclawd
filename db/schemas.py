@@ -147,3 +147,14 @@ class UserSettings(Document):
 
 	class Settings:
 		name = "UserSettings"
+
+
+class UserProfile(Document):
+	"""Small, fast read model for identity details used at startup and in greetings."""
+	user_id: str = "default"
+	display_name: Optional[str] = None
+	location: Optional[str] = None
+	updated_at: datetime = Field(default_factory=datetime.now)
+
+	class Settings:
+		name = "UserProfiles"

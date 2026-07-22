@@ -142,6 +142,7 @@ async def _upsert_fact(user_id: str, fact: _ExtractedFact, source_ids: list[str]
 		await existing.save()
 		from utils.memory_index import index_fact
 		await asyncio.to_thread(index_fact, existing)
+		await _update_profile(user_id, fact)
 		return
 
 	prior = await MemoryFact.find(
@@ -168,6 +169,24 @@ async def _upsert_fact(user_id: str, fact: _ExtractedFact, source_ids: list[str]
 	await stored.insert()
 	from utils.memory_index import index_fact
 	await asyncio.to_thread(index_fact, stored)
+	await _update_profile(user_id, fact)
+
+
+async def _update_profile(user_id: str, fact: _ExtractedFact) -> None:
+	"""Maintain the small identity projection without replacing MemoryFact."""
+	from db.schemas import UserProfile
+
+	if fact.namespace != "identity" or fact.key not in {"name", "location", "home_location", "city"}:
+		return
+	profile = await UserProfile.find_one(UserProfile.user_id == user_id)
+	if profile is None:
+		profile = UserProfile(user_id=user_id)
+	if fact.key == "name":
+		profile.display_name = fact.value
+	elif fact.key in {"location", "home_location", "city"}:
+		profile.location = fact.value
+	profile.updated_at = datetime.now()
+	await profile.save()
 
 
 async def process_pending_memory() -> int:

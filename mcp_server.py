@@ -27,6 +27,7 @@ MCP handshake stays fast (the client lists tools before any are called).
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -295,6 +296,37 @@ async def resume_session(session_id: str) -> str:
 	except ValueError:
 		return f"Session not found: {session_id}"
 	return f"Resumed session: {active_id}"
+
+
+@mcp.tool()
+async def mongo_inventory() -> str:
+	"""Show MongoDB collection names and document counts (read-only)."""
+	from utils.mongodb_access import inventory
+
+	try:
+		items = await inventory()
+	except Exception as exc:
+		return f"MongoDB unavailable: {exc}"
+	if not items:
+		return "MongoDB is connected, but no collections were found."
+	return "MongoDB collections:\n" + "\n".join(
+		f"- {item['collection']}: {item['count']} document(s)" for item in items
+	)
+
+
+@mcp.tool()
+async def mongo_find(collection: str, query_json: str = "{}", limit: int = 20) -> str:
+	"""Read bounded MongoDB documents using a JSON query; never modifies data."""
+	from utils.mongodb_access import find_documents
+
+	try:
+		query = json.loads(query_json)
+		if not isinstance(query, dict):
+			return "query_json must contain a JSON object."
+		documents = await find_documents(collection, query, limit=limit)
+	except Exception as exc:
+		return f"MongoDB read failed: {exc}"
+	return json.dumps(documents, ensure_ascii=False, indent=2, default=str)
 
 
 # ===========================================================================
