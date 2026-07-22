@@ -19,8 +19,9 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **Vision** — VLM-backed image description (`POST /vision`, `/look` command).
 - **6 personas** — switchable identities with distinct tones and voices.
 - **Persistent memory** — completed turns are stored as `Interaction` documents, then a
-  deferred local-LLM worker extracts attributable `MemoryFact` records. MongoDB is
-  authoritative; Qdrant is a disposable semantic-recall projection.
+  deferred GLiNER2 + local-LLM worker identifies entities/relations and extracts attributable
+  `MemoryFact` records. MongoDB is authoritative; Qdrant is a disposable semantic-recall
+  projection.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
 - **Fast user profile** — a small `UserProfile` document (one per `user_id`) materializes
@@ -109,6 +110,12 @@ uv run python main.py --keepalive
 uv run python main.py --session SESSION_UUID
 ```
 
+Last active application session:
+
+```bash
+uv run python main.py --session e4f97131-0c00-439b-b25b-41ff8e88774c
+```
+
 CLI flags: `--debug`, `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
 `--keepalive`, `--session SESSION_UUID`.
 
@@ -136,8 +143,9 @@ CLI / REST / Telegram / MCP
   → Interaction + MemoryWorkItem
 
 MemoryWorkItem (after 10 minutes idle)
-  → local generalist model with structured output
-  → MemoryFact upsert and supersession
+  → local GLiNER2 candidate entities and relations
+  → local generalist model with structured output for semantic extraction
+  → MemoryFact upsert, validation, provenance, and supersession
   → Qdrant projection for semantic recall
 
 MemoryFact identity updates also refresh the matching `UserProfile` read model, so greeting
@@ -174,7 +182,7 @@ interface pipelines, known issues, and the document inventory) see
 ```
 pydantic-aida/
 ├── main.py                  # CLI entry + REPL loop
-├── commands.py              # 15 slash commands
+├── commands.py              # 16 slash commands
 ├── pyproject.toml           # package "jeanclawd", uv-managed deps
 ├── agents/                  # routing, intent classification, personas
 ├── providers/               # lmstudio, llamacpp, openai_compatible, openai

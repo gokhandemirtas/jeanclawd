@@ -137,9 +137,25 @@ async def record_interaction(
 
 async def _extract(interactions: list) -> list[_ExtractedFact]:
 	candidates = []
+	signals_by_id = {}
+	from utils.entity_extractor import extract_user_signals
+	for interaction in interactions:
+		try:
+			signals_by_id[str(interaction.id)] = await asyncio.to_thread(
+				extract_user_signals, interaction.user_message
+			)
+		except Exception as exc:
+			logger.warning(f"[memory] GLiNER2 unavailable ({exc}); using fallback signals")
+			signals_by_id[str(interaction.id)] = {"entities": {}, "relations": {}}
 	for index, interaction in enumerate(interactions):
-		if _PERSONAL_SIGNAL.search(interaction.user_message) or _NAME_WITH_QUESTION.search(
-			interaction.user_message
+		signals = signals_by_id[str(interaction.id)]
+		entities = signals["entities"].get("entities", {})
+		relations = signals["relations"].get("relation_extraction", {})
+		if (
+			_PERSONAL_SIGNAL.search(interaction.user_message)
+			or _NAME_WITH_QUESTION.search(interaction.user_message)
+			or any(entities.values())
+			or any(relations.values())
 		):
 			candidates.append(interaction)
 			continue
@@ -194,6 +210,26 @@ async def _extract(interactions: list) -> list[_ExtractedFact]:
 		and fact.value
 		and fact.source_interaction_id in valid_ids
 	]
+	# Convert high-confidence GLiNER2 relations into facts without asking the
+	# generalist model to reproduce obvious user statements.
+	relation_keys = {
+		"likes": ("preference", "likes"),
+		"dislikes": ("preference", "dislikes"),
+		"lives in": ("identity", "location"),
+		"works on": ("interest", "work_on"),
+	}
+	for interaction in candidates:
+		relations = signals_by_id[str(interaction.id)]["relations"].get(
+		"relation_extraction", {}
+	)
+		for relation, output in relations.items():
+			mapped = relation_keys.get(relation)
+			if not mapped:
+				continue
+			for item in output:
+				tail = item.get("tail", {}).get("text", "").strip()
+				if tail and not any(f.namespace == mapped[0] and f.key == mapped[1] and f.value.lower() == tail.lower() for f in facts):
+					facts.append(_ExtractedFact(namespace=mapped[0], key=mapped[1], value=tail, confidence=1.0, source_interaction_id=str(interaction.id)))
 	# Preserve an unambiguous name supplied in the conversational form
 	# "Gokhan. what's your name?" even if the local model returns no fact.
 	for interaction in candidates:
