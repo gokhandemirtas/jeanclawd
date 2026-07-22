@@ -38,6 +38,26 @@ _SEARCH_PREFIXES = (
 	"find info",
 	"deep dive",
 	"tell me everything about",
+	"find links",
+	"find a link",
+	"product link",
+	"product links",
+	"where can i buy",
+	"where to buy",
+)
+
+# These are session/conversation-management requests, not web searches. Keep
+# them deterministic because a small routing model may interpret "where were
+# we" literally as a grammar/search query.
+_CONVERSATIONAL_PATTERNS = (
+	"where were we",
+	"where did we leave off",
+	"what were we discussing",
+	"what did we discuss",
+	"what were we talking about",
+	"do you remember what we",
+	"i was just testing",
+	"just testing your ability",
 )
 
 _DATETIME_QUERIES = frozenset(
@@ -74,7 +94,14 @@ _DATETIME_QUERIES = frozenset(
 def _keyword_classify(text: str) -> IntentLiteral | None:
 	"""Fast pre-check for high-confidence intents that small models routinely miss."""
 	t = text.lower().strip()
+	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
+		return "CHAT"
 	if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
+		return "SEARCH"
+	# Shopping requests must never be answered from the chat model's memory.
+	if any(vendor in t for vendor in ("amazon", "ebay", "ali express", "aliexpress")) and any(
+		word in t for word in ("link", "buy", "price", "product", "seller", "find", "search")
+	):
 		return "SEARCH"
 	t_norm = t.replace("'", "").replace("\u2019", "")
 	if t_norm in _DATETIME_QUERIES:

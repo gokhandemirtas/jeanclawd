@@ -131,6 +131,12 @@ async def generalist_route(
 	Falls back to CHAT on any routing failure so the conversation never hard-crashes.
 	"""
 	import time
+	from agents.intent_classifier.intent_classifier import _keyword_classify
+
+	shortcut = _keyword_classify(query)
+	if shortcut:
+		logger.debug(f"[router] {shortcut} (keyword match)")
+		return shortcut, 1.0
 
 	t = time.time()
 	try:

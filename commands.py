@@ -209,6 +209,21 @@ async def cmd_memories(args: str) -> None:
 		logger.error(f"memories failed: {e}")
 
 
+async def cmd_process_memory(args: str) -> None:
+	"""Run deferred memory extraction immediately for testing."""
+	try:
+		from utils.memory_service import process_pending_memory
+
+		include_complete = args.strip().lower() == "all"
+		logger.info("Running deferred memory extraction now…")
+		if include_complete:
+			logger.info("Including previously completed work items.")
+		count = await process_pending_memory(force=True, include_complete=include_complete)
+		logger.info(f"Memory extraction complete: stored {count} fact(s).")
+	except Exception as e:
+		logger.error(f"memory extraction failed: {e}")
+
+
 async def cmd_forget(args: str) -> None:
 	"""Mark one canonical fact as forgotten using its ID prefix."""
 	try:
@@ -602,6 +617,7 @@ async def cmd_help() -> None:
 		"  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
 		"  /connect <service> — authenticate a service (spotify | hue)\n"
 		"  /memories [q]      — list/search canonical user memory facts\n"
+		"  /process-memory [all] — run deferred extraction (all retries history)\n"
 		"  /forget-memory <id>       — forget one fact (ID prefix from /memories)\n"
 		"  /apocalypse        — wipe interactions and learned memory facts\n"
 		"  /ctx               — show context window usage for the current session\n"
@@ -622,6 +638,7 @@ _COMMANDS = {
 	"/model": cmd_model,
 	"/connect": cmd_connect,
 	"/memories": cmd_memories,
+	"/process-memory": cmd_process_memory,
 	"/forget-memory": cmd_forget,
 	"/apocalypse": cmd_apocalypse,
 	"/ctx": cmd_ctx,

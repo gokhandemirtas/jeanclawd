@@ -97,6 +97,7 @@ def _tts_rows() -> list[tuple[str, str]]:
 def _models() -> list[tuple[str, str]]:
 	keys = [
 		("Generalist", "MODEL_GENERALIST"),
+		("Research", "MODEL_RESEARCH"),
 		("Intent", "MODEL_INTENT"),
 		("Embedding", "MODEL_EMBEDDING"),
 		("Vision (VLM)", "MODEL_VLM"),

@@ -214,6 +214,13 @@ def _is_followup(text: str) -> bool:
 	bleed (e.g. 'about its history' → 'about Microsoft stock price's history').
 	"""
 	words = text.lower().split()
+	# A self-contained shopping/list request must not inherit the previous topic.
+	# The item list and vendor constraints are the subject, even when it says
+	# "these parts" or "the following items".
+	if ("\n-" in text or "\n*" in text or "\n•" in text) and any(
+		word in text.lower() for word in ("link", "buy", "amazon", "ebay", "ali express", "aliexpress")
+	):
+		return False
 	# Demonstrative pronouns ("this dish", "that recipe") reference context when the
 	# query is short. Long queries use demonstratives as predicate determiners ("it's
 	# this AI that...") and are self-contained — don't inject topic bleed into them.
@@ -323,6 +330,14 @@ def _chat_prompt_base() -> str:
 	return f"""{get_active_preamble()} Keep it to 1-2 sentences. If the user corrects you or references something from earlier, acknowledge it briefly.
 
 Always respond to what the user is saying right now. Do not bring up or continue a previous topic unless the user does.
+
+Shopping and URL safety: You cannot know whether a product listing URL is valid or current.
+Never invent, guess, or fabricate shopping links, prices, sellers, or availability. If the user
+asks you to find, search for, buy, or provide links to a product or commodity, that is a web
+search request and must be handled by SEARCH. If the request contains a list of products,
+search for each product separately and preserve any requested marketplaces (such as eBay,
+Amazon, or AliExpress). If you are in CHAT because routing failed, say that you need to search
+instead of producing plausible-looking URLs.
 
 When referencing something from earlier in the conversation, use first person naturally — "I mentioned", "I told you" — never "the assistant said" or "{name} said". Never start a response with "I said,".
 

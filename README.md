@@ -24,7 +24,7 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
 - **Fast user profile** — a small `UserProfile` document (one per `user_id`) materializes
-  identity details such as the display name and location for startup and greetings. Detailed
+  identity details such as the display name, birth date, gender, and location for startup and greetings. Detailed
   knowledge remains in `MemoryFact`.
 - **Resumable sessions** — every turn belongs to a UUID-backed session that can be listed
   and resumed from the CLI or API.
@@ -60,6 +60,7 @@ list. Key variables:
 |----------|---------|---------|
 | `INFERENCE_PROVIDER` | LLM backend | `lmstudio` |
 | `MODEL_GENERALIST` | Large model: chat, wrapping, routing, reasoning | `qwen3-30b-a3b-instruct-2507-mlx` |
+| `MODEL_RESEARCH` | Dedicated model for deep-search planning and synthesis | `Qwen3-14B-4bit` |
 | `MODEL_INTENT` | Lean model for stateless classification | `meta-llama-3.1-8b-instruct` |
 | `MODEL_EMBEDDING` | Embedding model for memory recall / RAG | `text-embedding-granite-embedding-30m-english` |
 | `MODEL_VLM` | Vision-language model for `/look` | `qwen/qwen3-vl-4b` |
@@ -103,18 +104,22 @@ uv run python -m api.server
 
 # Supervised auto-restart
 uv run python main.py --keepalive
+
+# Resume a previous session
+uv run python main.py --session SESSION_UUID
 ```
 
 CLI flags: `--debug`, `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
-`--keepalive`.
+`--keepalive`, `--session SESSION_UUID`.
 
 ## Slash commands
 
-15 in-REPL commands — see [CODEBASE.md](CODEBASE.md) for the full table. Highlights:
+16 in-REPL commands — see [CODEBASE.md](CODEBASE.md) for the full table. Highlights:
 
 - `/persona [id] [voice]` — switch identity
 - `/model [name]` — fuzzy-pick a loaded LM Studio model
 - `/memories [q]` — list or search long-term memory
+- `/process-memory` — run deferred memory extraction immediately (testing)
 - `/planner <task>` — multi-step tool use
 - `/forget <id>` — forget one learned fact
 - `/help` — list all commands

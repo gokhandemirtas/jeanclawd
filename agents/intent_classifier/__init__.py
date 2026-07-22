@@ -15,20 +15,21 @@ async def run_intent_classifier(
 
     async with foreground_inference():
         from skills.conversation.skill import consume_pending_intent, get_recent_history, resolve_query
+        user_input = await resolve_query(user_input)
+        shortcut = _keyword_classify(user_input)
         pending = consume_pending_intent()
-        if pending:
+        if shortcut:
+            if pending:
+                logger.debug(f"[router] explicit {shortcut} overrides pending intent lock: {pending}")
+            logger.debug(f"[router] {shortcut} (keyword match)")
+            intent = shortcut
+        elif pending:
             intent = pending
         else:
-            user_input = await resolve_query(user_input)
-            shortcut = _keyword_classify(user_input)
-            if shortcut:
-                logger.debug(f"[router] {shortcut} (keyword match)")
-                intent = shortcut
-            else:
-                from agents.generalist.router import generalist_route
-                intent, confidence = await generalist_route(user_input, get_recent_history(n=3))
-                if confidence < 0.75 and intent != "CHAT":
-                    intent = "CHAT"
+            from agents.generalist.router import generalist_route
+            intent, confidence = await generalist_route(user_input, get_recent_history(n=3))
+            if confidence < 0.75 and intent != "CHAT":
+                intent = "CHAT"
         if on_status:
             on_status(intent.replace("_", " ").title())
         response = await route(intent, user_input, on_token=on_token, voice_mode=voice_mode)

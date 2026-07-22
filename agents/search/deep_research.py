@@ -18,7 +18,12 @@ from utils.log import logger
 from utils.messages import HumanMessage, SystemMessage
 from utils.search import search_wikipedia, web_search
 
-MAX_STEPS = 6
+MAX_STEPS = 10
+
+
+def _research_model() -> str:
+	"""Use the dedicated research model, while keeping existing setups usable."""
+	return os.environ.get("MODEL_RESEARCH") or os.environ["MODEL_GENERALIST"]
 
 _SYSTEM_PROMPT = """You are a research assistant conducting deep research on behalf of the user.
 
@@ -31,6 +36,10 @@ _SYSTEM_PROMPT = """You are a research assistant conducting deep research on beh
 
 ## Rules
 - Be specific with search queries. "Jean-Claude Van Damme age 2024" beats "JCVD".
+- For shopping or product-link requests, treat every item in a user-provided list as a separate
+  research target and search each named marketplace separately.
+- Preserve marketplace constraints; do not substitute generic articles or other sellers.
+- Only report URLs returned by search results. Never construct or guess product URLs.
 - After 3+ observations, strongly prefer RESPOND unless a critical fact is clearly missing.
 - RESPOND with a comprehensive, well-structured answer — this is deep research, not a quick reply.
 - Never mention the search process in your final answer. Just answer the question.
@@ -97,7 +106,7 @@ def _extract_urls(text: str) -> tuple[str, list[str]]:
 async def _run_step(prompt: str) -> _ResearchStep:
     return await asyncio.to_thread(
         generate_structured_output,
-        model_name=os.environ["MODEL_GENERALIST"],
+        model_name=_research_model(),
         user_prompt=prompt,
         system_prompt=_SYSTEM_PROMPT,
         pydantic_model=_ResearchStep,
@@ -107,7 +116,7 @@ async def _run_step(prompt: str) -> _ResearchStep:
 
 async def _summarize(text: str, query: str) -> str:
     from agents.agent_factory import create_llm
-    llm = create_llm(temperature=0.0, max_tokens=400)
+    llm = create_llm(model_name=_research_model(), temperature=0.0, max_tokens=400)
     response = await llm.ainvoke([
         SystemMessage(content=(
             "Summarize the following search result. Keep every fact that is relevant to the query. "
@@ -149,7 +158,7 @@ async def _synthesize(original_query: str, observations: list[str], length_hint:
         "Do not mention the research process — just answer the question directly."
     )
     research = "\n\n".join(f"Finding {i + 1}:\n{obs}" for i, obs in enumerate(observations))
-    llm = create_llm(temperature=0.7, max_tokens=2048)
+    llm = create_llm(model_name=_research_model(), temperature=0.7, max_tokens=2048)
     response = await llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=f"User question: {original_query}\n\nResearch:\n{research}"),

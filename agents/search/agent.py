@@ -34,6 +34,8 @@ _DEEP_RESEARCH_TRIGGERS = {
 	"full breakdown",
 	"tell me everything",
 }
+_SHOPPING_TERMS = ("find links", "product links", "where can i buy", "where to buy", "buy")
+_MARKETPLACES = ("amazon", "ebay", "ali express", "aliexpress")
 
 _EXTRACT_PROMPT = (
 	"Extract a concise web search query from the user's message. "
@@ -99,13 +101,20 @@ def _is_deep_research(query: str) -> bool:
 	return any(trigger in q for trigger in _DEEP_RESEARCH_TRIGGERS)
 
 
+def _is_shopping_request(query: str) -> bool:
+	q = query.lower()
+	return any(term in q for term in _SHOPPING_TERMS) and (
+		any(marketplace in q for marketplace in _MARKETPLACES) or "link" in q
+	)
+
+
 async def run_search(query: str) -> str:
 	from skills.conversation.skill import get_current_topic
 
 	topic_hint = get_current_topic() or ""
 	topic = _extract_topic(query, topic_hint)
 
-	if _is_deep_research(query):
+	if _is_deep_research(query) or _is_shopping_request(query):
 		logger.debug(f"[search] Deep research mode for '{topic}'")
 		answer, references = await deep_research(original_query=query, topic=topic)
 		if references:

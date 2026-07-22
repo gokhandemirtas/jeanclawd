@@ -125,7 +125,13 @@ class _ProgressSpinner:
 
 
 async def main(
-	debug: bool, emote: bool, speak: bool, track_camera: bool, server: bool, listen: bool
+	debug: bool,
+	emote: bool,
+	speak: bool,
+	track_camera: bool,
+	server: bool,
+	listen: bool,
+	session_id: str | None = None,
 ) -> None:
 	logger.set_debug(debug)
 	logger.init_file_logging("logs/app.log")
@@ -197,8 +203,15 @@ async def main(
 
 	from db.preferences import apply_preferences
 	await apply_preferences()
-	from utils.session_service import initialize_session
-	await initialize_session()
+	from utils.session_service import initialize_session, resume_session
+	try:
+		if session_id:
+			await resume_session(session_id)
+		else:
+			await initialize_session()
+	except ValueError:
+		console.print(f"[red]Could not resume session: {session_id}[/red]")
+		return
 	from utils.memory_service import start_memory_worker
 	start_memory_worker()
 
@@ -255,7 +268,7 @@ async def main(
 				continue
 			if user_input.startswith("/"):
 				if user_input in ("/quit",):
-					console.print("\nGoodbye! Have a great day!")
+					_print_resume_hint()
 					break
 				await handle_command(user_input)
 				continue
@@ -282,8 +295,15 @@ async def main(
 						async with foreground_inference():
 							effective_query = await resolve_query(user_input)
 							effective_query = await resolve_action_query(effective_query)
+							from agents.intent_classifier.intent_classifier import _keyword_classify
+							shortcut = _keyword_classify(effective_query)
 							pending = consume_pending_intent()
-							if pending:
+							if shortcut:
+								if pending:
+									logger.debug(f"[router] explicit {shortcut} overrides pending intent lock: {pending}")
+								intent = shortcut
+								confidence = 1.0
+							elif pending:
 								logger.debug(f"[router] pending intent lock: {pending}")
 								intent = pending
 								confidence = 1.0
@@ -328,23 +348,36 @@ async def main(
 		except KeyboardInterrupt:
 			count = pending_count()
 			if count == 0:
-				console.print("\nGoodbye! Have a great day!")
+				_print_resume_hint()
 				break
 			console.print(f"\n[yellow]{count} task(s) queued. Clear queue? [y/n][/yellow] ", end="")
 			try:
 				answer = input().strip().lower()
 			except (EOFError, KeyboardInterrupt):
-				console.print("\nGoodbye! Have a great day!")
+				_print_resume_hint()
 				break
 			if answer == "y":
 				removed = drain()
 				console.print(f"[dim]Cleared {removed} task(s). Press Ctrl+C to exit.[/dim]")
 		except EOFError:
-			console.print("\nGoodbye! Have a great day!")
+			_print_resume_hint()
 			break
 		except Exception as e:
 			logger.error(f"An error occurred: {e}")
 			console.print("\nSorry, I encountered an error. Let's try again.\n")
+
+
+def _print_resume_hint() -> None:
+	from utils.session_service import get_active_session_id
+
+	session_id = get_active_session_id()
+	if session_id:
+		console.print(
+			f"\nGoodbye! Resume this session with:\n"
+			f"[cyan]uv run main.py --session {session_id}[/cyan]"
+		)
+	else:
+		console.print("\nGoodbye! Have a great day!")
 
 
 async def _record_interaction(question: str, answer: str, *, intent: str | None = None) -> None:
@@ -410,6 +443,7 @@ if __name__ == "__main__":
 	parser.add_argument("--server", action="store_true", help="Start the API server")
 	parser.add_argument("--listen", action="store_true", help="Enable microphone voice input (push-to-talk)")
 	parser.add_argument("--keepalive", action="store_true", help="Run under supervisord (auto-restart on crash)")
+	parser.add_argument("--session", help="Resume an existing session by UUID")
 	args = parser.parse_args()
 
 	if args.keepalive:
@@ -425,5 +459,6 @@ if __name__ == "__main__":
 			track_camera=args.track_camera,
 			server=args.server,
 			listen=args.listen,
+			session_id=args.session,
 		)
 	)
