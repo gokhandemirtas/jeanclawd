@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from functools import lru_cache
+from io import StringIO
 import warnings
 
 _MODEL_NAME = "fastino/gliner2-base-v1"
@@ -34,7 +36,10 @@ def _model():
 				"ignore",
 				message=r"You are using a model of type `extractor`.*",
 			)
-			return GLiNER2.from_pretrained(_MODEL_NAME)
+			# GLiNER2 prints its configuration directly to stdout during
+			# construction; keep that library banner out of the chat terminal.
+			with redirect_stdout(StringIO()):
+				return GLiNER2.from_pretrained(_MODEL_NAME)
 	finally:
 		transformers_logging.set_verbosity(previous_verbosity)
 

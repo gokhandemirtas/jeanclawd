@@ -92,13 +92,11 @@ def _write_report(
 	observations: list[str],
 	references: list[str],
 ) -> Path:
-	"""Persist the complete research output as a Markdown document."""
+	"""Persist readable summaries, not raw page/navigation captures."""
 	report_dir = Path(__file__).resolve().parents[2] / "deep-research"
 	report_dir.mkdir(parents=True, exist_ok=True)
 	report_path = report_dir / f"{_report_slug(topic)}.md"
-	findings = "\n\n".join(
-		f"### Finding {i}\n\n{observation}" for i, observation in enumerate(observations, 1)
-	)
+	notes = "\n\n".join(_format_report_observation(observation) for observation in observations)
 	sources = "\n".join(f"{i}. {url}" for i, url in enumerate(references, 1)) or "No external sources were collected."
 	content = (
 		f"# Deep Research: {topic}\n\n"
@@ -106,13 +104,48 @@ def _write_report(
 		f"- Original request: {original_query}\n\n"
 		"## Final answer\n\n"
 		f"{answer.strip()}\n\n"
-		"## Research findings\n\n"
-		f"{findings or 'No research findings were collected.'}\n\n"
+		"## Research notes\n\n"
+		f"{notes or 'No research notes were collected.'}\n\n"
 		"## Sources\n\n"
 		f"{sources}\n"
 	)
 	report_path.write_text(content, encoding="utf-8")
 	return report_path
+
+
+def _split_long_paragraphs(text: str, *, max_sentences: int = 3, max_chars: int = 560) -> str:
+	"""Add readable breaks without changing the model's wording."""
+	paragraphs: list[str] = []
+	for paragraph in re.split(r"\n\s*\n", text.strip()):
+		paragraph = re.sub(r"\s+", " ", paragraph).strip()
+		if not paragraph:
+			continue
+		sentences = re.split(r"(?<=[.!?])\s+(?=[\"'A-Z0-9])", paragraph)
+		if len(sentences) <= max_sentences and len(paragraph) <= max_chars:
+			paragraphs.append(paragraph)
+			continue
+		chunks: list[str] = []
+		chunk: list[str] = []
+		chunk_chars = 0
+		for sentence in sentences:
+			if chunk and (len(chunk) >= max_sentences or chunk_chars + len(sentence) + 1 > max_chars):
+				chunks.append(" ".join(chunk))
+				chunk, chunk_chars = [], 0
+			chunk.append(sentence)
+			chunk_chars += len(sentence) + 1
+		if chunk:
+			chunks.append(" ".join(chunk))
+		paragraphs.extend(chunks)
+	return "\n\n".join(paragraphs)
+
+
+def _format_report_observation(observation: str) -> str:
+	"""Render one search summary as a labelled note, not a fake finding."""
+	match = re.match(r"Query:\s*(.*?)\nResult:\s*(.*)", observation, flags=re.DOTALL)
+	if not match:
+		return _split_long_paragraphs(observation)
+	query, result = match.groups()
+	return f"### Search: {query.strip()}\n\n{_split_long_paragraphs(result)}"
 
 
 async def _complete_research(
@@ -176,7 +209,7 @@ async def _summarize(text: str, query: str) -> str:
         )),
         HumanMessage(content=f"Query: {query}\n\nSearch result:\n{text}"),
     ])
-    return _strip_reasoning(response.content)
+    return _split_long_paragraphs(_strip_reasoning(response.content))
 
 
 def _strip_reasoning(text: str) -> str:
@@ -215,19 +248,20 @@ async def _synthesize(original_query: str, observations: list[str], references: 
 
     system = (
         f"{get_active_identity()} You have conducted deep research on behalf of the user. "
-        f"Using the findings below, write a thorough, well-structured response in {length_hint}. "
-        "Use short paragraphs. No bullet points unless comparing multiple items. "
+        f"Using the research below, write a thorough, well-structured response in {length_hint}. "
+        "Use short paragraphs of no more than 2–3 sentences, and insert a blank line "
+        "whenever the topic or comparison point changes. No bullet points unless comparing multiple items. "
         "Cite factual claims with source markers such as [S1] when supported by the research. "
         "Do not invent sources or citations. Do not mention the research process — just answer the question directly."
     )
-    research = "\n\n".join(f"Finding {i + 1}:\n{obs}" for i, obs in enumerate(observations))
+    research = "\n\n".join(f"Research note {i + 1}:\n{obs}" for i, obs in enumerate(observations))
     source_list = "\n".join(f"[S{i}] {url}" for i, url in enumerate(references, 1)) or "(none)"
     llm = create_llm(model_name=_research_model(), temperature=0.7, max_tokens=2048)
     response = await llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=f"User question: {original_query}\n\nResearch:\n{research}\n\nAvailable sources:\n{source_list}"),
     ])
-    return _strip_reasoning(response.content)
+    return _split_long_paragraphs(_strip_reasoning(response.content))
 
 
 def _status(msg: str) -> None:
@@ -293,7 +327,9 @@ async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]
 		result, full_result = await _search(step.query, references)
 		_status(f"[{step_num}/{MAX_STEPS}] Search done in {time.time() - t_search:.1f}s")
 		observations.append(f"Query: {step.query}\nResult: {result}")
-		report_observations.append(f"Query: {step.query}\nResult: {full_result}")
+		# Publish the cleaned/summarized result, not the raw page capture. The latter
+		# often contains navigation, related-content widgets, and social links.
+		report_observations.append(f"Query: {step.query}\nResult: {result}")
 		logger.debug(f"[deep_research] Observation: {result[:120]}…")
 
 	if observations:
