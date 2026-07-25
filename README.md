@@ -117,7 +117,13 @@ uv run python main.py --session e4f97131-0c00-439b-b25b-41ff8e88774c
 ```
 
 CLI flags: `--debug`, `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
-`--keepalive`, `--session SESSION_UUID`.
+`--telegram`, `--keepalive`, `--session SESSION_UUID`.
+
+Telegram requires `TELEGRAM_BOT_TOKEN` in `.env`; start it with:
+
+```bash
+uv run python main.py --telegram
+```
 
 ## Slash commands
 

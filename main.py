@@ -131,6 +131,7 @@ async def main(
 	track_camera: bool,
 	server: bool,
 	listen: bool,
+	telegram: bool = False,
 	session_id: str | None = None,
 ) -> None:
 	logger.set_debug(debug)
@@ -201,6 +202,14 @@ async def main(
 		console.print("[red]Database unavailable — cannot start.[/red]")
 		sys.exit(1)
 
+	if telegram:
+		from skills.telegram import start_telegram_bot
+
+		telegram_status = await start_telegram_bot()
+		connections["Telegram"] = (
+			bool(telegram_status), telegram_status or "TELEGRAM_BOT_TOKEN not set"
+		)
+
 	from db.preferences import apply_preferences
 	await apply_preferences()
 	from utils.session_service import initialize_session, resume_session
@@ -225,6 +234,7 @@ async def main(
 			"listen": listen,
 			"track_camera": track_camera,
 			"server": server,
+			"telegram": telegram,
 		},
 		persona={
 			"Persona": get_active_persona_id(),
@@ -442,6 +452,7 @@ if __name__ == "__main__":
 	)
 	parser.add_argument("--server", action="store_true", help="Start the API server")
 	parser.add_argument("--listen", action="store_true", help="Enable microphone voice input (push-to-talk)")
+	parser.add_argument("--telegram", action="store_true", help="Enable the Telegram bot")
 	parser.add_argument("--keepalive", action="store_true", help="Run under supervisord (auto-restart on crash)")
 	parser.add_argument("--session", help="Resume an existing session by UUID")
 	args = parser.parse_args()
@@ -459,6 +470,7 @@ if __name__ == "__main__":
 			track_camera=args.track_camera,
 			server=args.server,
 			listen=args.listen,
+			telegram=args.telegram,
 			session_id=args.session,
 		)
 	)
