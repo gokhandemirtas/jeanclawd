@@ -24,6 +24,13 @@ from db.init import db_init
 from utils import logger
 from utils.boot_info import boot, check_inference
 from utils.task_queue import drain, enqueue, pending_count, worker
+from utils.pending_plan import (
+	clear_pending,
+	is_cancellation,
+	is_confirmation,
+	set_pending,
+	take_pending,
+)
 
 try:
 	from prompt_toolkit import PromptSession
@@ -305,25 +312,58 @@ async def main(
 						async with foreground_inference():
 							effective_query = await resolve_query(user_input)
 							effective_query = await resolve_action_query(effective_query)
-							from agents.intent_classifier.intent_classifier import _keyword_classify
-							shortcut = _keyword_classify(effective_query)
-							pending = consume_pending_intent()
-							if shortcut:
-								if pending:
-									logger.debug(f"[router] explicit {shortcut} overrides pending intent lock: {pending}")
-								intent = shortcut
-								confidence = 1.0
-							elif pending:
-								logger.debug(f"[router] pending intent lock: {pending}")
-								intent = pending
-								confidence = 1.0
+							planned = take_pending()
+							if planned is not None:
+								if is_cancellation(user_input):
+									result = "Cancelled the pending requests."
+								elif is_confirmation(user_input):
+									parts: list[str] = []
+									for index, task in enumerate(planned, 1):
+										try:
+											resolved_intent = task.intent
+											answer = await route(task.intent, task.query)
+											parts.append(f"{index}. {answer}")
+										except Exception as exc:
+											logger.exception(f"[decomposer] Task {index} failed")
+											parts.append(f"{index}. Failed: {exc}")
+									result = "\n\n".join(parts)
+								else:
+									clear_pending()
+									result = "I cancelled the pending requests because the confirmation response was unclear."
 							else:
-								intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
-								if confidence < 0.75 and intent != "CHAT":
-									logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
-									intent = "CHAT"
-							resolved_intent = intent
-							result = await route(intent, effective_query, on_token=on_token)
+								from agents.decomposer import decompose_request
+								decomposition = await decompose_request(effective_query)
+								if decomposition.is_compound:
+									set_pending(decomposition.tasks)
+									lines = [f"I found {len(decomposition.tasks)} requests:"]
+									lines.extend(
+										f"{i}. {task.description}"
+										for i, task in enumerate(decomposition.tasks, 1)
+									)
+									lines.append("\nProcess these in order? [y/n]")
+									result = "\n".join(lines)
+								else:
+									# A single task deliberately goes through the existing router;
+									# decomposition does not replace intent classification.
+									from agents.intent_classifier.intent_classifier import _keyword_classify
+									shortcut = _keyword_classify(effective_query)
+									pending = consume_pending_intent()
+									if shortcut:
+										if pending:
+											logger.debug(f"[router] explicit {shortcut} overrides pending intent lock: {pending}")
+										intent = shortcut
+										confidence = 1.0
+									elif pending:
+										logger.debug(f"[router] pending intent lock: {pending}")
+										intent = pending
+										confidence = 1.0
+									else:
+										intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
+										if confidence < 0.75 and intent != "CHAT":
+											logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
+											intent = "CHAT"
+									resolved_intent = intent
+									result = await route(intent, effective_query, on_token=on_token)
 						if not done.done():
 							done.set_result(result)
 					except Exception as e:
