@@ -33,7 +33,12 @@ async def route(
 		result = skill.handle(user_input)
 	if inspect.isawaitable(result):
 		result = await result
-	if skill.needs_wrapping:
+	# Deep research already produces a user-facing document path. Wrapping it in
+	# another LLM call can alter or omit that path, so preserve it verbatim.
+	document_response = isinstance(result, str) and result.startswith(
+		"Finished research, please check the final document at:"
+	)
+	if skill.needs_wrapping and not document_response:
 		final = await handle_conversation(
 			user_input, result, on_token=on_token, voice_mode=voice_mode
 		)

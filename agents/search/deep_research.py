@@ -2,13 +2,18 @@
 
 Runs up to MAX_STEPS search iterations, letting the model decide when it has
 gathered enough information to answer the original question comprehensively.
+Completed work is written to a Markdown report under ``deep-research/`` so the
+interactive context only retains a compact pointer to the document.
 """
 
 import asyncio
 import os
 import re
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +21,7 @@ from agents.persona import get_active_identity
 from utils.llm_structured_output import generate_structured_output
 from utils.log import logger
 from utils.messages import HumanMessage, SystemMessage
-from utils.search import search_wikipedia, web_search
+from utils.search import web_search
 
 MAX_STEPS = 10
 
@@ -47,6 +52,7 @@ _SYSTEM_PROMPT = """You are a research assistant conducting deep research on beh
 
 _URL_RE = re.compile(r'https?://\S+')
 _MD_LINK_RE = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
+_SOURCE_URL_RE = re.compile(r'(?im)^SourceURL:\s*(https?://\S+)\s*$')
 _SUMMARIZE_THRESHOLD = 1000
 _SUMMARIZE_INPUT_CAP = 12000  # chars fed to the summarizer LLM (~3k tokens)
 _DEFAULT_LENGTH = "at least 4–6 substantial paragraphs"
@@ -72,6 +78,56 @@ def _extract_length_hint(query: str) -> str:
     return _DEFAULT_LENGTH
 
 
+def _report_slug(topic: str) -> str:
+	"""Create a stable, filesystem-safe filename from the research topic."""
+	normalized = unicodedata.normalize("NFKD", topic).encode("ascii", "ignore").decode().lower()
+	slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+	return (slug[:100].rstrip("-") or "research")
+
+
+def _write_report(
+	original_query: str,
+	topic: str,
+	answer: str,
+	observations: list[str],
+	references: list[str],
+) -> Path:
+	"""Persist the complete research output as a Markdown document."""
+	report_dir = Path(__file__).resolve().parents[2] / "deep-research"
+	report_dir.mkdir(parents=True, exist_ok=True)
+	report_path = report_dir / f"{_report_slug(topic)}.md"
+	findings = "\n\n".join(
+		f"### Finding {i}\n\n{observation}" for i, observation in enumerate(observations, 1)
+	)
+	sources = "\n".join(f"{i}. {url}" for i, url in enumerate(references, 1)) or "No external sources were collected."
+	content = (
+		f"# Deep Research: {topic}\n\n"
+		f"- Generated: {datetime.now(UTC).isoformat(timespec='seconds')}\n"
+		f"- Original request: {original_query}\n\n"
+		"## Final answer\n\n"
+		f"{answer.strip()}\n\n"
+		"## Research findings\n\n"
+		f"{findings or 'No research findings were collected.'}\n\n"
+		"## Sources\n\n"
+		f"{sources}\n"
+	)
+	report_path.write_text(content, encoding="utf-8")
+	return report_path
+
+
+async def _complete_research(
+	original_query: str,
+	topic: str,
+	answer: str,
+	report_observations: list[str],
+	references: list[str],
+) -> tuple[str, list[str]]:
+	report_path = _write_report(original_query, topic, answer, report_observations, references)
+	from skills.conversation.skill import compact_after_deep_research
+	await compact_after_deep_research(topic, str(report_path))
+	return f"Finished research, please check the final document at: {report_path}", references
+
+
 class _ResearchStep(BaseModel):
     thought: str = Field(description="What you know so far and what is still missing.")
     action: Literal["SEARCH", "RESPOND"] = Field(
@@ -83,24 +139,20 @@ class _ResearchStep(BaseModel):
 
 
 def _extract_urls(text: str) -> tuple[str, list[str]]:
-    """Strip URLs from text, return (cleaned_text, deduplicated_url_list)."""
-    urls: list[str] = []
+	"""Strip explicit source URLs, ignoring incidental page-navigation links."""
+	urls: list[str] = []
 
-    def _capture_md(m: re.Match) -> str:
-        url = m.group(2).rstrip('.,);\'\"')
-        if url not in urls:
-            urls.append(url)
-        return m.group(1)
+	def _capture_source(match: re.Match) -> str:
+		url = match.group(1).rstrip('.,);\'"')
+		if url not in urls:
+			urls.append(url)
+		return ""
 
-    def _capture_bare(m: re.Match) -> str:
-        url = m.group(0).rstrip('.,);\'\"')
-        if url not in urls:
-            urls.append(url)
-        return ''
-
-    text = _MD_LINK_RE.sub(_capture_md, text)
-    text = _URL_RE.sub(_capture_bare, text)
-    return text.strip(), urls
+	text = _SOURCE_URL_RE.sub(_capture_source, text)
+	# Remove markdown and bare URLs from page text without adding them as sources.
+	text = _MD_LINK_RE.sub(lambda match: match.group(1), text)
+	text = _URL_RE.sub("", text)
+	return text.strip(), urls
 
 
 async def _run_step(prompt: str) -> _ResearchStep:
@@ -124,110 +176,140 @@ async def _summarize(text: str, query: str) -> str:
         )),
         HumanMessage(content=f"Query: {query}\n\nSearch result:\n{text}"),
     ])
-    return response.content.strip()
+    return _strip_reasoning(response.content)
 
 
-async def _search(query: str, references: list[str]) -> str:
-    wiki = await asyncio.to_thread(search_wikipedia, query)
-    if wiki:
-        raw = f"[Wikipedia] {wiki}"
-    else:
-        raw = await web_search(query) or f"No results found for: {query}"
+def _strip_reasoning(text: str) -> str:
+	"""Remove private reasoning/channel markers before text reaches a report."""
+	if '<|message|>' in text:
+		text = text.rsplit('<|message|>', 1)[-1]
+	text = re.sub(r'<\|[^|]+\|>', '', text)
+	return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+
+async def _search(query: str, references: list[str]) -> tuple[str, str]:
+    raw = await web_search(query) or f"No results found for: {query}"
 
     cleaned, urls = _extract_urls(raw)
     for u in urls:
         if u not in references:
             references.append(u)
+    source_block = ""
+    if urls:
+        source_block = "\n\nSources: " + ", ".join(
+            f"[S{references.index(url) + 1}] {url}" for url in urls
+        )
 
+    full_result = cleaned + source_block
     if len(cleaned) > _SUMMARIZE_THRESHOLD:
         t = time.time()
         _status(f"Summarising result ({len(cleaned):,} chars)…")
         cleaned = await _summarize(cleaned[:_SUMMARIZE_INPUT_CAP], query)
         _status(f"Summarised in {time.time() - t:.1f}s")
 
-    return cleaned
+    return cleaned + source_block, full_result
 
 
-async def _synthesize(original_query: str, observations: list[str], length_hint: str) -> str:
+async def _synthesize(original_query: str, observations: list[str], references: list[str], length_hint: str) -> str:
     from agents.agent_factory import create_llm
 
     system = (
         f"{get_active_identity()} You have conducted deep research on behalf of the user. "
         f"Using the findings below, write a thorough, well-structured response in {length_hint}. "
         "Use short paragraphs. No bullet points unless comparing multiple items. "
-        "Do not mention the research process — just answer the question directly."
+        "Cite factual claims with source markers such as [S1] when supported by the research. "
+        "Do not invent sources or citations. Do not mention the research process — just answer the question directly."
     )
     research = "\n\n".join(f"Finding {i + 1}:\n{obs}" for i, obs in enumerate(observations))
+    source_list = "\n".join(f"[S{i}] {url}" for i, url in enumerate(references, 1)) or "(none)"
     llm = create_llm(model_name=_research_model(), temperature=0.7, max_tokens=2048)
     response = await llm.ainvoke([
         SystemMessage(content=system),
-        HumanMessage(content=f"User question: {original_query}\n\nResearch:\n{research}"),
+        HumanMessage(content=f"User question: {original_query}\n\nResearch:\n{research}\n\nAvailable sources:\n{source_list}"),
     ])
-    return response.content.strip()
+    return _strip_reasoning(response.content)
 
 
 def _status(msg: str) -> None:
-    print(f"  ○ {msg}", flush=True)
+	print(f"  ○ {msg}", flush=True)
 
 
 async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]]:
-    t_total = time.time()
-    length_hint = _extract_length_hint(original_query)
-    _status(f"Deep research started — topic: {topic}")
-    observations: list[str] = []
-    searched_queries: set[str] = set()
-    references: list[str] = []
+	t_total = time.time()
+	length_hint = _extract_length_hint(original_query)
+	observations: list[str] = []
+	report_observations: list[str] = []
+	searched_queries: set[str] = set()
+	references: list[str] = []
+	_status(f"Deep research started — topic: {topic}")
 
-    for step_num in range(1, MAX_STEPS + 1):
-        obs_text = (
-            "\n\n".join(f"Observation {i + 1}:\n{obs}" for i, obs in enumerate(observations))
-            if observations else "No searches run yet."
-        )
-        already_searched = ", ".join(f'"{q}"' for q in searched_queries) or "none"
-        prompt = (
-            f"Original question: {original_query}\n"
-            f"Search topic extracted: {topic}\n\n"
-            f"Queries already searched: {already_searched}\n\n"
-            f"{obs_text}\n\n"
-            f"What is your next step? (step {step_num}/{MAX_STEPS})"
-        )
+	for step_num in range(1, MAX_STEPS + 1):
+		obs_text = (
+			"\n\n".join(f"Observation {i + 1}:\n{obs}" for i, obs in enumerate(observations))
+			if observations else "No searches run yet."
+		)
+		already_searched = ", ".join(f'"{q}"' for q in searched_queries) or "none"
+		prompt = (
+			f"Original question: {original_query}\n"
+			f"Search topic extracted: {topic}\n\n"
+			f"Queries already searched: {already_searched}\n\n"
+			f"{obs_text}\n\n"
+			f"What is your next step? (step {step_num}/{MAX_STEPS})"
+		)
 
-        t_step = time.time()
-        _status(f"[{step_num}/{MAX_STEPS}] Thinking…")
-        try:
-            step = await _run_step(prompt)
-        except Exception as e:
-            logger.error(f"[deep_research] Step failed: {e}")
-            break
-        _status(f"[{step_num}/{MAX_STEPS}] Thought in {time.time() - t_step:.1f}s")
+		_status(f"[{step_num}/{MAX_STEPS}] Thinking…")
+		t_step = time.time()
+		try:
+			step = await _run_step(prompt)
+		except Exception as e:
+			logger.error(f"[deep_research] Step failed: {e}")
+			break
 
-        logger.debug(f"[deep_research] Thought: {step.thought}")
+		_status(f"[{step_num}/{MAX_STEPS}] Thought in {time.time() - t_step:.1f}s — {step.action}")
+		logger.debug(f"[deep_research] Thought: {step.thought}")
 
-        if step.action == "RESPOND":
-            _status(f"[{step_num}/{MAX_STEPS}] Satisfied — composing answer from {len(observations)} finding(s)")
-            if observations:
-                t_synth = time.time()
-                answer = await _synthesize(original_query, observations, length_hint)
-                _status(f"Answer composed in {time.time() - t_synth:.1f}s  |  total: {time.time() - t_total:.1f}s")
-                return answer, references
-            return step.query, references
+		if step.action == "RESPOND":
+			if observations:
+				_status(f"[{step_num}/{MAX_STEPS}] Satisfied — composing answer from {len(observations)} finding(s)")
+				t_synth = time.time()
+				answer = await _synthesize(original_query, observations, references, length_hint)
+				result = await _complete_research(
+					original_query, topic, answer, report_observations, references
+				)
+				logger.debug(f"[deep_research] Report written in {time.time() - t_synth:.1f}s")
+				return result
+			return await _complete_research(
+				original_query, topic, step.query, report_observations, references
+			)
 
-        if step.query in searched_queries:
-            _status(f"[{step_num}/{MAX_STEPS}] Duplicate query — stopping early")
-            break
+		if step.query in searched_queries:
+			_status(f"[{step_num}/{MAX_STEPS}] Duplicate query — stopping early")
+			logger.debug("[deep_research] Duplicate query — stopping early")
+			break
 
-        searched_queries.add(step.query)
-        t_search = time.time()
-        _status(f"[{step_num}/{MAX_STEPS}] Searching: {step.query}")
-        result = await _search(step.query, references)
-        _status(f"[{step_num}/{MAX_STEPS}] Search done in {time.time() - t_search:.1f}s")
-        observations.append(f"Query: {step.query}\nResult: {result}")
-        logger.debug(f"[deep_research] Observation: {result[:120]}…")
+		searched_queries.add(step.query)
+		_status(f"[{step_num}/{MAX_STEPS}] Searching: {step.query}")
+		t_search = time.time()
+		result, full_result = await _search(step.query, references)
+		_status(f"[{step_num}/{MAX_STEPS}] Search done in {time.time() - t_search:.1f}s")
+		observations.append(f"Query: {step.query}\nResult: {result}")
+		report_observations.append(f"Query: {step.query}\nResult: {full_result}")
+		logger.debug(f"[deep_research] Observation: {result[:120]}…")
 
-    _status(f"Max steps reached — synthesising from {len(observations)} finding(s)")
-    if observations:
-        t_synth = time.time()
-        answer = await _synthesize(original_query, observations, length_hint)
-        _status(f"Answer composed in {time.time() - t_synth:.1f}s  |  total: {time.time() - t_total:.1f}s")
-        return answer, references
-    return "I wasn't able to find enough information to answer your question.", references
+	if observations:
+		_status(f"Max steps reached — synthesising from {len(observations)} finding(s)")
+		t_synth = time.time()
+		answer = await _synthesize(original_query, observations, references, length_hint)
+		result = await _complete_research(
+			original_query, topic, answer, report_observations, references
+		)
+		logger.debug(f"[deep_research] Report written in {time.time() - t_synth:.1f}s")
+		return result
+	_status(f"No findings collected — finishing in {time.time() - t_total:.1f}s")
+	return await _complete_research(
+		original_query,
+		topic,
+		"I wasn't able to find enough information to answer your question.",
+		report_observations,
+		references,
+	)

@@ -457,6 +457,21 @@ def append_to_history(user_msg: str, assistant_msg: str) -> None:
 	_history.append(AIMessage(content=assistant_msg))
 
 
+async def compact_after_deep_research(topic: str, report_path: str) -> None:
+	"""Replace detailed research context with a durable pointer to its report."""
+	global _rolling_summary, _current_topic
+	previous = _rolling_summary.strip() if _rolling_summary else ""
+	research_note = (
+		f"Deep research completed on {topic}. The full findings and answer are saved at {report_path}. "
+		"Use that document if the user asks to revisit the detailed research."
+	)
+	_rolling_summary = f"{previous}\n\n{research_note}".strip() if previous else research_note
+	_history.clear()
+	_current_topic = topic
+	from utils.session_service import update_session_summary
+	await update_session_summary(_rolling_summary)
+
+
 def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
 	"""Return the last n exchanges as (user, assistant) string pairs."""
 	messages = list(_history)

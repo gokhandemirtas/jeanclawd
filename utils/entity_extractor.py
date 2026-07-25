@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import warnings
 
 _MODEL_NAME = "fastino/gliner2-base-v1"
 _ENTITY_LABELS = {
@@ -20,8 +21,22 @@ _RELATION_LABELS = ["likes", "dislikes", "lives in", "works on"]
 @lru_cache(maxsize=1)
 def _model():
 	from gliner2 import GLiNER2
+	from transformers.utils import logging as transformers_logging
 
-	return GLiNER2.from_pretrained(_MODEL_NAME)
+	# GLiNER2 intentionally wraps a DeBERTa encoder in its custom ``extractor``
+	# model class. Transformers emits a compatibility warning for that expected
+	# composition; keep other warnings/errors visible.
+	previous_verbosity = transformers_logging.get_verbosity()
+	try:
+		transformers_logging.set_verbosity_error()
+		with warnings.catch_warnings():
+			warnings.filterwarnings(
+				"ignore",
+				message=r"You are using a model of type `extractor`.*",
+			)
+			return GLiNER2.from_pretrained(_MODEL_NAME)
+	finally:
+		transformers_logging.set_verbosity(previous_verbosity)
 
 
 def extract_user_signals(text: str) -> dict:
