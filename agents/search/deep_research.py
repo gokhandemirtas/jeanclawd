@@ -24,6 +24,7 @@ from utils.messages import HumanMessage, SystemMessage
 from utils.search import web_search
 
 MAX_STEPS = 10
+MIN_SEARCHES = 3
 
 
 def _research_model() -> str:
@@ -46,6 +47,8 @@ _SYSTEM_PROMPT = """You are a research assistant conducting deep research on beh
 - Preserve marketplace constraints; do not substitute generic articles or other sellers.
 - Only report URLs returned by search results. Never construct or guess product URLs.
 - After 3+ observations, strongly prefer RESPOND unless a critical fact is clearly missing.
+- Do not RESPOND before at least 3 distinct searches have been completed. Before then,
+  always choose SEARCH, preferably using a different angle or source type.
 - RESPOND with a comprehensive, well-structured answer — this is deep research, not a quick reply.
 - Never mention the search process in your final answer. Just answer the question.
 """
@@ -103,7 +106,7 @@ def _write_report(
 		f"- Generated: {datetime.now(UTC).isoformat(timespec='seconds')}\n"
 		f"- Original request: {original_query}\n\n"
 		"## Final answer\n\n"
-		f"{answer.strip()}\n\n"
+		f"{_strip_reasoning(answer).strip()}\n\n"
 		"## Research notes\n\n"
 		f"{notes or 'No research notes were collected.'}\n\n"
 		"## Sources\n\n"
@@ -143,9 +146,9 @@ def _format_report_observation(observation: str) -> str:
 	"""Render one search summary as a labelled note, not a fake finding."""
 	match = re.match(r"Query:\s*(.*?)\nResult:\s*(.*)", observation, flags=re.DOTALL)
 	if not match:
-		return _split_long_paragraphs(observation)
+		return _split_long_paragraphs(_strip_reasoning(observation))
 	query, result = match.groups()
-	return f"### Search: {query.strip()}\n\n{_split_long_paragraphs(result)}"
+	return f"### Search: {query.strip()}\n\n{_split_long_paragraphs(_strip_reasoning(result))}"
 
 
 async def _complete_research(
@@ -217,7 +220,12 @@ def _strip_reasoning(text: str) -> str:
 	if '<|message|>' in text:
 		text = text.rsplit('<|message|>', 1)[-1]
 	text = re.sub(r'<\|[^|]+\|>', '', text)
-	return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+	text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+	# Some local model templates emit only the closing marker. In that case,
+	# everything before it is still private reasoning and must be discarded.
+	if re.search(r'</think>', text, flags=re.IGNORECASE):
+		text = re.split(r'</think>', text, maxsplit=1, flags=re.IGNORECASE)[-1]
+	return text.strip()
 
 
 async def _search(query: str, references: list[str]) -> tuple[str, str]:
@@ -286,6 +294,7 @@ async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]
 		prompt = (
 			f"Original question: {original_query}\n"
 			f"Search topic extracted: {topic}\n\n"
+			f"Completed searches: {len(observations)} (minimum before RESPOND: {MIN_SEARCHES})\n"
 			f"Queries already searched: {already_searched}\n\n"
 			f"{obs_text}\n\n"
 			f"What is your next step? (step {step_num}/{MAX_STEPS})"
@@ -302,9 +311,28 @@ async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]
 		_status(f"[{step_num}/{MAX_STEPS}] Thought in {time.time() - t_step:.1f}s — {step.action}")
 		logger.debug(f"[deep_research] Thought: {step.thought}")
 
+		if step.action == "RESPOND" and len(observations) < MIN_SEARCHES:
+			# Enforce meaningful depth even when the local model decides too early
+			# that its first result is sufficient.
+			angles = (
+				"historical context and scholarly sources",
+				"specific examples and influence on later shows",
+				"critical reception and contrasting perspectives",
+			)
+			fallback_query = f"{original_query} {angles[len(observations) % len(angles)]}"
+			_status(
+				f"[{step_num}/{MAX_STEPS}] One response is not enough — "
+				f"continuing to search ({len(observations)}/{MIN_SEARCHES})"
+			)
+			step = _ResearchStep(
+				thought="The minimum independent-source depth has not been reached.",
+				action="SEARCH",
+				query=fallback_query,
+			)
+
 		if step.action == "RESPOND":
 			if observations:
-				_status(f"[{step_num}/{MAX_STEPS}] Satisfied — composing answer from {len(observations)} finding(s)")
+				_status(f"[{step_num}/{MAX_STEPS}] Satisfied — composing answer from {len(observations)} search(es)")
 				t_synth = time.time()
 				answer = await _synthesize(original_query, observations, references, length_hint)
 				result = await _complete_research(
