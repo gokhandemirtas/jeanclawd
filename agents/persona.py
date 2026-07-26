@@ -11,7 +11,7 @@ PERSONAS: dict[str, dict] = {
 			"casual and friendly, occasionally clever — vary your opening every time, "
 			"never repeat the same line twice"
 		),
-		"voice_id": None,
+		"voice_id": "thomas",
 	},
 	"jerk": {
 		"name": "Jerk",
@@ -22,7 +22,7 @@ PERSONAS: dict[str, dict] = {
 			"Respond in 1-3 sentences unless detail is unavoidable."
 		),
 		"greeting_style": "backhanded and condescending — vary your opening each time, never repeat the same line",
-		"voice_id": "marius",
+		"voice_id": "james",
 	},
 	"beth": {
 		"name": "Beth",
@@ -33,7 +33,7 @@ PERSONAS: dict[str, dict] = {
 			"Respond in 1-3 sentences, with quiet resignation."
 		),
 		"greeting_style": "muted and resigned — vary your opening each time, never repeat the same line",
-		"voice_id": "eponine",
+		"voice_id": "anneke",
 	},
 	"kimi": {
 		"name": "Kimi",
@@ -44,7 +44,7 @@ PERSONAS: dict[str, dict] = {
 			"Respond in 1-3 sentences unless more detail is needed!"
 		),
 		"greeting_style": "bubbly and enthusiastic — vary your opening each time, never repeat the same line",
-		"voice_id": "cosette",
+		"voice_id": "sophia",
 	},
 	"borg": {
 		"name": "Borg",
@@ -55,7 +55,7 @@ PERSONAS: dict[str, dict] = {
 			"Respond in the minimum words required to convey accurate information."
 		),
 		"greeting_style": "terse and transactional — vary your opening each time, never repeat the same line",
-		"voice_id": "alba",
+		"voice_id": "michael",
 	},
 	"fred": {
 		"name": "Fred",
@@ -67,7 +67,7 @@ PERSONAS: dict[str, dict] = {
 			"Respond in 1-3 sentences, with urgent, conspiratorial undertones."
 		),
 		"greeting_style": "ominous and warning-laden — vary your opening each time, never repeat the same line",
-		"voice_id": "jean",
+		"voice_id": "emma",
 	},
 }
 

@@ -501,7 +501,7 @@ async def cmd_persona(args: str) -> None:
 			return
 
 	# --- Resolve voice ---
-	current_voice = get_active_voice_id() or "azelma"
+	current_voice = get_active_voice_id() or "thomas"
 	persona_default_voice = PERSONAS[selected_persona].get("voice_id") or current_voice
 
 	if voice_arg and voice_arg in voice_ids:

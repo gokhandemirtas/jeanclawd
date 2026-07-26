@@ -32,7 +32,7 @@ TTS_HOST = os.getenv(
 	_lmstudio_host if TTS_PROVIDER == "lmstudio" else "https://api.openai.com/v1",
 )
 TTS_API_KEY = os.getenv("TTS_API_KEY", os.getenv("OPENAI_API_KEY", "lm-studio"))
-TTS_LANG = os.getenv("TTS_LANG", "en-us")
+TTS_LANG = os.getenv("TTS_LANG", "en").split("-")[0]
 
 
 def _load_model_adapter():
@@ -51,8 +51,8 @@ def _load_model_adapter():
 _adapter = _load_model_adapter()
 
 # Resolve effective model ID and default voice from adapter (or env fallbacks)
-_effective_model_id: str = getattr(_adapter, "MODEL_ID", TTS_MODEL or "kokoro")
-_adapter_default_voice: str = getattr(_adapter, "DEFAULT_VOICE", "af_heart")
+_effective_model_id: str = getattr(_adapter, "MODEL_ID", TTS_MODEL or "supertonic-3")
+_adapter_default_voice: str = getattr(_adapter, "DEFAULT_VOICE", "M1")
 
 
 def set_spinner(enabled: bool) -> None:
@@ -61,35 +61,63 @@ def set_spinner(enabled: bool) -> None:
 
 
 voice_ids = [
-	"alba",
-	"marius",
-	"javert",
-	"jean",
-	"fantine",
-	"cosette",
-	"eponine",
-	"azelma",
+	"thomas",
+	"anneke",
+	"james",
+	"sophia",
+	"michael",
+	"emma",
 ]
 
-# Maps internal persona voice names → Kokoro voice IDs
-_KOKORO_VOICE_MAP: dict[str, str] = {
-	"alba": "bf_emma",  # British female, warm
-	"marius": "am_michael",  # American male, young
-	"javert": "bm_lewis",  # British male, stern
-	"jean": "bm_george",  # British male, authoritative
-	"fantine": "af_bella",  # American female, emotive
-	"cosette": "af_nicole",  # American female, bright
-	"eponine": "af_sky",  # American female, distinct
-	"azelma": "af_heart",  # American female, default
+# Friendly application voice names → Supertonic voice styles.
+SUPERTONIC_VOICE_MAP: dict[str, str] = {
+	"thomas": "M1",
+	"anneke": "F1",
+	"james": "M2",
+	"sophia": "F2",
+	"michael": "M3",
+	"emma": "F3",
 }
 
 
-def _resolve_kokoro_voice(voice_id: str) -> str:
-	return _KOKORO_VOICE_MAP.get(voice_id, voice_id)
+def _resolve_voice(voice_id: str) -> str:
+	return SUPERTONIC_VOICE_MAP.get(voice_id.lower(), voice_id)
 
 
-active_voice_id = _adapter_default_voice if TTS_PROVIDER != "local" else "azelma"
+active_voice_id = _adapter_default_voice if TTS_PROVIDER != "local" else "thomas"
 _tts_enabled = False
+
+_local_tts = None
+_local_tts_lock = threading.RLock()
+
+
+def _get_local_tts():
+	"""Load Supertonic once; its model and voice styles are reused by all callers."""
+	global _local_tts
+	if _local_tts is None:
+		with _local_tts_lock:
+			if _local_tts is None:
+				from supertonic import TTS
+
+				_local_tts = TTS(auto_download=True)
+	return _local_tts
+
+
+def _synthesise_local(text: str, voice_id: str, cancel_event: threading.Event):
+	if cancel_event.is_set():
+		return None, None
+	with _local_tts_lock:
+		tts = _get_local_tts()
+		style = tts.get_voice_style(voice_name=_resolve_voice(voice_id))
+		wav, _duration = tts.synthesize(
+			text=text,
+			voice_style=style,
+			total_steps=8,
+			speed=1.05,
+			lang=TTS_LANG,
+			verbose=False,
+		)
+	return np.asarray(wav).squeeze(), 44100
 
 
 def enable_tts(enabled: bool = True) -> None:
@@ -143,7 +171,7 @@ def _remote_synthesise_bytes(text: str, voice_id: str) -> bytes:
 
 	payload = {
 		"text": text,
-		"voice": _resolve_kokoro_voice(voice_id),
+		"voice": _resolve_voice(voice_id),
 		"speed": 1.8,
 		"lang": TTS_LANG,
 	}
@@ -170,19 +198,12 @@ def _play_wav_bytes(wav_bytes: bytes, stop_event: threading.Event) -> None:
 			stream.write(data[i : i + chunk_size].reshape(-1, 1))
 
 
-# ── Local (pocket_tts) backend ────────────────────────────────────────────────
+# ── Local (Supertonic) backend ────────────────────────────────────────────────
 
 
 def _local_synthesise(
 	text: str, output_path: str, voice_id: str, cancel_event: threading.Event
 ) -> str:
-	from pocket_tts import TTSModel
-
-	tts_model = TTSModel.load_model(temp=0.5, lsd_decode_steps=7, eos_threshold=-1.0)
-	voice_state = tts_model.get_state_for_audio_prompt(voice_id)
-	chunks = tts_model.generate_audio_stream(voice_state, text_to_generate=text)
-
-	all_audio = []
 	ctx = (
 		Live(
 			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
@@ -193,27 +214,16 @@ def _local_synthesise(
 		else contextlib.nullcontext()
 	)
 	with ctx:
-		for chunk in chunks:
-			if cancel_event.is_set():
-				break
-			all_audio.append(chunk.numpy())
+		combined, sample_rate = _synthesise_local(text, voice_id, cancel_event)
 
-	if not all_audio:
+	if combined is None or cancel_event.is_set():
 		return output_path
 
-	combined = np.concatenate(all_audio)
-	scipy.io.wavfile.write(output_path, tts_model.sample_rate, combined)
+	scipy.io.wavfile.write(output_path, sample_rate, combined.astype(np.float32))
 	return output_path
 
 
 def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
-	from pocket_tts import TTSModel
-
-	tts_model = TTSModel.load_model(temp=0.5, lsd_decode_steps=7, eos_threshold=-1.0)
-	sample_rate = tts_model.sample_rate
-	voice_state = tts_model.get_state_for_audio_prompt(voice_id)
-	chunks = tts_model.generate_audio_stream(voice_state, text_to_generate=text)
-
 	spinner_ctx = (
 		Live(
 			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
@@ -223,12 +233,15 @@ def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
 		if _show_spinner
 		else contextlib.nullcontext()
 	)
+	with spinner_ctx:
+		wav, sample_rate = _synthesise_local(text, voice_id, stop_event)
+	if wav is None or stop_event.is_set():
+		return
 	with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
-		with spinner_ctx:
-			for chunk in chunks:
-				if stop_event.is_set():
-					break
-				stream.write(chunk.numpy().reshape(-1, 1))
+		for i in range(0, len(wav), 1024):
+			if stop_event.is_set():
+				break
+			stream.write(wav[i : i + 1024].astype(np.float32).reshape(-1, 1))
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -288,7 +301,7 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 
 	payload = {
 		"text": text,
-		"voice": _resolve_kokoro_voice(voice_id),
+		"voice": _resolve_voice(voice_id),
 		"speed": 1.8,
 		"lang": TTS_LANG,
 	}

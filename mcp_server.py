@@ -192,7 +192,7 @@ async def set_voice(voice_id: str) -> str:
     """Switch the active TTS voice.
 
     Args:
-        voice_id: The voice ID to activate (e.g. "azelma", "puck"). Use list_voices to see options.
+        voice_id: Friendly voice ID to activate (for example, "thomas" or "anneke"). Use list_voices to see options.
     """
     from tts.tts import voice_ids
     from tts.tts import set_active_voice_id

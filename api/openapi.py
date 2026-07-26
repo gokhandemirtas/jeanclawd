@@ -87,7 +87,7 @@ def build_spec() -> dict:
 					"description": (
 						"Accepts a recorded audio file (m4a). "
 						"Server transcribes via Whisper, classifies intent, generates response, "
-						"synthesises speech via pocket-tts, and returns both text and base64 audio."
+						"synthesises speech via local Supertonic TTS, and returns both text and base64 audio."
 					),
 					"requestBody": {
 						"required": True,

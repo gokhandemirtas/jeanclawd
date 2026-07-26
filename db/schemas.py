@@ -141,7 +141,7 @@ class UserSettings(Document):
 	"""Explicit application settings, deliberately separate from learned memory."""
 	user_id: str = "default"
 	agent_persona: str = "jean"
-	agent_voice_id: str = "azelma"
+	agent_voice_id: str = "thomas"
 	fav_spotify_device: Optional[str] = None
 	news_length: Literal["short", "medium", "long"] = "medium"
 
