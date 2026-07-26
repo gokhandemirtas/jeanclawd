@@ -15,6 +15,17 @@ class DecomposerTests(unittest.TestCase):
 		result = DecompositionResult(is_compound=True, tasks=tasks)
 		self.assertEqual([task.description for task in result.tasks], [str(i) for i in range(8)])
 
+	def test_internal_intent_aliases_are_normalized(self) -> None:
+		result = DecompositionResult(
+			is_compound=True,
+			tasks=[
+				{"description": "turn lights off", "intent": "turn_light", "query": "turn lights off"},
+				{"description": "set reminder", "intent": "set_reminder", "query": "remind me tomorrow"},
+				{"description": "research", "intent": "research_topic", "query": "research Buffy"},
+			],
+		)
+		self.assertEqual([task.intent for task in result.tasks], ["HOME_CONTROL", "REMINDER", "SEARCH"])
+
 	def test_confirmation_and_cancellation(self) -> None:
 		self.assertTrue(is_confirmation("yes"))
 		self.assertTrue(is_confirmation("Y"))

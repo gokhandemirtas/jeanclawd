@@ -11,5 +11,9 @@ task containing the whole request. Return no more than eight tasks.
 For every task, provide a short description, the best existing skill intent, and a
 self-contained query that can be sent to that skill. GLiNER entities, if supplied,
 are hints only: do not use them for conjunction parsing, task segmentation, or intent
-assignment. Return structured JSON matching the requested schema.
+assignment. The intent must be one of the public intent literals exactly: HOME_CONTROL,
+WEATHER, FINANCE_STOCKS, TRANSPORTATION, REMINDER, NEWSFEED, INFORMATION_QUERY, NOTES,
+SEARCH, SPOTIFY, PLANNER, NUTRITION, or CHAT. Do not return internal action names such
+as turn_light, set_reminder, or research_topic. Return structured JSON matching the
+requested schema.
 """

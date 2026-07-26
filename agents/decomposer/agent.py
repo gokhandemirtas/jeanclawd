@@ -10,11 +10,34 @@ from utils import logger
 
 MAX_TASKS = 8
 
+_INTENT_ALIASES: dict[str, IntentLiteral] = {
+	"turn_light": "HOME_CONTROL",
+	"turn_lights": "HOME_CONTROL",
+	"home_control": "HOME_CONTROL",
+	"set_reminder": "REMINDER",
+	"create_reminder": "REMINDER",
+	"research_topic": "SEARCH",
+	"deep_research": "SEARCH",
+	"search_topic": "SEARCH",
+	"weather_lookup": "WEATHER",
+	"stock_lookup": "FINANCE_STOCKS",
+	"play_music": "SPOTIFY",
+	"take_note": "NOTES",
+	"recipe_lookup": "NUTRITION",
+}
+
 
 class DecomposedTask(BaseModel):
 	description: str
 	intent: IntentLiteral
 	query: str
+
+	@field_validator("intent", mode="before")
+	@classmethod
+	def normalize_intent_alias(cls, value: object) -> object:
+		if isinstance(value, str):
+			return _INTENT_ALIASES.get(value.strip().lower(), value)
+		return value
 
 
 class DecompositionResult(BaseModel):
