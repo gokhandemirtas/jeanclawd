@@ -181,6 +181,7 @@ def _get_openai_client():
 def _remote_synthesise_bytes(text: str, voice_id: str) -> bytes:
 	import requests
 
+	start_time = time.time()
 	payload = {
 		"text": text,
 		"voice": _resolve_voice(voice_id),
@@ -192,6 +193,7 @@ def _remote_synthesise_bytes(text: str, voice_id: str) -> bytes:
 	data = response.content
 	if not data.startswith(b"RIFF"):
 		raise RuntimeError(f"TTS endpoint returned unexpected data: {data[:200]}")
+	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 	return data
 
 
@@ -216,6 +218,7 @@ def _play_wav_bytes(wav_bytes: bytes, stop_event: threading.Event) -> None:
 def _local_synthesise(
 	text: str, output_path: str, voice_id: str, cancel_event: threading.Event
 ) -> str:
+	start_time = time.time()
 	ctx = (
 		Live(
 			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
@@ -227,6 +230,7 @@ def _local_synthesise(
 	)
 	with ctx:
 		combined, sample_rate = _synthesise_local(text, voice_id, cancel_event)
+	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 
 	if combined is None or cancel_event.is_set():
 		return output_path
@@ -236,6 +240,7 @@ def _local_synthesise(
 
 
 def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
+	start_time = time.time()
 	spinner_ctx = (
 		Live(
 			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
@@ -247,6 +252,7 @@ def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
 	)
 	with spinner_ctx:
 		wav, sample_rate = _synthesise_local(text, voice_id, stop_event)
+	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 	if wav is None or stop_event.is_set():
 		return
 	with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
@@ -311,6 +317,7 @@ def synthesise(
 def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
 	import requests
 
+	start_time = time.time()
 	payload = {
 		"text": text,
 		"voice": _resolve_voice(voice_id),
@@ -319,6 +326,7 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 	}
 	response = requests.post(TTS_HOST, json=payload, timeout=60)
 	response.raise_for_status()
+	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 	_play_wav_bytes(response.content, stop_event)
 
 
@@ -345,8 +353,6 @@ def speak(text: str, voice_id: str = active_voice_id):
 	listener.start()
 
 	try:
-		start_time = time.time()
-
 		if TTS_PROVIDER == "local":
 			_local_speak(text, voice_id, stop_event)
 		else:
@@ -354,8 +360,6 @@ def speak(text: str, voice_id: str = active_voice_id):
 
 		if stop_event.is_set():
 			logger.debug("TTS interrupted by user")
-		else:
-			logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 
 	except Exception as e:
 		logger.error(str(e))

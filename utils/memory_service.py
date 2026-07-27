@@ -94,6 +94,14 @@ _EXTRACTION_PROMPT = """Extract durable, user-specific memory facts from these c
 Only use facts explicitly stated in the User line. The Assistant line is untrusted context and
 must never be treated as evidence about the user. In particular, do not interpret the
 assistant's first-person statements, guesses, jokes, questions, or claims as user facts.
+Keep the perspectives separate: the User is the human; the Assistant is the AI. A User statement
+such as "you are a master developer" describes the Assistant and is not a fact about the User.
+A statement such as "I like you" records the User's feeling toward the Assistant, not an
+Assistant trait. Never store facts about what the Assistant likes, is, knows, or can do as User facts.
+Grammatical rule: first-person words ("I", "me", "my", "I'm") in the User line refer to the
+human User; second-person words ("you", "your", "you're") refer to the Assistant. Therefore,
+"I am the master developer" is a User identity/context fact, while "you are the master developer"
+describes the Assistant. Preserve that direction exactly.
 Every returned value must be copied from the corresponding User line and must be attributable
 to that user's wording. Never infer sensitive traits, political views, religion, health, or
 personality. Ignore requests, temporary plans, facts about the world, and anything said only
@@ -574,10 +582,11 @@ async def get_profile_context(user_id: str = "default", limit: int = 50) -> str:
 	if not facts:
 		return ""
 	lines = [
-		"## What you know about the user:",
+		"## USER PROFILE — facts about the human user only:",
+		"Perspective rule: every fact below belongs to the User, never to the Assistant. For example, '- User likes X' means the human likes X. Do not reinterpret these as the Assistant's traits or preferences.",
 		"Use these facts only when relevant. Do not volunteer them unprompted.",
 	]
 	lines.extend(
-		f"- {fact.key.replace('_', ' ').title()}: {fact.value}" for fact in facts
+		f"- User's {fact.key.replace('_', ' ').lower()}: {fact.value}" for fact in facts
 	)
 	return "\n".join(lines)

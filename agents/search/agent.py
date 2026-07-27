@@ -36,7 +36,10 @@ _DEEP_RESEARCH_TRIGGERS = {
 }
 _SHOPPING_TERMS = ("find links", "product links", "where can i buy", "where to buy", "buy")
 _MARKETPLACES = ("amazon", "ebay", "ali express", "aliexpress")
-
+_SEARCH_REDIRECTS = re.compile(
+	r"^(?:please\s+)?(?:use|try)\s+(?:the\s+)?search\s+skill(?:\s+on\s+it)?$|^look\s+it\s+up$",
+	flags=re.IGNORECASE,
+)
 _EXTRACT_PROMPT = (
 	"Extract a concise web search query from the user's message. "
 	"Return only the essential keywords — no conversational filler, no punctuation. "
@@ -112,7 +115,9 @@ async def run_search(query: str) -> str:
 	from skills.conversation.skill import get_current_topic
 
 	topic_hint = get_current_topic() or ""
-	topic = _extract_topic(query, topic_hint)
+	# A redirect such as "use the search skill" refers to the established topic;
+	# sending it through the extractor lets a small model invent an unrelated one.
+	topic = topic_hint if topic_hint and _SEARCH_REDIRECTS.fullmatch(query.strip()) else _extract_topic(query, topic_hint)
 
 	if _is_deep_research(query) or _is_shopping_request(query):
 		logger.debug(f"[search] Deep research mode for '{topic}'")
@@ -121,14 +126,16 @@ async def run_search(query: str) -> str:
 			logger.debug(f"[search] {len(references)} reference(s) collected")
 		return answer
 
+	# Explicit SEARCH requests should use live web results first. Wikipedia remains
+	# a useful fallback when the web providers return nothing.
+	results = await web_search(topic)
+	if results:
+		top = results.split("\n")[0]
+		return f"User query: {topic}\n\nResult: {top}"
+
 	wiki = await asyncio.to_thread(search_wikipedia, topic)
 	if wiki:
-		logger.debug(f"[search] Wikipedia hit for '{topic}'")
+		logger.debug(f"[search] Web search returned nothing; Wikipedia hit for '{topic}'")
 		return f"User query: {topic}\n\nWikipedia: {wiki}"
-
-	logger.debug(f"[search] Wikipedia miss for '{topic}', falling back to web search")
-	results = await web_search(topic)
-	if not results:
-		return f"No results found for: {topic}"
-	top = results.split("\n")[0]
-	return f"User query: {topic}\n\nResult: {top}"
+	logger.debug(f"[search] No web or Wikipedia result for '{topic}'")
+	return f"No results found for: {topic}"

@@ -306,6 +306,7 @@ def _data_prompt(handler_response: str) -> str:
 {handler_response}
 
 ## Rules
+- The user's task and the Data section take absolute priority over persona style. Personality may add only restrained tonal color after the task is fulfilled; it must not alter, omit, summarize, contradict, or delay any requested information.
 - ALWAYS present the information from the Data section first — in full, before saying anything else.
 - Present ONLY the information given in the Data section above. Do NOT add, infer, or invent any data.
 - Do NOT include metrics that are not explicitly present in the Data (e.g. humidity, wind speed, UV index, disclaimers about forecasts, links to other sources).
@@ -328,6 +329,8 @@ Example: "<happy> Great to hear from you!"
 def _chat_prompt_base() -> str:
 	name = get_active_name()
 	return f"""{get_active_preamble()} Keep it to 1-2 sentences. If the user corrects you or references something from earlier, acknowledge it briefly.
+
+Perspective and pronouns: in the user's message, "I", "me", and "my" refer to the human user; "you" and "your" refer to you, the Assistant. Preserve this direction exactly, including when the user jokingly assigns themselves a role or title. Do not claim a user identity or title as your own.
 
 Always respond to what the user is saying right now. Do not bring up or continue a previous topic unless the user does.
 
@@ -560,8 +563,8 @@ async def _fetch_relevant_memories(query: str) -> str:
 		memories = await search_relevant_memories(query)
 		if not memories:
 			return ""
-		lines = "\n".join(f"- {m}" for m in memories)
-		return f"## What I remember:\n{lines}"
+		lines = "\n".join(f"- User memory (about the human user, not the Assistant): {m}" for m in memories)
+		return f"## USER MEMORIES — facts about the human user only:\n{lines}"
 	except Exception:
 		logger.exception("[chat] Memory search failed")
 		return ""

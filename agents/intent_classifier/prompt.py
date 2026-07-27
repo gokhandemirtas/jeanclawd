@@ -20,9 +20,17 @@ Key distinctions:
 - PLANNER requires the user to ask the assistant to plan something. Mentioning a trip or event is not PLANNER.
 - NOTES requires an explicit note action. A sentence containing the word "note" is not automatically NOTES.
 - CHAT covers anything conversational, emotional, personal, or where the user is sharing rather than requesting an action.
+- Feedback, agreement, corrections, explanations, and meta-commentary about the assistant's previous answer are CHAT. Do not classify a declarative comment as INFORMATION_QUERY or SEARCH merely because it mentions reliability, sources, facts, or online retrieval.
 - "Stop the music", "stop playing", or "stop" in a music context is SPOTIFY, not HOME_CONTROL.
 - SEARCH vs INFORMATION_QUERY: INFORMATION_QUERY is a quick lookup ("how tall is X", "what year was Y built"). SEARCH is a broader research request ("research X", "find information about Y", "look up Z").
+- Any question containing a temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" requires live or externally verified information. Route it to the appropriate live-data intent (usually INFORMATION_QUERY or SEARCH), never CHAT, even when the underlying subject is familiar or general knowledge.
+- This applies generically to people, offices, laws, prices, products, rankings, events, technology, organizations, and any other changing subject. Do not rely on a memorized answer for a time-qualified question.
 - Any message starting with or containing "research", "search for", "look up", or "find information" is SEARCH, not CHAT or INFORMATION_QUERY.
 - When in doubt, CHAT is the safe default.
+
+Examples:
+- "Who is the current prime minister of the UK?" → INFORMATION_QUERY
+- "What is the latest version of Python?" → INFORMATION_QUERY
+- "Who was the prime minister of the UK in 2010?" → CHAT (historical, stable fact)
 
 Respond with the intent JSON only."""

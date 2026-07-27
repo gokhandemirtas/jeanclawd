@@ -292,12 +292,15 @@ async def main(
 
 			with _ProgressSpinner() as spinner:
 				streamed: list[str] = []
+				streamed_visible = False
 
 				def on_token(token: str) -> None:
+					nonlocal streamed_visible
 					if not streamed:
 						spinner.stop()
 						print("\033[36m", end="", flush=True)  # cyan on first token
 					streamed.append(token)
+					streamed_visible = True
 					print(token, end="", flush=True)
 
 				loop = asyncio.get_running_loop()
@@ -377,9 +380,9 @@ async def main(
 				response = await done
 				_elapsed = time.time() - _start
 
-				if streamed:
+				if streamed_visible:
 					print("\033[0m")  # reset color + newline
-				else:
+				if not streamed_visible or "".join(streamed).strip() != response.strip():
 					spinner.stop()  # ensure cleared before the logged fallback
 					logger.newline()
 					logger.info(response)
@@ -393,8 +396,23 @@ async def main(
 				from tts.tts import speak as tts_speak, active_voice_id
 				from agents.persona import get_active_voice_id
 
-				spoken_response = await asyncio.to_thread(decorate_for_speech, response)
-				await asyncio.to_thread(tts_speak, spoken_response, get_active_voice_id() or active_voice_id)
+				voice_spinner = _ProgressSpinner("Synthesizing voice…")
+				voice_spinner.start()
+				try:
+					# News is already formatted by its dedicated skill. Read the exact
+					# displayed briefing rather than sending it through persona decoration.
+					if resolved_intent == "NEWSFEED":
+						spoken_response = response
+						logger.debug("[tts] NEWSFEED: speaking displayed response verbatim")
+					else:
+						spoken_response = await asyncio.to_thread(decorate_for_speech, response)
+					await asyncio.to_thread(
+						tts_speak,
+						spoken_response,
+						get_active_voice_id() or active_voice_id,
+					)
+				finally:
+					voice_spinner.stop()
 
 			logger.timing(_elapsed)
 

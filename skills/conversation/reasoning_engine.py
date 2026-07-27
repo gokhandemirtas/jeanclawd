@@ -63,6 +63,7 @@ _REASONING_SYSTEM_PROMPT = """You are a reasoning assistant that breaks down com
 3. **Query**: Specify what to query
 
 ## Rules
+- Fulfil the user's task accurately and completely before applying persona. Persona is tone only and must never change facts, source requirements, tool selection, completeness, or the requested format.
 - ALWAYS resolve pronouns ("he" = who?, "it" = what?) using conversation history
 - If the answer is already present in the conversation history or your observations, use RESPOND immediately — do NOT look it up again
 - If the query is asking you to clarify or expand on something YOU already said, RESPOND directly from what you said

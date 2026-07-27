@@ -90,7 +90,6 @@ _DATETIME_QUERIES = frozenset(
 	}
 )
 
-
 def _keyword_classify(text: str) -> IntentLiteral | None:
 	"""Fast pre-check for high-confidence intents that small models routinely miss."""
 	t = text.lower().strip()
