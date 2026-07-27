@@ -21,6 +21,7 @@ Key distinctions:
 - NOTES requires an explicit note action. A sentence containing the word "note" is not automatically NOTES.
 - CHAT covers anything conversational, emotional, personal, or where the user is sharing rather than requesting an action.
 - Feedback, agreement, corrections, explanations, and meta-commentary about the assistant's previous answer are CHAT. Do not classify a declarative comment as INFORMATION_QUERY or SEARCH merely because it mentions reliability, sources, facts, or online retrieval.
+- Questions about the user's own name, identity, remembered profile, or relationship with the Assistant (for example, "remember me?", "what's my name?", or "what do you know about me?") are CHAT, not NOTES or INFORMATION_QUERY, unless the user explicitly asks to save or retrieve a note.
 - "Stop the music", "stop playing", or "stop" in a music context is SPOTIFY, not HOME_CONTROL.
 - SEARCH vs INFORMATION_QUERY: INFORMATION_QUERY is a quick lookup ("how tall is X", "what year was Y built"). SEARCH is a broader research request ("research X", "find information about Y", "look up Z").
 - Any question containing a temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" requires live or externally verified information. Route it to the appropriate live-data intent (usually INFORMATION_QUERY or SEARCH), never CHAT, even when the underlying subject is familiar or general knowledge.

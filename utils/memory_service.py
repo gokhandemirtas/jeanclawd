@@ -42,13 +42,91 @@ _EXPLICIT_BIRTH_DATE = re.compile(
 	r"(?P<value>(?:[A-Za-z]+\s+\d{1,2},\s+\d{4}|\d{1,2}[-/]\d{1,2}[-/]\d{4}))",
 	re.IGNORECASE,
 )
+_INVALID_FACT_VALUES = frozenset({
+	"me", "myself", "i", "you", "yourself", "the assistant", "assistant",
+	"hello", "hi", "hey", "there", "something", "things", "it", "this", "that",
+	"mine", "my own",
+})
+_SECOND_PERSON_VALUE = re.compile(
+	r"^(?:you|your|yourself|the assistant|assistant)$", re.IGNORECASE
+)
+_FIRST_PERSON_SUBJECT = re.compile(
+	r"^(?:i|i['’]m|i am|my|we|we['’]re|we are)\b", re.IGNORECASE
+)
+
+
+def _clean_fact_value(value: str) -> str:
+	return " ".join(value.strip(" \t\r\n.,;:!?()[]{}\"'").split())
+
+
+def _usable_fact_value(value: str) -> bool:
+	compact = " ".join(value.casefold().split())
+	return bool(compact) and compact not in _INVALID_FACT_VALUES and not _SECOND_PERSON_VALUE.fullmatch(compact)
+
+
+def _durable_fact_value(value: str, *, namespace: str, key: str) -> bool:
+	"""Reject model/entity output that is too small to be useful memory.
+
+	Single words are valid for names, locations, and explicit preferences, but
+	free-floating one-word interest/context values are usually entity-extractor
+	noise (for example, a pronoun or a word copied from the assistant's turn).
+	Those values should not reach MongoDB even if an upstream model emits them.
+	"""
+	value = _clean_fact_value(value)
+	if not _usable_fact_value(value) or len(value) < 2:
+		return False
+	if namespace in {"interest", "context"} and key not in {"name", "location"}:
+		return len(value.split()) >= 2
+	return True
+
+
+def _retrievable_fact(key: str, value: str) -> bool:
+	"""Apply the same quality policy when reading older stored/indexed facts."""
+	namespace = "interest" if key in {"interest", "work_on"} else "context"
+	if key in {"name", "birth_date", "gender", "location", "home_location", "city"}:
+		namespace = "identity"
+	elif key in {"likes", "dislikes", "diet", "settings"}:
+		namespace = "preference"
+	return _durable_fact_value(value, namespace=namespace, key=key)
 
 
 def _grounded_in_user_message(value: str, message: str) -> bool:
 	"""Require extracted values to be present in the user's own words."""
-	compact_value = " ".join(value.casefold().split())
+	compact_value = _clean_fact_value(value).casefold()
 	compact_message = " ".join(message.casefold().split())
-	return bool(compact_value) and compact_value in compact_message
+	return (
+		bool(compact_value)
+		and _usable_fact_value(compact_value)
+		and compact_value in compact_message
+	)
+
+
+def _explicitly_supported_fact(namespace: str, key: str, value: str, message: str) -> bool:
+	"""Require a value to occur in the right first-person claim, not anywhere."""
+	value = _clean_fact_value(value)
+	message_casefolded = message.casefold()
+	value_casefolded = value.casefold()
+	value_start = message_casefolded.find(value_casefolded)
+	if value_start < 0:
+		return False
+	prefix = message_casefolded[max(0, value_start - 100):value_start]
+
+	if namespace == "preference":
+		# Preferences about the Assistant are not user preferences. Also avoid
+		# accepting a truncated relation tail from a larger object phrase.
+		if re.search(r"\byour\b|\bthe assistant\b", prefix):
+			return False
+		return bool(re.search(r"\b(?:i|i['’]m|i am)\s+(?:also\s+)?(?:don't|do not|dislike|hate|like|love|enjoy|prefer)\s+(?:[^.!?]*\s+)?$", prefix))
+
+	if namespace == "identity" and key in {"location", "home_location", "city"}:
+		return bool(re.search(r"\b(?:i\s+(?:live|moved|am based)|my\s+(?:home|city|location))\s+(?:in|is|to)?\s*$", prefix))
+	if namespace == "identity" and key == "name":
+		return bool(re.search(r"\b(?:my name is|call me|i am|i['’]m)\s*$", prefix))
+	if namespace == "interest" and key == "work_on":
+		return bool(re.search(r"\b(?:i\s+(?:work|am working)\s+on|i['’]m\s+working\s+on|i\s+build)\s*$", prefix))
+	if namespace == "interest":
+		return bool(re.search(r"\b(?:my\s+(?:hobby|interest)\s+is|i am interested in|i enjoy)\s*$", prefix))
+	return False
 
 
 class _ExtractedFact(BaseModel):
@@ -105,7 +183,8 @@ describes the Assistant. Preserve that direction exactly.
 Every returned value must be copied from the corresponding User line and must be attributable
 to that user's wording. Never infer sensitive traits, political views, religion, health, or
 personality. Ignore requests, temporary plans, facts about the world, and anything said only
-by the assistant. Return no facts when uncertain.
+by the assistant. Do not extract facts from greetings, questions such as "remember me?", or
+pronouns alone. Return no facts when uncertain.
 
 Use concise snake_case keys. Use `identity` for name, birth_date, gender, home location/work; `preference` for
 stable likes, dislikes, diet and settings; `interest` for recurring hobbies; `relationship`
@@ -226,11 +305,14 @@ async def _extract(interactions: list) -> list[_ExtractedFact]:
 		for fact in result.facts
 		if fact.namespace in valid
 		and fact.key
-		and fact.value
+		and _durable_fact_value(fact.value, namespace=fact.namespace, key=fact.key)
 		and fact.source_interaction_id in valid_ids
 		and any(
 			str(interaction.id) == fact.source_interaction_id
 			and _grounded_in_user_message(fact.value, interaction.user_message)
+			and _explicitly_supported_fact(
+				fact.namespace, fact.key, fact.value, interaction.user_message
+			)
 			for interaction in candidates
 		)
 	]
@@ -251,8 +333,18 @@ async def _extract(interactions: list) -> list[_ExtractedFact]:
 			if not mapped:
 				continue
 			for item in output:
+				head = item.get("head", {}).get("text", "").strip()
 				tail = item.get("tail", {}).get("text", "").strip()
-				if tail and not any(f.namespace == mapped[0] and f.key == mapped[1] and f.value.lower() == tail.lower() for f in facts):
+				if (
+					not _FIRST_PERSON_SUBJECT.match(head)
+					or not _durable_fact_value(tail, namespace=mapped[0], key=mapped[1])
+					or not _grounded_in_user_message(tail, interaction.user_message)
+					or not _explicitly_supported_fact(
+						mapped[0], mapped[1], tail, interaction.user_message
+					)
+				):
+					continue
+				if not any(f.namespace == mapped[0] and f.key == mapped[1] and f.value.lower() == tail.lower() for f in facts):
 					facts.append(_ExtractedFact(namespace=mapped[0], key=mapped[1], value=tail, confidence=1.0, source_interaction_id=str(interaction.id)))
 	# Preserve an unambiguous name supplied in the conversational form
 	# "Gokhan. what's your name?" even if the local model returns no fact.
@@ -281,9 +373,9 @@ async def _extract(interactions: list) -> list[_ExtractedFact]:
 			)
 		for match in _EXPLICIT_PREFERENCE.finditer(interaction.user_message):
 			value = match.group("value").strip(" ,;")
-			if not value:
-				continue
 			key = "dislikes" if match.group("negative") else "likes"
+			if not _durable_fact_value(value, namespace="preference", key=key):
+				continue
 			if not any(
 				f.namespace == "preference" and f.key == key and f.value.lower() == value.lower()
 				for f in facts
@@ -304,6 +396,12 @@ async def _upsert_fact(
 	user_id: str, fact: _ExtractedFact, source_ids: list[str]
 ) -> None:
 	from db.schemas import MemoryFact
+
+	# Keep this guard at the persistence boundary as well: extraction providers
+	# can change independently and callers may construct _ExtractedFact values.
+	if not _durable_fact_value(fact.value, namespace=fact.namespace, key=fact.key):
+		return
+	fact.value = _clean_fact_value(fact.value)
 
 	now = datetime.now()
 	existing = await MemoryFact.find_one(
@@ -520,6 +618,7 @@ async def list_memories(
 		.sort("-last_confirmed_at")
 		.to_list()
 	)
+	facts = [fact for fact in facts if _retrievable_fact(fact.key, fact.value)]
 	if not query:
 		return facts[:limit]
 	needle = query.casefold()
@@ -537,7 +636,14 @@ async def search_relevant_memories(
 
 	results = await asyncio.to_thread(search_facts, query, user_id, limit)
 	if results:
-		return results
+		return [
+			item for item in results
+			if (
+				_retrievable_fact(item.split(":", 1)[0].strip(), item.split(":", 1)[1].strip())
+				if ":" in item
+				else _usable_fact_value(item)
+			)
+		]
 	# Qdrant is only a projection; preserve basic recall from authoritative MongoDB.
 	facts = await list_memories(query, user_id=user_id, limit=limit)
 	return [f"{fact.key}: {fact.value}" for fact in facts]
@@ -579,6 +685,7 @@ async def get_profile_context(user_id: str = "default", limit: int = 50) -> str:
 		.limit(limit)
 		.to_list()
 	)
+	facts = [fact for fact in facts if _retrievable_fact(fact.key, fact.value)]
 	if not facts:
 		return ""
 	lines = [
