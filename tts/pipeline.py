@@ -37,6 +37,7 @@ def process_voice_job(
 	voice_id: str,
 ) -> None:
 	"""Blocking pipeline: Whisper → intent classifier → TTS. Runs in thread pool."""
+	from tts.expressions import decorate_for_speech
 	from tts.tts import synthesise
 
 	cancel_event: threading.Event = job["cancel_event"]
@@ -67,7 +68,12 @@ def process_voice_job(
 
 		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 			audio_out = tmp.name
-		synthesise(_clean_for_tts(response_text), audio_out, voice_id=voice_id, cancel_event=cancel_event)
+		synthesise(
+			decorate_for_speech(_clean_for_tts(response_text)),
+			audio_out,
+			voice_id=voice_id,
+			cancel_event=cancel_event,
+		)
 
 		if cancel_event.is_set():
 			job.update({"status": "cancelled"})
@@ -96,6 +102,7 @@ def process_voice_ws(
 	on_token,
 ) -> None:
 	"""Blocking pipeline: Whisper → LLM → TTS for the WebSocket path."""
+	from tts.expressions import decorate_for_speech
 	from tts.tts import synthesise
 
 	audio_out = None
@@ -121,7 +128,12 @@ def process_voice_ws(
 
 		with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
 			audio_out = tmp.name
-		synthesise(_clean_for_tts(response_text), audio_out, voice_id=voice_id, cancel_event=cancel_event)
+		synthesise(
+			decorate_for_speech(_clean_for_tts(response_text)),
+			audio_out,
+			voice_id=voice_id,
+			cancel_event=cancel_event,
+		)
 
 		if cancel_event.is_set():
 			return

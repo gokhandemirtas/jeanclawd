@@ -125,6 +125,7 @@ async def _handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def _reply_audio(update: Update, text: str) -> None:
+    from tts.expressions import decorate_for_speech
     from tts.tts import synthesise
     import asyncio
 
@@ -132,7 +133,8 @@ async def _reply_audio(update: Update, text: str) -> None:
         tmp_path = f.name
 
     try:
-        await asyncio.to_thread(synthesise, text, tmp_path)
+        spoken_text = await asyncio.to_thread(decorate_for_speech, text)
+        await asyncio.to_thread(synthesise, spoken_text, tmp_path)
         with open(tmp_path, "rb") as audio_file:
             await update.message.reply_audio(audio=audio_file, title="Response")
     except Exception as e:

@@ -15,7 +15,8 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **Skill registry** — 12 skills: weather, finance, home control, information, reminders,
   newsfeed, transportation, notes, search, Spotify, nutrition, chat.
 - **Voice in / out** — wake word (`hey jarvis`), Whisper STT (mlx), local Supertonic TTS
-  (plus LM Studio / OpenAI-compatible providers) with six friendly voice IDs.
+  (plus LM Studio / OpenAI-compatible providers) with six friendly voice IDs and
+  persona-aware expression tags.
 - **Vision** — VLM-backed image description (`POST /vision`, `/look` command).
 - **6 personas** — switchable identities with distinct tones and voices.
 - **Persistent memory** — completed turns are stored as `Interaction` documents, then a

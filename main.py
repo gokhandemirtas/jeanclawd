@@ -331,9 +331,10 @@ async def main(
 									clear_pending()
 									result = "I cancelled the pending requests because the confirmation response was unclear."
 							else:
-								from agents.decomposer import decompose_request
-								decomposition = await decompose_request(effective_query)
-								if decomposition.is_compound:
+								from agents.decomposer import decompose_request, extract_batch_request
+								batch_query = extract_batch_request(effective_query)
+								decomposition = await decompose_request(batch_query) if batch_query else None
+								if decomposition is not None and decomposition.is_compound:
 									set_pending(decomposition.tasks)
 									lines = [f"I found {len(decomposition.tasks)} requests:"]
 									lines.extend(
@@ -388,10 +389,12 @@ async def main(
 			await _record_interaction(user_input, response, intent=resolved_intent)
 
 			if speak:
+				from tts.expressions import decorate_for_speech
 				from tts.tts import speak as tts_speak, active_voice_id
 				from agents.persona import get_active_voice_id
 
-				await asyncio.to_thread(tts_speak, response, get_active_voice_id() or active_voice_id)
+				spoken_response = await asyncio.to_thread(decorate_for_speech, response)
+				await asyncio.to_thread(tts_speak, spoken_response, get_active_voice_id() or active_voice_id)
 
 			logger.timing(_elapsed)
 

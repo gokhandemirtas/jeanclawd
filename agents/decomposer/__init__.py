@@ -5,6 +5,7 @@ from agents.decomposer.agent import (
 	DecompositionResult,
 	decompose_request,
 	decompose_request_sync,
+	extract_batch_request,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
 	"DecompositionResult",
 	"decompose_request",
 	"decompose_request_sync",
+	"extract_batch_request",
 ]

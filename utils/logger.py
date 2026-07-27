@@ -12,19 +12,39 @@ from rich.text import Text
 _console = Console()
 _debug_enabled = False
 _log_file = None
+_log_path = None
 _file_lock = threading.Lock()
+_MAX_LOG_BYTES = 500 * 1024
 
 
 def init_file_logging(path: str) -> None:
-	global _log_file
+	global _log_file, _log_path
 	os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+	_log_path = path
+	# The application log is deliberately a short operational buffer. Long-term
+	# conversational history is handled by reflections, not by this file.
 	_log_file = open(path, "a", buffering=1)
+	if os.path.getsize(path) > _MAX_LOG_BYTES:
+		_log_file.close()
+		_log_file = open(path, "w", buffering=1)
 
 
 def _write(level: str, msg: str) -> None:
+	global _log_file
 	if _log_file:
-		entry = json.dumps({"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "msg": msg})
 		with _file_lock:
+			entry = json.dumps({"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "msg": msg})
+			# Keep even an unexpectedly large traceback from exceeding the file cap.
+			if len(entry.encode("utf-8")) >= _MAX_LOG_BYTES:
+				entry = json.dumps({
+					"ts": datetime.now().isoformat(timespec="milliseconds"),
+					"level": level,
+					"msg": msg[:2000] + " …[message truncated]",
+				})
+			entry_bytes = len((entry + "\n").encode("utf-8"))
+			if _log_file.tell() + entry_bytes > _MAX_LOG_BYTES:
+				_log_file.close()
+				_log_file = open(_log_path, "w", buffering=1)
 			_log_file.write(entry + "\n")
 
 

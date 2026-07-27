@@ -219,6 +219,9 @@ class MonitorApp(App):
 		if not self._log_path.exists():
 			return
 		try:
+			# The application keeps a bounded log and may truncate it between polls.
+			if self._log_path.stat().st_size < self._file_pos:
+				self._file_pos = 0
 			with open(self._log_path) as f:
 				f.seek(self._file_pos)
 				new_lines = f.readlines()

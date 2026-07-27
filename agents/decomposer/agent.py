@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pydantic import BaseModel, field_validator
 
 from agents.intent_classifier.intent_classifier import IntentLiteral
@@ -9,6 +10,19 @@ from providers import get_intent_provider
 from utils import logger
 
 MAX_TASKS = 8
+_BATCH_REQUEST_RE = re.compile(r"^\s*batch\s+request\s*:\s*(.*)$", re.IGNORECASE | re.DOTALL)
+_EXPLICIT_COMPOUND_RE = re.compile(
+	r"(?:;|\n|\?|\b(?:and|also|then|plus|as well|followed by)\b)",
+	re.IGNORECASE,
+)
+
+
+def extract_batch_request(text: str) -> str | None:
+	"""Return the batch payload only when the user explicitly requests batching."""
+	match = _BATCH_REQUEST_RE.match(text)
+	if not match:
+		return None
+	return match.group(1).strip()
 
 _INTENT_ALIASES: dict[str, IntentLiteral] = {
 	"turn_light": "HOME_CONTROL",
@@ -70,6 +84,14 @@ def _normalize(result: DecompositionResult, original: str) -> DecompositionResul
 	# Keep the model's result safe even when a permissive provider returns a stale
 	# compound flag or more than the schema limit.
 	result.tasks = result.tasks[:MAX_TASKS]
+	# Do not let the model invent multiple intents for a single sentence. A
+	# A comma is ordinary conversational punctuation, not enough evidence that
+	# the model found multiple requests. Semicolons, line breaks, question
+	# boundaries, and explicit sequencing/conjunction words are stronger signals.
+	if len(result.tasks) > 1 and not _EXPLICIT_COMPOUND_RE.search(original):
+		result.tasks = [
+			DecomposedTask(description=original, intent="CHAT", query=original)
+		]
 	result.is_compound = len(result.tasks) > 1
 	if len(result.tasks) == 1 and not result.tasks[0].query.strip():
 		result.tasks[0].query = original
