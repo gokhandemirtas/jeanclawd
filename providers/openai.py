@@ -85,13 +85,6 @@ class OpenAIProvider(InferenceProvider):
 		)
 		return resp.choices[0].message.content
 
-	def embed(self, text: str) -> list[float]:
-		resp = self._client.embeddings.create(
-			model="text-embedding-3-small",
-			input=text,
-		)
-		return resp.data[0].embedding
-
 	def context_length(self) -> int:
 		for prefix, ctx in _MODEL_CONTEXT.items():
 			if self._model.startswith(prefix):

@@ -232,11 +232,11 @@ async def list_memories(query: Optional[str] = None, limit: int = 20) -> str:
     """List all stored memories, or search for memories relevant to a query.
 
     Args:
-        query: Optional search query. If provided, returns semantically similar memories.
-               If omitted, returns the most recent memories.
+        query: Optional text filter. If provided, returns matching profile fields.
+               If omitted, returns the stored profile fields.
         limit: Maximum number of memories to return (default 20).
     """
-    from utils.memory_service import list_memories as get_memories, search_relevant_memories
+    from utils.langmem_service import list_memories as get_memories, search_relevant_memories
 
     if query:
         memories = await search_relevant_memories(query, limit=limit)
@@ -254,7 +254,7 @@ async def list_memories(query: Optional[str] = None, limit: int = 20) -> str:
 
 @mcp.tool()
 async def search_memories(query: str, limit: int = 10) -> str:
-    """Semantic search over stored memories.
+    """Search over stored memories.
 
     Args:
         query: Natural language search query.
@@ -562,7 +562,7 @@ async def plan(task: str) -> str:
     """
     from agents.planner import run_planner
     from utils.inference_gate import foreground_inference
-    from utils.memory_service import record_interaction
+    from utils.langmem_service import record_interaction
 
     async with foreground_inference():
         response = await run_planner(task)

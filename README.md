@@ -19,15 +19,10 @@ Package name: `jeanclawd` (see `pyproject.toml`).
   persona-aware expression tags.
 - **Vision** — VLM-backed image description (`POST /vision`, `/look` command).
 - **6 personas** — switchable identities with distinct tones and voices.
-- **Persistent memory** — completed turns are stored as `Interaction` documents, then a
-  deferred GLiNER2 + local-LLM worker identifies entities/relations and extracts attributable
-  `MemoryFact` records. MongoDB is authoritative; Qdrant is a disposable semantic-recall
-  projection.
+- **Persistent memory** — completed turns are stored as `Interaction` documents and sent to
+  LangMem, which maintains one compact structured user profile in MongoDB using the generalist model.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
-- **Fast user profile** — a small `UserProfile` document (one per `user_id`) materializes
-  identity details such as the display name, birth date, gender, and location for startup and greetings. Detailed
-  knowledge remains in `MemoryFact`.
 - **Resumable sessions** — every turn belongs to a UUID-backed session that can be listed
   and resumed from the CLI or API.
 - **API server** — 22 routes (aiohttp), OpenAPI 3.0 spec, Swagger UI at `/docs`.
@@ -39,7 +34,6 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **[uv](https://github.com/astral-sh/uv)** for dependency management (never `pip` —
   keeps `pyproject.toml` / `uv.lock` in sync)
 - **MongoDB** (port 27017, db `langbox`)
-- **Qdrant** (port 6333) for semantic memory recall
 - **LM Studio** (or another OpenAI-compatible LLM server on `:1234`) for inference
 
 ## Installation
@@ -64,7 +58,6 @@ list. Key variables:
 | `MODEL_GENERALIST` | Large model: chat, wrapping, routing, reasoning | `qwen3-30b-a3b-instruct-2507-mlx` |
 | `MODEL_RESEARCH` | Dedicated model for deep-search planning and synthesis | `Qwen3-14B-4bit` |
 | `MODEL_INTENT` | Lean model for stateless classification | `meta-llama-3.1-8b-instruct` |
-| `MODEL_EMBEDDING` | Embedding model for memory recall / RAG | `text-embedding-granite-embedding-30m-english` |
 | `MODEL_VLM` | Vision-language model for `/look` | `qwen/qwen3-vl-4b` |
 | `MODEL_HOST` | LLM endpoint | `http://localhost:1234/v1` |
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
@@ -78,14 +71,12 @@ list. Key variables:
 |------|-------|-----|
 | Generalist | `qwen3-30b-a3b-instruct-2507-mlx` (MLX 4-bit) | 30B total / 3B active per token; ~80–100 tok/s on M1 Max/Ultra; strong rule-following for the 13-intent classifier; instruct-tuned (not thinking) for low latency on voice turns |
 | Intent | `meta-llama-3.1-8b-instruct` | 8B is the sweet spot for structured JSON outputs on routing / topic extraction / query rewrite; pairs cleanly with the 30B generalist |
-| Embedding | `text-embedding-granite-embedding-30m-english` | 30M params, 384-dim, fast |
 | VLM | `qwen/qwen3-vl-4b` | Small VL model that fits comfortably in RAM |
 
 Download via LM Studio UI, or from the CLI:
 ```bash
 lms pull lmstudio-community/Qwen3-30B-A3B-Instruct-2507-MLX-4bit
 lms pull lmstudio-community/meta-llama-3.1-8b-instruct
-lms pull ibm-granite/granite-embedding-30m-english-GGUF
 lms pull lmstudio-community/Qwen3-VL-4B-Instruct-MLX
 ```
 
@@ -133,9 +124,8 @@ uv run python main.py --telegram
 - `/persona [id] [voice]` — switch identity
 - `/model [name]` — fuzzy-pick a loaded LM Studio model
 - `/memories [q]` — list or search long-term memory
-- `/process-memory` — run deferred memory extraction immediately (testing)
 - `/planner <task>` — multi-step tool use
-- `/forget <id>` — forget one learned fact
+- `/forget-memory <field>` — clear one LangMem profile field
 - `/help` — list all commands
 
 ## Architecture
@@ -147,27 +137,18 @@ CLI / REST / Telegram / MCP
   → query resolution and intent routing
   → registered skill or CHAT handler
   → response (optionally streamed or spoken)
-  → Interaction + MemoryWorkItem
+  → Interaction + background LangMem profile update
 
-MemoryWorkItem (after 10 minutes idle)
-  → local GLiNER2 candidate entities and relations
-  → local generalist model with structured output for semantic extraction
-  → MemoryFact upsert, validation, provenance, and supersession
-  → Qdrant projection for semantic recall
-
-MemoryFact identity updates also refresh the matching `UserProfile` read model, so greeting
-generation does not need to scan the full memory collection.
+LangMem uses the configured `MODEL_GENERALIST` through the local OpenAI-compatible endpoint.
+It stores one structured profile per user in the MongoDB `LangMem` collection. The MongoDB
+store is configured without an index, so embeddings and vector search are disabled.
 ```
 
 The interfaces follow the same conceptual stages, while API, Telegram, and MCP use the
 shared intent-classifier entry point and the CLI keeps its own streaming path. The CLI
 also resolves memory-backed phrases such as “my favourite band” before routing. In-process
 conversation history is only for short-term follow-ups; cross-session knowledge comes from
-active `MemoryFact` documents.
-
-Memory facts are deliberately separate from runtime settings. Facts can be forgotten,
-superseded, searched semantically, or recovered with `rebuild_memory_index()` if Qdrant is
-lost. When Qdrant is unavailable, basic key/value recall falls back to MongoDB.
+the LangMem profile.
 
 Sessions are separate from both settings and learned memory. A session stores its UUID,
 title, rolling summary, and recent `Interaction` records. If no title is supplied, the
@@ -197,7 +178,7 @@ pydantic-aida/
 ├── db/                      # Beanie ODM + MongoDB
 ├── api/                     # aiohttp server (22 routes) + OpenAPI
 ├── stt/  tts/               # speech I/O providers
-├── utils/                   # memory_service, memory_index, inference_gate, embedder, ...
+├── utils/                   # langmem_service, inference_gate, ...
 ├── storage/  memory/        # local state + feedback notes
 ├── fixtures/                # tickers.json + test fixtures
 └── logs/                    # app.log + supervisord logs

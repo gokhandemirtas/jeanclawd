@@ -14,7 +14,6 @@ from pathlib import Path
 import aiohttp
 import psutil
 from rich.color import Color
-from rich.columns import Columns
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
@@ -99,7 +98,6 @@ def _models() -> list[tuple[str, str]]:
 		("Generalist", "MODEL_GENERALIST"),
 		("Research", "MODEL_RESEARCH"),
 		("Intent", "MODEL_INTENT"),
-		("Embedding", "MODEL_EMBEDDING"),
 		("Vision (VLM)", "MODEL_VLM"),
 		("Host", "MODEL_HOST"),
 	]

@@ -34,7 +34,7 @@ async def run_intent_classifier(
             on_status(intent.replace("_", " ").title())
         response = await route(intent, user_input, on_token=on_token, voice_mode=voice_mode)
 
-    from utils.memory_service import record_interaction
+    from utils.langmem_service import record_interaction
     await record_interaction(user_input, response, intent=intent)
 
     return response

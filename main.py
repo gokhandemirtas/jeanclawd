@@ -228,9 +228,6 @@ async def main(
 	except ValueError:
 		console.print(f"[red]Could not resume session: {session_id}[/red]")
 		return
-	from utils.memory_service import start_memory_worker
-	start_memory_worker()
-
 	from agents.persona import get_active_persona_id, get_active_voice_id
 	boot(
 		connections=connections,
@@ -452,7 +449,7 @@ def _print_resume_hint() -> None:
 
 
 async def _record_interaction(question: str, answer: str, *, intent: str | None = None) -> None:
-	from utils.memory_service import record_interaction
+	from utils.langmem_service import record_interaction
 	await record_interaction(question, answer, intent=intent)
 
 

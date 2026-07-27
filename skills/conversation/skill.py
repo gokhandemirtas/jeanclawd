@@ -10,7 +10,7 @@ from utils.log import logger
 
 from agents.agent_factory import create_llm
 from agents.persona import get_active_identity, get_active_name, get_active_preamble
-from utils.memory_service import get_profile_context
+from utils.langmem_service import get_profile_context
 from utils.llm_structured_output import generate_structured_output
 
 
@@ -558,7 +558,7 @@ async def _fetch_relevant_memories(query: str) -> str:
 	if len(query.split()) < 4:
 		return ""
 	try:
-		from utils.memory_service import search_relevant_memories
+		from utils.langmem_service import search_relevant_memories
 
 		memories = await search_relevant_memories(query)
 		if not memories:
@@ -705,13 +705,9 @@ async def generate_greeting() -> str:
 	Falls back to a generic greeting on any failure.
 	"""
 	try:
-		from db.schemas import UserProfile
+		from utils.langmem_service import get_fact_value
 
-		profile = await UserProfile.find_one(UserProfile.user_id == "default")
-		user_name = profile.display_name if profile else None
-		if not user_name:
-			from utils.memory_service import get_fact_value
-			user_name = await get_fact_value("name")
+		user_name = await get_fact_value("name")
 
 		name_instruction = (
 			f" The user's name is {user_name}. Use it naturally." if user_name else ""

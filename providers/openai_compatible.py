@@ -22,15 +22,13 @@ class OpenAICompatibleProvider(InferenceProvider):
 	Configured entirely via env vars:
 	  MODEL_HOST       — base URL, e.g. http://localhost:11434/v1
 	  MODEL_GENERALIST — model id for completions
-	  MODEL_EMBEDDING  — model id for embeddings
 	  OPENAI_API_KEY   — bearer token (default: "lm-studio")
 	  MODEL_CTX        — fallback context length when /models doesn't report one
 	"""
 
-	def __init__(self, model_key: str, embedding_model: str | None = None):
+	def __init__(self, model_key: str):
 		self._base = os.environ.get("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
 		self._model = model_key
-		self._embedding_model = embedding_model or os.environ.get("MODEL_EMBEDDING", "")
 		self._api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
 		self._headers = {
 			"Authorization": f"Bearer {self._api_key}",
@@ -98,16 +96,6 @@ class OpenAICompatibleProvider(InferenceProvider):
 		)
 		resp.raise_for_status()
 		return resp.json()["choices"][0]["message"]["content"]
-
-	def embed(self, text: str) -> list[float]:
-		resp = requests.post(
-			f"{self._base}/embeddings",
-			headers=self._headers,
-			json={"model": self._embedding_model, "input": text},
-			timeout=30,
-		)
-		resp.raise_for_status()
-		return resp.json()["data"][0]["embedding"]
 
 	def context_length(self) -> int:
 		# Try per-model endpoint first (supported by some servers)

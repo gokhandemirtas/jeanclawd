@@ -110,7 +110,7 @@ async def handle_weather(query: str) -> str:
 
   if location == "unknown_location" or not location:
     try:
-      from utils.memory_service import get_fact_value
+      from utils.langmem_service import get_fact_value
       saved_location = await get_fact_value("location")
       if saved_location:
         location = saved_location

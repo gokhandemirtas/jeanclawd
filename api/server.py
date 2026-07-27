@@ -53,7 +53,7 @@ async def handle_query(request: web.Request) -> web.Response:
 			)
 		from agents.planner import run_planner
 		from utils.inference_gate import foreground_inference
-		from utils.memory_service import record_interaction
+		from utils.langmem_service import record_interaction
 
 		async with foreground_inference():
 			response = await run_planner(task)
@@ -123,7 +123,7 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 				on_status("Building your plan")
 				from agents.planner import run_planner
 				from utils.inference_gate import foreground_inference
-				from utils.memory_service import record_interaction
+				from utils.langmem_service import record_interaction
 
 				async with foreground_inference():
 					response = await run_planner(task)
@@ -685,11 +685,9 @@ def create_app() -> web.Application:
 
 
 async def start_api_server(host: str = "0.0.0.0", port: int = 8000) -> web.AppRunner:
-	from utils.memory_service import start_memory_worker
 	from utils.session_service import initialize_session
 
 	await initialize_session()
-	start_memory_worker()
 	app = create_app()
 	runner = web.AppRunner(app)
 	await runner.setup()

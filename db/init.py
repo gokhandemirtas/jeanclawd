@@ -8,8 +8,6 @@ from db.schemas import (
   Credentials,
   HueConfiguration,
   Interaction,
-  MemoryFact,
-  MemoryWorkItem,
   Newsfeed,
   Note,
   Plans,
@@ -17,11 +15,10 @@ from db.schemas import (
   Session,
   ServiceCredentials,
   UserSettings,
-  UserProfile,
   Weather,
 )
 
-collections = [Credentials, HueConfiguration, Interaction, MemoryFact, MemoryWorkItem, Newsfeed, Note, Plans, Reminders, Session, ServiceCredentials, UserProfile, UserSettings, Weather]
+collections = [Credentials, HueConfiguration, Interaction, Newsfeed, Note, Plans, Reminders, Session, ServiceCredentials, UserSettings, Weather]
 
 
 async def db_init() -> str | None:
@@ -33,27 +30,6 @@ async def db_init() -> str | None:
 
     await init_beanie(database=client.langbox, document_models=collections)
 
-    # UserProfile is a deliberately small startup read model.  Ensure the
-    # default document exists even before the first identity fact is extracted;
-    # MongoDB otherwise does not create the collection until the first insert.
-    profile = await UserProfile.find_one(UserProfile.user_id == "default")
-    if profile is None:
-      profile = UserProfile(user_id="default")
-      identity_facts = await MemoryFact.find(
-        MemoryFact.user_id == "default",
-        MemoryFact.namespace == "identity",
-        MemoryFact.status == "active",
-      ).to_list()
-      for fact in identity_facts:
-        if fact.key == "name":
-          profile.display_name = fact.value
-        elif fact.key == "birth_date":
-          profile.birth_date = fact.value
-        elif fact.key == "gender":
-          profile.gender = fact.value
-        elif fact.key in {"location", "home_location", "city"}:
-          profile.location = fact.value
-      await profile.insert()
     return f"Initiated MongoDB with: {[col.__name__ for col in collections]}"
   except Exception as error:
     raise RuntimeError("MongoDB failed to start") from error

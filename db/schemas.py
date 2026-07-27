@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from beanie import Document
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 NoteCategory = Literal["read", "listen", "watch", "eat", "visit"]
 
@@ -92,41 +92,6 @@ class Interaction(Document):
 		name = "Interactions"
 
 
-MemoryNamespace = Literal["identity", "preference", "interest", "relationship", "context"]
-MemoryStatus = Literal["active", "superseded", "forgotten"]
-MemoryWorkStatus = Literal["pending", "processing", "complete", "error"]
-
-
-class MemoryFact(Document):
-	"""A curated, attributable fact used for cross-session recall."""
-	user_id: str = "default"
-	namespace: MemoryNamespace
-	key: str
-	value: str
-	confidence: float = 0.8
-	source_interaction_ids: list[str] = Field(default_factory=list)
-	status: MemoryStatus = "active"
-	first_observed_at: datetime
-	last_confirmed_at: datetime
-	expires_at: Optional[datetime] = None
-
-	class Settings:
-		name = "MemoryFacts"
-
-
-class MemoryWorkItem(Document):
-	"""Durable outbox item for deferred memory extraction."""
-	user_id: str = "default"
-	interaction_id: str
-	created_at: datetime
-	status: MemoryWorkStatus = "pending"
-	attempts: int = 0
-	error: Optional[str] = None
-
-	class Settings:
-		name = "MemoryWorkItems"
-
-
 class Note(Document):
 	created_at: datetime
 	title: str  # plain text
@@ -147,16 +112,3 @@ class UserSettings(Document):
 
 	class Settings:
 		name = "UserSettings"
-
-
-class UserProfile(Document):
-	"""Small, fast read model for identity details used at startup and in greetings."""
-	user_id: str = "default"
-	display_name: Optional[str] = None
-	birth_date: Optional[str] = None
-	gender: Optional[str] = None
-	location: Optional[str] = None
-	updated_at: datetime = Field(default_factory=datetime.now)
-
-	class Settings:
-		name = "UserProfiles"

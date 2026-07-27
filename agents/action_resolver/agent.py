@@ -47,7 +47,7 @@ async def resolve_action_query(user_input: str) -> str:
     """
     import os
 
-    from utils.memory_service import search_relevant_memories
+    from utils.langmem_service import search_relevant_memories
     from utils.llm_structured_output import generate_structured_output
 
     if not _ACTION_PREFIX.search(user_input.strip()):

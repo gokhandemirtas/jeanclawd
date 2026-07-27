@@ -18,11 +18,11 @@ def backend_label() -> str:
 	return _BACKEND_LABELS.get(backend, backend)
 
 
-def _make_provider(model: str, load_embeddings: bool = True) -> InferenceProvider:
+def _make_provider(model: str) -> InferenceProvider:
 	backend = os.getenv("INFERENCE_PROVIDER", "lmstudio").lower()
 	if backend == "lmstudio":
 		from .lmstudio import LMStudioProvider
-		return LMStudioProvider(model, load_embeddings=load_embeddings)
+		return LMStudioProvider(model)
 	elif backend == "llamacpp":
 		from .llamacpp import LlamaCppProvider
 		return LlamaCppProvider(model)
@@ -50,8 +50,8 @@ def get_intent_provider() -> InferenceProvider:
 	"""Lean provider for the intent classifier.
 
 	When MODEL_INTENT is set to a different model than MODEL_GENERALIST, creates
-	a dedicated lean instance (no embeddings). Otherwise reuses the main provider
-	to avoid duplicate handles to the same model.
+	a dedicated lean instance. Otherwise reuses the main provider to avoid
+	duplicate handles to the same model.
 	"""
 	global _intent_provider
 	if _intent_provider is not None:
@@ -61,7 +61,7 @@ def get_intent_provider() -> InferenceProvider:
 	generalist_model = os.getenv("MODEL_GENERALIST", "").strip()
 
 	if intent_model and intent_model != generalist_model:
-		_intent_provider = _make_provider(intent_model, load_embeddings=False)
+		_intent_provider = _make_provider(intent_model)
 	else:
 		_intent_provider = get_provider()
 

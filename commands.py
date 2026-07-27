@@ -88,7 +88,7 @@ async def cmd_session(args: str) -> None:
 async def cmd_planner(args: str) -> None:
 	from agents.planner import run_planner
 	from utils.inference_gate import foreground_inference
-	from utils.memory_service import record_interaction
+	from utils.langmem_service import record_interaction
 
 	task = args.strip()
 	if not task:
@@ -190,10 +190,10 @@ async def cmd_memories(args: str) -> None:
 
 	Usage:
 	  /memories           — list all stored memories
-	  /memories <query>   — semantic search for relevant memories
+	  /memories <query>   — search stored LangMem profile fields
 	"""
 	try:
-		from utils.memory_service import list_memories
+		from utils.langmem_service import list_memories
 
 		query = args.strip()
 		results = await list_memories(query)
@@ -201,56 +201,27 @@ async def cmd_memories(args: str) -> None:
 			logger.info(f"No memories found{f' for {query!r}' if query else ''}.")
 			return
 		lines = "\n".join(
-			f"  {str(item.id)[:8]}  {item.key}: {item.value} [{item.namespace}]"
+			f"  {item.key:14}  {item.value} [{'/'.join(item.namespace)}]"
 			for item in results
 		)
-		logger.info(f"{len(results)} active memory fact(s):\n{lines}")
+		logger.info(f"{len(results)} stored memory field(s):\n{lines}")
 	except Exception as e:
 		logger.error(f"memories failed: {e}")
 
 
-async def cmd_process_memory(args: str) -> None:
-	"""Run deferred memory extraction immediately for testing."""
-	try:
-		from utils.memory_service import process_pending_memory
-
-		include_complete = args.strip().lower() == "all"
-		logger.info("Running deferred memory extraction now…")
-		if include_complete:
-			logger.info("Including previously completed work items.")
-		count = await process_pending_memory(force=True, include_complete=include_complete)
-		logger.info(f"Memory extraction complete: stored {count} fact(s).")
-	except Exception as e:
-		logger.error(f"memory extraction failed: {e}")
-
-
 async def cmd_forget(args: str) -> None:
-	"""Mark one canonical fact as forgotten using its ID prefix."""
+	"""Clear one LangMem profile field."""
 	try:
-		from db.schemas import MemoryFact
+		from utils.langmem_service import forget_memory
 
-		prefix = args.strip()
-		if len(prefix) < 4:
-			logger.info("Usage: /forget <memory-id-prefix>  (use /memories to list IDs)")
+		field = args.strip()
+		if not field:
+			logger.info("Usage: /forget-memory <name|location|likes|dislikes|interests|relationships|context>")
 			return
-		matches = [
-			fact
-			for fact in await MemoryFact.find(MemoryFact.status == "active").to_list()
-			if str(fact.id).startswith(prefix)
-		]
-		if not matches:
-			logger.info("No active memory matches that ID.")
-			return
-		if len(matches) > 1:
-			logger.info("That prefix is ambiguous; use more characters from /memories.")
-			return
-		fact = matches[0]
-		fact.status = "forgotten"
-		await fact.save()
-		from utils.memory_index import index_fact
-
-		await asyncio.to_thread(index_fact, fact)
-		logger.info(f"Forgot: {fact.key}: {fact.value}")
+		if await forget_memory(field):
+			logger.info(f"Cleared memory field: {field}")
+		else:
+			logger.info(f"Unknown or empty memory field: {field}")
 	except Exception as e:
 		logger.error(f"forget failed: {e}")
 
@@ -258,20 +229,16 @@ async def cmd_forget(args: str) -> None:
 async def cmd_apocalypse() -> None:
 	"""Wipe interactions and learned memory facts; preserve explicit settings."""
 	try:
-		from db.schemas import Interaction, MemoryFact, MemoryWorkItem, UserProfile
+		from db.schemas import Interaction
+		from utils.langmem_service import clear_memories
 
 		interaction_count = await Interaction.delete_all()
-		fact_count = await MemoryFact.delete_all()
-		await MemoryWorkItem.delete_all()
-		await UserProfile.delete_all()
-		from utils.memory_index import reset_index
-
-		await asyncio.to_thread(reset_index)
+		memory_count = await clear_memories()
 		from skills.conversation.skill import _history
 
 		_history.clear()
 		logger.info(
-			f"☢  Apocalypse: wiped {interaction_count} interaction(s) and {fact_count} memory fact(s)."
+			f"☢  Apocalypse: wiped {interaction_count} interaction(s) and {memory_count} LangMem profile record(s)."
 		)
 	except Exception as e:
 		logger.error(f"apocalypse failed: {e}")
@@ -301,10 +268,10 @@ async def cmd_model(args: str) -> None:
 		logger.error(f"Could not reach inference server: {e}")
 		return
 
-	models = [m["id"] for m in data.get("data", []) if "embed" not in m["id"].lower()]
+	models = [m["id"] for m in data.get("data", [])]
 
 	if not models:
-		logger.info("No non-embedding models found.")
+		logger.info("No models found.")
 		return
 
 	target = args.strip()
@@ -619,10 +586,9 @@ async def cmd_help() -> None:
 		"  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
 		"  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
 		"  /connect <service> — authenticate a service (spotify | hue)\n"
-		"  /memories [q]      — list/search canonical user memory facts\n"
-		"  /process-memory [all] — run deferred extraction (all retries history)\n"
-		"  /forget-memory <id>       — forget one fact (ID prefix from /memories)\n"
-		"  /apocalypse        — wipe interactions and learned memory facts\n"
+		"  /memories [q]      — list/search LangMem profile fields\n"
+		"  /forget-memory <field> — clear one LangMem profile field\n"
+		"  /apocalypse        — wipe interactions and LangMem profile memory\n"
 		"  /ctx               — show context window usage for the current session\n"
 		"  /note [title]      — save a note from the current conversation context\n"
 		"  /planner <task>    — run an autonomous multi-step planning agent\n"
@@ -641,7 +607,6 @@ _COMMANDS = {
 	"/model": cmd_model,
 	"/connect": cmd_connect,
 	"/memories": cmd_memories,
-	"/process-memory": cmd_process_memory,
 	"/forget-memory": cmd_forget,
 	"/apocalypse": cmd_apocalypse,
 	"/ctx": cmd_ctx,

@@ -73,7 +73,7 @@ async def _process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, use
         if user_text.startswith("@planner"):
             from agents.planner import run_planner
             from utils.inference_gate import foreground_inference
-            from utils.memory_service import record_interaction
+            from utils.langmem_service import record_interaction
 
             task = user_text[len("@planner"):].strip()
             if not task:
