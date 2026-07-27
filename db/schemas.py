@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from beanie import Document
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 NoteCategory = Literal["read", "listen", "watch", "eat", "visit"]
 
@@ -83,7 +83,7 @@ class Interaction(Document):
 	"""Immutable record of one completed user/assistant turn."""
 	user_id: str = "default"
 	session_id: str = "default"
-	created_at: datetime
+	created_at: datetime = Field(default_factory=datetime.now)
 	user_message: str
 	assistant_message: str
 	intent: Optional[str] = None

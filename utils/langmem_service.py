@@ -2,8 +2,8 @@
 
 Conversation turns remain in MongoDB as interaction history. LangMem maintains
 one compact structured profile per user in a separate ``LangMem`` collection.
-The MongoDB store is intentionally created without an index configuration, so
-this integration does not enable embeddings or vector search.
+The MongoDB store uses the configured local embedding model for semantic
+retrieval.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from utils.log import logger
 _STORE_CONTEXT = None
 _STORE = None
 _MANAGER = None
+_EMBEDDINGS = None
 _EXTRACTION_TASKS: set[asyncio.Task] = set()
 
 
@@ -66,20 +67,26 @@ def _mongo_uri() -> str:
 		f"{os.environ.get('MONGODB_HOST', 'localhost')}:{os.environ.get('MONGODB_PORT', '27017')}"
 	)
 	if "?" not in uri:
-		uri += "?authSource=admin&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000"
+		uri += "?authSource=admin&directConnection=true&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000"
 	return uri
 
 
 def _store():
 	global _STORE, _STORE_CONTEXT
 	if _STORE is None:
-		from langgraph.store.mongodb import MongoDBStore
+		from langgraph.store.mongodb import MongoDBStore, create_vector_index_config
 
+		index_config = create_vector_index_config(
+			dims=int(os.environ["EMBEDDING_DIM"]),
+			embed=_embeddings(),
+			fields=["content"],
+			name="langmem_vector_index",
+		)
 		_STORE_CONTEXT = MongoDBStore.from_conn_string(
 			conn_string=_mongo_uri(),
 			db_name=os.environ.get("MONGODB_DB", "langbox"),
 			collection_name="LangMem",
-			# No index_config: this store uses ordinary MongoDB key/value access.
+			index_config=index_config,
 		)
 		_STORE = _STORE_CONTEXT.__enter__()
 	return _STORE
@@ -96,6 +103,40 @@ def _model():
 	if os.getenv("INFERENCE_PROVIDER", "lmstudio").lower() != "openai":
 		kwargs["base_url"] = os.environ.get("MODEL_HOST", "http://localhost:1234/v1")
 	return ChatOpenAI(**kwargs)
+
+
+def _embeddings():
+	global _EMBEDDINGS
+	if _EMBEDDINGS is None:
+		from langchain_openai import OpenAIEmbeddings
+
+		class _LMStudioEmbeddings(OpenAIEmbeddings):
+			"""Send text compatible with Granite's local tokenizer."""
+
+			@staticmethod
+			def _clean(text: str) -> str:
+				# Granite's tokenizer rejects emoji variation selectors. Removing
+				# the selectors preserves the readable emoji/text and avoids making
+				# an otherwise valid conversation turn fail memory retrieval.
+				return text.replace("\ufe0e", "").replace("\ufe0f", "")
+
+			def embed_documents(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+				return super().embed_documents([self._clean(text) for text in texts], **kwargs)
+
+			async def aembed_documents(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
+				return await super().aembed_documents([self._clean(text) for text in texts], **kwargs)
+
+		kwargs: dict[str, Any] = {
+			"model": os.environ["MODEL_EMBEDDING"],
+			"api_key": os.environ.get("OPENAI_API_KEY", "lm-studio"),
+			# LM Studio's OpenAI-compatible endpoint expects raw strings, not
+			# the integer token IDs used by LangChain's tiktoken path.
+			"check_embedding_ctx_length": False,
+		}
+		if os.getenv("INFERENCE_PROVIDER", "lmstudio").lower() != "openai":
+			kwargs["base_url"] = os.environ.get("MODEL_HOST", "http://localhost:1234/v1")
+		_EMBEDDINGS = _LMStudioEmbeddings(**kwargs)
+	return _EMBEDDINGS
 
 
 def _manager():
@@ -237,11 +278,13 @@ async def list_memories(
 async def search_relevant_memories(
 	query: str, user_id: str = "default", limit: int = 5
 ) -> list[str]:
-	"""Perform lightweight local key/value recall without vector search."""
-	return [
-		f"{record.key}: {record.value}"
-		for record in await list_memories(query, user_id=user_id, limit=limit)
-	]
+	"""Recall profile content using the MongoDB vector index."""
+	items = await _store().asearch(("memories", user_id), query=query, limit=limit)
+	results: list[str] = []
+	for item in items:
+		for key, value in _profile_lines(_profile_from_value(item.value)):
+			results.append(f"{key}: {value}")
+	return results[: max(0, limit)]
 
 
 async def get_fact_value(key: str, user_id: str = "default") -> str | None:

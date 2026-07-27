@@ -24,11 +24,14 @@ collections = [Credentials, HueConfiguration, Interaction, Newsfeed, Note, Plans
 async def db_init() -> str | None:
   try:
     client = AsyncMongoClient(
-      f"""mongodb://{os.environ["MONGODB_USER"]}:{os.environ["MONGODB_PASSWORD"]}@{os.environ["MONGODB_HOST"]}:{os.environ["MONGODB_PORT"]}""",
+      f"""mongodb://{os.environ["MONGODB_USER"]}:{os.environ["MONGODB_PASSWORD"]}@{os.environ["MONGODB_HOST"]}:{os.environ["MONGODB_PORT"]}/?authSource=admin&directConnection=true&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000""",
       timeoutMS=5000,
     )
 
-    await init_beanie(database=client.langbox, document_models=collections)
+    await init_beanie(
+      database=client[os.environ.get("MONGODB_DB", "langbox")],
+      document_models=collections,
+    )
 
     return f"Initiated MongoDB with: {[col.__name__ for col in collections]}"
   except Exception as error:

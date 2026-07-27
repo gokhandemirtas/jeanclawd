@@ -141,7 +141,7 @@ CLI / REST / Telegram / MCP
 
 LangMem uses the configured `MODEL_GENERALIST` through the local OpenAI-compatible endpoint.
 It stores one structured profile per user in the MongoDB `LangMem` collection. The MongoDB
-store is configured without an index, so embeddings and vector search are disabled.
+store uses the configured local embedding model and MongoDB vector index for semantic retrieval.
 ```
 
 The interfaces follow the same conceptual stages, while API, Telegram, and MCP use the

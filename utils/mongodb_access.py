@@ -22,7 +22,8 @@ async def database() -> AsyncIterator[Any]:
 	"""Yield the configured database and always close the client afterward."""
 	uri = (
 		f"mongodb://{os.environ['MONGODB_USER']}:{os.environ['MONGODB_PASSWORD']}@"
-		f"{os.environ.get('MONGODB_HOST', 'localhost')}:{os.environ.get('MONGODB_PORT', '27017')}"
+		f"{os.environ.get('MONGODB_HOST', 'localhost')}:{os.environ.get('MONGODB_PORT', '27017')}/?"
+		"authSource=admin&directConnection=true&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000"
 	)
 	client = AsyncMongoClient(uri, timeoutMS=5000)
 	try:

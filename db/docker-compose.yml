@@ -2,17 +2,19 @@ version: '3.8'
 
 services:
   mongodb:
-    image: mongo:7
+    image: mongodb/mongodb-atlas-local:preview
     container_name: langbox-mongodb
+    hostname: mongodb
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-admin}
+      MONGODB_INITDB_ROOT_USERNAME: ${MONGODB_USER:-admin}
+      MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-admin}
       MONGO_INITDB_DATABASE: ${MONGODB_DB:-langbox}
     ports:
       - "${MONGODB_PORT:-27017}:27017"
     volumes:
       - mongodb_data:/data/db
-      - mongodb_config:/data/configdb
+      - mongodb_atlas_config:/data/configdb
+      - mongodb_mongot:/data/mongot
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
@@ -23,5 +25,7 @@ services:
 volumes:
   mongodb_data:
     driver: local
-  mongodb_config:
+  mongodb_atlas_config:
+    driver: local
+  mongodb_mongot:
     driver: local

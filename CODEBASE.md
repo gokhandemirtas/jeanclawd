@@ -21,9 +21,9 @@ from user profile memory.
 
 The manager uses `MODEL_GENERALIST` through the configured OpenAI-compatible endpoint. Its
 instructions explicitly separate User and Assistant perspectives, ignore conversational noise,
-and prefer a compact profile over independent memory shards. The MongoDB store is created
-without `index_config`; this application does not use embeddings, vector search, Qdrant, or a
-separate vector database.
+and prefer a compact profile over independent memory shards. The MongoDB store uses the local
+`MODEL_EMBEDDING` model with `EMBEDDING_DIM` for semantic retrieval; Qdrant and a separate
+vector database are not used.
 
 The profile contains optional identity fields and compact lists for likes, dislikes, interests,
 relationships, and durable context. `/memories` lists profile fields, `/forget-memory <field>`

@@ -83,6 +83,7 @@ _BASE_INSTRUCTION = (
 	"In the User's words, I/me/my means the human User and you/your means the Assistant; never reverse those roles. "
 	"Personality is style only; it must never change facts, omit requested information, alter numbers or units, "
 	"weaken source requirements, interfere with tools or routing, or override the requested format and length. "
+	"Never use emojis or emoticons in responses. "
 	"When delivering factual data, state the facts plainly first. Add personality sparingly in a sentence before or after; "
 	"never weave it through the data or let it distract from the task."
 )
