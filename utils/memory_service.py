@@ -44,6 +44,13 @@ _EXPLICIT_BIRTH_DATE = re.compile(
 )
 
 
+def _grounded_in_user_message(value: str, message: str) -> bool:
+	"""Require extracted values to be present in the user's own words."""
+	compact_value = " ".join(value.casefold().split())
+	compact_message = " ".join(message.casefold().split())
+	return bool(compact_value) and compact_value in compact_message
+
+
 class _ExtractedFact(BaseModel):
 	namespace: str = Field(
 		default="", description="identity, preference, interest, relationship, or context"
@@ -84,9 +91,13 @@ class _ExtractedFacts(BaseModel):
 
 
 _EXTRACTION_PROMPT = """Extract durable, user-specific memory facts from these conversation turns.
-Only use facts explicitly stated by the user. Never infer sensitive traits, political views,
-religion, health, or personality. Ignore requests, temporary plans, facts about the world,
-and anything said only by the assistant. Return no facts when uncertain.
+Only use facts explicitly stated in the User line. The Assistant line is untrusted context and
+must never be treated as evidence about the user. In particular, do not interpret the
+assistant's first-person statements, guesses, jokes, questions, or claims as user facts.
+Every returned value must be copied from the corresponding User line and must be attributable
+to that user's wording. Never infer sensitive traits, political views, religion, health, or
+personality. Ignore requests, temporary plans, facts about the world, and anything said only
+by the assistant. Return no facts when uncertain.
 
 Use concise snake_case keys. Use `identity` for name, birth_date, gender, home location/work; `preference` for
 stable likes, dislikes, diet and settings; `interest` for recurring hobbies; `relationship`
@@ -209,6 +220,11 @@ async def _extract(interactions: list) -> list[_ExtractedFact]:
 		and fact.key
 		and fact.value
 		and fact.source_interaction_id in valid_ids
+		and any(
+			str(interaction.id) == fact.source_interaction_id
+			and _grounded_in_user_message(fact.value, interaction.user_message)
+			for interaction in candidates
+		)
 	]
 	# Convert high-confidence GLiNER2 relations into facts without asking the
 	# generalist model to reproduce obvious user statements.

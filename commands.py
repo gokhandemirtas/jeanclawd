@@ -258,11 +258,12 @@ async def cmd_forget(args: str) -> None:
 async def cmd_apocalypse() -> None:
 	"""Wipe interactions and learned memory facts; preserve explicit settings."""
 	try:
-		from db.schemas import Interaction, MemoryFact, MemoryWorkItem
+		from db.schemas import Interaction, MemoryFact, MemoryWorkItem, UserProfile
 
 		interaction_count = await Interaction.delete_all()
 		fact_count = await MemoryFact.delete_all()
 		await MemoryWorkItem.delete_all()
+		await UserProfile.delete_all()
 		from utils.memory_index import reset_index
 
 		await asyncio.to_thread(reset_index)
@@ -484,8 +485,10 @@ async def cmd_persona(args: str) -> None:
 		logger.info("Available personas:\n" + "\n".join(lines))
 		try:
 			picker = PromptSession(
-				completer=FuzzyCompleter(WordCompleter(persona_ids, sentence=True))
+				completer=FuzzyCompleter(WordCompleter(persona_ids, sentence=True)),
+				complete_while_typing=True,
 			)
+			logger.info("Type a persona or press Tab to autocomplete.")
 			raw = (await picker.prompt_async("  persona ❯ ")).strip().lower()
 		except (KeyboardInterrupt, EOFError):
 			logger.info("Cancelled.")

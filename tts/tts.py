@@ -62,21 +62,33 @@ def set_spinner(enabled: bool) -> None:
 
 voice_ids = [
 	"thomas",
-	"anneke",
 	"james",
-	"sophia",
 	"michael",
+	"oliver",
+	"lucas",
+	"ethan",
+	"anneke",
+	"sophia",
 	"emma",
+	"clara",
+	"lily",
+	"nora",
 ]
 
 # Friendly application voice names → Supertonic voice styles.
 SUPERTONIC_VOICE_MAP: dict[str, str] = {
 	"thomas": "M1",
-	"anneke": "F1",
 	"james": "M2",
-	"sophia": "F2",
 	"michael": "M3",
+	"oliver": "M4",
+	"lucas": "M5",
+	"ethan": "M6",
+	"anneke": "F1",
+	"sophia": "F2",
 	"emma": "F3",
+	"clara": "F4",
+	"lily": "F5",
+	"nora": "F6",
 }
 
 
