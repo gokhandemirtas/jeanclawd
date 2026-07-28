@@ -16,7 +16,7 @@ def build_spec() -> dict:
 	from skills.registry import SKILLS
 
 	# Derive intent enum and skill descriptions directly from the registry
-	intent_enum = [s.id for s in SKILLS]
+	intent_enum = [s.id for s in SKILLS if s.routable]
 	skills_table = "\n".join(f"- **{s.id}**: {s.description}" for s in SKILLS)
 
 	# Inline schemas from Pydantic models
@@ -78,6 +78,38 @@ def build_spec() -> dict:
 							},
 						},
 						"400": _error_response("query field is missing or empty"),
+					},
+				}
+			},
+			"/vision": {
+				"post": {
+					"summary": "Identify an uploaded image",
+					"description": "Runs the VISION skill on an uploaded image and adds the result to conversation context.",
+					"requestBody": {
+						"required": True,
+						"content": {
+							"multipart/form-data": {
+								"schema": {
+									"type": "object",
+									"required": ["image"],
+									"properties": {
+										"image": {"type": "string", "format": "binary"},
+										"prompt": {"type": "string"},
+									},
+								},
+							}
+						},
+					},
+					"responses": {
+						"200": {
+							"description": "Image description",
+							"content": {
+								"application/json": {
+									"schema": {"type": "object", "properties": {"description": {"type": "string"}}}
+								}
+							}
+						},
+						"400": _error_response("image field is required or multipart data is invalid"),
 					},
 				}
 			},

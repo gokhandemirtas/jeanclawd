@@ -14,6 +14,11 @@ class QueryRequest(BaseModel):
 	query: str = Field(
 		..., description="Natural language query sent to the intent classifier"
 	)
+	image: Optional[str] = Field(
+		None,
+		description="Optional base64 image or data URL. When present, the request uses the VISION skill.",
+	)
+	filename: Optional[str] = Field(None, description="Original image filename")
 
 
 class QueryResponse(BaseModel):

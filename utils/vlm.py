@@ -15,10 +15,8 @@ import requests
 from utils.log import logger
 
 _DEFAULT_PROMPT = (
-	"Describe everything you see in this image in detail. Be concise, do NOT speculate"
-	"Be specific about objects, people, text, colours, and spatial relationships."
-	"Be specific about objects, people, text, colours, and spatial relationships."
-	"Keep it 1-2 paragraphs"
+	"Describe everything visible in this image. Be specific about objects, people, "
+	"text, colours, and spatial relationships. Do not speculate. Keep it to 1-2 paragraphs."
 )
 
 

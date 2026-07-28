@@ -14,6 +14,7 @@ from skills.nutrition import nutrition_skill
 from skills.weather import weather_skill
 from agents.search import search_skill
 from agents.planner import planner_skill
+from skills.vision import vision_skill
 
 # CHAT is handled directly by the conversation skill (no intermediate handler,
 # no post-processing wrap needed — handle_chat already produces final output).
@@ -38,7 +39,10 @@ SKILLS: list[Skill] = [
     search_skill,
     spotify_skill,
     planner_skill,
+    vision_skill,
     chat_skill,
 ]
 
-SKILL_MAP: dict[str, Skill] = {skill.id: skill for skill in SKILLS}
+SKILL_MAP: dict[str, Skill] = {
+	skill.id: skill for skill in SKILLS if skill.routable
+}

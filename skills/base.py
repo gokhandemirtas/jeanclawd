@@ -10,3 +10,4 @@ class Skill:
 	system_prompt: Optional[str] = None
 	needs_wrapping: bool = True
 	auth_provider: Any = None
+	routable: bool = True

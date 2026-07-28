@@ -58,6 +58,10 @@ religion, or other sensitive traits. Prefer leaving a field unchanged over
 guessing. Preserve meaningful phrases rather than splitting them into single
 words. Merge duplicate list entries and remove entries that are not durable.
 When the User explicitly corrects an existing fact, replace the old value.
+When changing a list field, replace the entire list at its field path; do not
+patch individual list indexes. An empty list has no indexes to replace. If the
+User did not explicitly provide durable information, leave the profile
+unchanged. Never create a memory from Assistant-only wording.
 """
 
 

@@ -94,6 +94,43 @@ async def _process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, use
         await update.message.reply_text("Sorry, something went wrong. Please try again.")
 
 
+async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+	"""Run /vision for Telegram photos and image documents."""
+	chat_id = update.effective_chat.id
+	allowed = _allowed_chat_ids()
+	if allowed and chat_id not in allowed:
+		logger.warning(f"Telegram: rejected message from unauthorized chat_id={chat_id}")
+		return
+
+	try:
+		from skills.vision import handle_vision
+
+		if update.message.photo:
+			telegram_file = await update.message.photo[-1].get_file()
+			filename = "telegram-photo.jpg"
+		else:
+			telegram_file = await update.message.document.get_file()
+			filename = update.message.document.file_name or "telegram-image"
+
+		with tempfile.NamedTemporaryFile(suffix=".image", delete=False) as f:
+			tmp_path = f.name
+		await telegram_file.download_to_drive(tmp_path)
+		try:
+			with open(tmp_path, "rb") as image_file:
+				image_bytes = image_file.read()
+		finally:
+			os.remove(tmp_path)
+
+		caption = (update.message.caption or "").strip()
+		prompt = caption.removeprefix("/vision").strip() or None
+		await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+		description = await handle_vision(image_bytes, prompt=prompt, filename=filename)
+		await update.message.reply_text(await _fit_response(description))
+	except Exception as e:
+		logger.error(f"Telegram image handler error: {e}")
+		await update.message.reply_text("Sorry, I couldn't analyse that image.")
+
+
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     allowed = _allowed_chat_ids()
@@ -154,6 +191,7 @@ async def start_telegram_bot() -> None:
     app = ApplicationBuilder().token(token).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_audio))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, _handle_image))
 
     await app.initialize()
     await app.start()

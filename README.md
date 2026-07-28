@@ -17,7 +17,7 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **Voice in / out** — wake word (`hey jarvis`), Whisper STT (mlx), local Supertonic TTS
   (plus LM Studio / OpenAI-compatible providers) with six friendly voice IDs and
   persona-aware expression tags.
-- **Vision** — VLM-backed image description (`POST /vision`, `/look` command).
+- **Vision** — VLM-backed image description (`POST /vision`, `/vision` command).
 - **6 personas** — switchable identities with distinct tones and voices.
 - **Persistent memory** — completed turns are stored as `Interaction` documents and sent to
   LangMem, which maintains one compact structured user profile in MongoDB using the generalist model.
@@ -58,7 +58,7 @@ list. Key variables:
 | `MODEL_GENERALIST` | Large model: chat, wrapping, routing, reasoning | `qwen3-30b-a3b-instruct-2507-mlx` |
 | `MODEL_RESEARCH` | Dedicated model for deep-search planning and synthesis | `Qwen3-14B-4bit` |
 | `MODEL_INTENT` | Lean model for stateless classification | `meta-llama-3.1-8b-instruct` |
-| `MODEL_VLM` | Vision-language model for `/look` | `qwen/qwen3-vl-4b` |
+| `MODEL_VLM` | Vision-language model for `/vision` | `qwen/qwen3-vl-4b` |
 | `MODEL_HOST` | LLM endpoint | `http://localhost:1234/v1` |
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
 | `TTS_PROVIDER` | Text-to-speech backend | `local` / `lmstudio` / `remote` |

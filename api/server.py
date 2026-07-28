@@ -19,6 +19,7 @@ Endpoints:
 """
 
 import asyncio
+import base64
 import json
 import os
 import tempfile
@@ -39,11 +40,37 @@ _voice_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice")
 _voice_jobs: dict[str, dict] = {}  # job_id → {status, result}
 
 
+
+def _decode_image(value: str) -> bytes:
+	"""Decode a base64 image or a data URL supplied by an API client."""
+	import base64
+
+	if "," in value and value.startswith("data:"):
+		value = value.split(",", 1)[1]
+	return base64.b64decode(value, validate=True)
+
+
 async def handle_query(request: web.Request) -> web.Response:
 	data = await request.json()
 	query = data.get("query", "").strip()
 	if not query:
 		return web.json_response({"error": "query is required"}, status=400)
+
+	image = data.get("image")
+	if image:
+		try:
+			from skills.vision import handle_vision
+			description = await handle_vision(
+				_decode_image(image),
+				prompt=query.removeprefix("/vision").strip() or None,
+				filename=data.get("filename", "image"),
+			)
+			return web.json_response({"response": description, "intent": "VISION"})
+		except (ValueError, TypeError, base64.binascii.Error) as e:
+			return web.json_response({"error": f"invalid image: {e}"}, status=400)
+		except Exception as e:
+			logger.error(f"[api/query] vision call failed: {e}")
+			return web.json_response({"error": "VLM inference failed"}, status=503)
 
 	if query.startswith("/planner"):
 		task = query[len("/planner") :].strip()
@@ -103,6 +130,8 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 		await ws.close()
 		return ws
 
+	image = data.get("image")
+
 	queue: asyncio.Queue = asyncio.Queue()
 
 	def on_status(message: str) -> None:
@@ -114,6 +143,16 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 	async def run_query() -> None:
 		try:
 			from agents.intent_classifier import run_intent_classifier
+			if image:
+				from skills.vision import handle_vision
+				on_status("Looking at your image")
+				description = await handle_vision(
+					_decode_image(image),
+					prompt=query.removeprefix("/vision").strip() or None,
+					filename=data.get("filename", "image"),
+				)
+				queue.put_nowait({"stage": "done", "text": description})
+				return
 
 			if query.startswith("/planner"):
 				task = query[len("/planner") :].strip()
@@ -352,8 +391,7 @@ async def handle_vision(request: web.Request) -> web.Response:
 	  image  — image file (required)
 	  prompt — custom prompt string (optional)
 	"""
-	from utils.vlm import describe_image
-	from skills.conversation.skill import append_to_history
+	from skills.vision import handle_vision
 
 	if not request.content_type.startswith("multipart/"):
 		return web.json_response({"error": "multipart/form-data required"}, status=400)
@@ -378,20 +416,14 @@ async def handle_vision(request: web.Request) -> web.Response:
 		return web.json_response({"error": "image field is required"}, status=400)
 
 	try:
-		kwargs = {"image_bytes": image_bytes}
-		if prompt:
-			kwargs["prompt"] = prompt
-		description = await describe_image(**kwargs)
+		description = await handle_vision(
+			image_bytes, prompt=prompt, filename=filename
+		)
 	except ValueError as e:
 		return web.json_response({"error": str(e)}, status=503)
 	except Exception as e:
 		logger.error(f"[api/vision] VLM call failed: {e}")
 		return web.json_response({"error": "VLM inference failed"}, status=500)
-
-	append_to_history(
-		f"[Image: {filename}]",
-		f"I can see the following in the image: {description}",
-	)
 
 	return web.json_response({"description": description, "context_injected": True})
 
