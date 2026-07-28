@@ -35,6 +35,13 @@ TTS_API_KEY = os.getenv("TTS_API_KEY", os.getenv("OPENAI_API_KEY", "lm-studio"))
 TTS_LANG = os.getenv("TTS_LANG", "en").split("-")[0]
 
 
+def _active_tts_lang() -> str:
+	"""Use Portuguese for the alien voice, otherwise the configured language."""
+	from agents.persona import get_active_persona_id
+
+	return "hr" if get_active_persona_id() == "ztyntchtch" else TTS_LANG
+
+
 def _load_model_adapter():
 	"""Load tts/models/{TTS_MODEL}.py if it exists. Returns the module or None."""
 	if not TTS_MODEL:
@@ -126,7 +133,10 @@ def _synthesise_local(text: str, voice_id: str, cancel_event: threading.Event):
 			voice_style=style,
 			total_steps=8,
 			speed=1.05,
-			lang=TTS_LANG,
+			# Alien/cat speech expands each source word into several tokens. Keep
+			# chunks below Supertonic's long-sequence ONNX shape limit.
+			max_chunk_length=120,
+			lang=_active_tts_lang(),
 			verbose=False,
 		)
 	return np.asarray(wav).squeeze(), 44100
@@ -186,7 +196,7 @@ def _remote_synthesise_bytes(text: str, voice_id: str) -> bytes:
 		"text": text,
 		"voice": _resolve_voice(voice_id),
 		"speed": 1.8,
-		"lang": TTS_LANG,
+		"lang": _active_tts_lang(),
 	}
 	response = requests.post(TTS_HOST, json=payload, timeout=60)
 	response.raise_for_status()
@@ -287,7 +297,10 @@ def synthesise(
 
 	try:
 		from utils.observability import span
-		with span("tts_synthesis", provider=TTS_PROVIDER, voice=voice_id, input_chars=len(text)):
+
+		with span(
+			"tts_synthesis", provider=TTS_PROVIDER, voice=voice_id, input_chars=len(text)
+		):
 			if TTS_PROVIDER == "local":
 				_local_synthesise(text, output_path, voice_id, cancel_event)
 			else:
@@ -324,7 +337,7 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 		"text": text,
 		"voice": _resolve_voice(voice_id),
 		"speed": 1.8,
-		"lang": TTS_LANG,
+		"lang": _active_tts_lang(),
 	}
 	response = requests.post(TTS_HOST, json=payload, timeout=60)
 	response.raise_for_status()

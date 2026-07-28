@@ -39,68 +39,39 @@ _TAG_REPEAT_COUNTS = {
 # The alien voice gets a separate speech script. Keeping this deterministic makes
 # retries sound consistent while still giving each source word a varied shape.
 _ALIEN_SYLLABLES = ALIEN_SYLLABLES = (
-	# Lovecraft-style UH
-	"cthulu",
-	"bab ah ghoul",
-	"ch peth peth",
-	"hun bah",
-	"hula mnah",
-	"thulak",
-	# Lovecraft-style OH
-	"bha rab hab",
-	"oghul",
-	"cthom kah",
-	"shoggoth",
-	# Lovecraft-style EH
-	"fhtagn",
-	"fhehl",
-	"bah mhoul",
-	"cthehl",
-	"gheh",
-	"BA'AL",
-	"mef tunh",
-	# Hybrid guttural
-	"kthuloh",
-	"gaht hul",
-	"BRRR KAP KAP KUPUMMM!!!!",
-	"ghthuno",
-	"rrlyeh",
-	"ch ch ch AKH lul!",
-	# Your original vowel-extended base
-	"ph ph tchaah acha",
-	"tam hap",
-	"ak lak mor",
-	"ctacha",
-	"lap hok",
-	"paka nuh tah",
-	"eckannn",
+	"aaach peth path",
+	"bahunnnn eck!!",
+	"tck tck trrrr hulak",
+	"bhab hab rab",
+	"cthommm kah",
+	"ktkah'fhehl",
+	"ahhhhhh chommm",
+	"ktktkt tohm brap",
+	"tsckkckskaprom hrap",
+	"chu chuch AKH lul!",
+	"ph phuch tchaah acha",
+	"hap tam hap",
+	"ahk lagk hmorrrr",
+	"thk thk thk turrrrr",
+	"chk chk chk hurrrr TAP",
+	"tckha pakap tch nuhtah",
+	"eckannn hak",
 	"ka pap mak",
-	"tata nok",
-	"epa kh khar",
-	"klopa ph ch",
-	"man horkum",
-	"ack tak",
-	"bal ghora",
-	"can deh lah",
-	"khara hap",
-	"aniyyaa! jerrrrr shak shak shak shak shak shak BLUP",
-	"khora toom",
-	"khula tah",
-	"braka hok",
-	"rruka",
-	"ek ek ek",
+	"taptah nok",
+	"ep kham hor",
+	"klop pha cha",
+	"tch ghor'aaah",
+	"tkhap khum kar hap",
+	"khora tck tck toooom",
+	"pooom tah",
+	"brah thk hok",
 	"thaka akh!",
-	"ahk toh poht",
 	"pakh glohhk",
-	"tkula",
 	"ukh blukh",
-	"beh malaph",
-	"ckolo",
 	"cpet pet?",
-	"kloka",
-	"jorrrrrrr KHUNH!",
-	"teke li li",
-	"pckolohk ohkolokh",
+	"klopkap akh",
+	"KHUNH!",
+	"pkolohk oh palok",
 )
 
 _ALIEN_TAG_RE = re.compile(
@@ -108,54 +79,98 @@ _ALIEN_TAG_RE = re.compile(
 )
 _ALIEN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
 
+# Fraction of the human response's words that become alien sound-words.
+# 0.5 means 30 human words produce approximately 15 alien words.
+try:
+	ALIEN_SPEECH_WORD_RATIO = max(
+		0.05, min(2.0, float(os.getenv("ALIEN_SPEECH_WORD_RATIO", "0.25")))
+	)
+except ValueError:
+	ALIEN_SPEECH_WORD_RATIO = 0.5
+
 
 def alienize_for_speech(text: str) -> str:
 	"""Render text as cryptic alien phonemes for audio only.
 
-	Expression tags are retained so Supertonic can still perform laughs, breaths,
-	and similar effects. The visible assistant response is never passed here.
+	Expression tags are removed so the alien voice uses only its own phonemes. The
+	visible assistant response is never passed here.
 	"""
 	if not text.strip():
 		return text
 
 	word_index = 0
+	word_count = len(_ALIEN_WORD_RE.findall(_ALIEN_TAG_RE.sub("", text)))
+	if word_count == 0:
+		return text
+	# Keep at least three sound-words so both laughs can be placed between them.
+	target_count = max(3, round(word_count * ALIEN_SPEECH_WORD_RATIO))
+	if target_count <= word_count:
+		if target_count == 1:
+			selected_words = {word_count // 2}
+		else:
+			selected_words = {
+				round(index * (word_count - 1) / (target_count - 1))
+				for index in range(target_count)
+			}
+		words_per_source = None
+	else:
+		selected_words = set(range(word_count))
+		words_per_source = [
+			target_count // word_count + (index < target_count % word_count)
+			for index in range(word_count)
+		]
 
 	def replace_word(match: re.Match[str]) -> str:
 		nonlocal word_index
 		word = match.group(0)
-		digest = hashlib.blake2b(f"{word_index}:{word}".encode(), digest_size=8).digest()
+		source_index = word_index
 		word_index += 1
-		count = 2 + digest[0] % 3
+		if words_per_source is None:
+			count = 1 if source_index in selected_words else 0
+		else:
+			count = words_per_source[source_index]
+		if count == 0:
+			return ""
+		digest = hashlib.blake2b(f"{word_index}:{word}".encode(), digest_size=8).digest()
 		parts = [
 			re.sub(
 				r"[^A-Za-z']+",
 				"",
-				_ALIEN_SYLLABLES[digest[offset] % len(_ALIEN_SYLLABLES)],
+				_ALIEN_SYLLABLES[digest[offset % len(digest)] % len(_ALIEN_SYLLABLES)],
 			)
 			for offset in range(1, count + 1)
 		]
 		return " ".join(parts)
 
-	# Split around tags first so they remain exact and are not spoken as words.
-	segments = _ALIEN_TAG_RE.split(text)
-	tags = _ALIEN_TAG_RE.findall(text)
-	phonemes: list[str] = []
-	for index, segment in enumerate(segments):
-		phonemes.append(_ALIEN_WORD_RE.sub(replace_word, segment))
-		if index < len(tags):
-			phonemes.append(tags[index])
-	return "".join(phonemes)
+	# Alien speech deliberately drops incoming expression tags, then adds exactly
+	# two random laughs as part of the alien vocal performance.
+	alien_text = _ALIEN_WORD_RE.sub(replace_word, _ALIEN_TAG_RE.sub("", text)).strip()
+	words = alien_text.split()
+	return " ".join(words)
 
 
-_CAT_SOUNDS = (
+_CAT_SOUNDS = [
 	"meow",
-	"merrk",
-	"meoooow?",
-	"mrrrkk",
-	"meaaawww!!!!",
-	"mrrrow",
-	"brk. brkew?meowmeow mrk",
-)
+	"mew",
+	"mao",
+	"maow",
+	"miah",
+	"miaow",
+	"nyah",
+	"nyao",
+	"nyae",
+	"purr",
+	"pruh",
+	"prrr",
+	"raw",
+	"raow",
+	"yow",
+	"yowl",
+	"chirp",
+	"chup",
+	"mrr",
+	"hrrm",
+]
 
 
 def catize_for_speech(text: str) -> str:
@@ -225,15 +240,15 @@ def decorate_for_speech(text: str) -> str:
 		return text
 
 	persona_id = get_active_persona_id()
-	if persona_id in {"ztyntchtch", "mr_meowsky"}:
+	if persona_id == "ztyntchtch":
+		# The alien language has its own vocal texture; do not add or preserve
+		# Supertonic expression tags such as <laugh> or <sigh>.
+		return alienize_for_speech(text)
+	if persona_id == "mr_meowsky":
 		# Persona-specific vocalizations are intended for audio only. This path
 		# also applies to remote TTS providers.
 		if os.getenv("TTS_PROVIDER", "local") != "local":
-			return (
-				alienize_for_speech(text)
-				if persona_id == "ztyntchtch"
-				else catize_for_speech(text)
-			)
+			return catize_for_speech(text)
 
 	guidance = _PERSONA_GUIDANCE.get(
 		persona_id, "natural, restrained, and conversational"
