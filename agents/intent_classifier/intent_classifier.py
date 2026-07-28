@@ -95,6 +95,12 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 	t = text.lower().strip()
 	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
 		return "CHAT"
+	# Reminder listing is unambiguous and must not fall through to NOTES just
+	# because it contains the generic word "list".
+	if "reminder" in t and any(
+		word in t for word in ("list", "show", "view", "see", "upcoming", "schedule")
+	):
+		return "REMINDER"
 	if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
 		return "SEARCH"
 	# Shopping requests must never be answered from the chat model's memory.
