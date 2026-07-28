@@ -132,7 +132,6 @@ class _ProgressSpinner:
 
 
 async def main(
-	debug: bool,
 	emote: bool,
 	speak: bool,
 	track_camera: bool,
@@ -141,7 +140,6 @@ async def main(
 	telegram: bool = False,
 	session_id: str | None = None,
 ) -> None:
-	logger.set_debug(debug)
 	logger.init_file_logging("logs/app.log")
 
 	asyncio.create_task(worker())
@@ -552,7 +550,6 @@ def _keepalive_loop(forwarded_args: list[str]) -> None:
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--debug", action="store_true", help="Enable debug/warn logging")
 	parser.add_argument("--emote", action="store_true", help="Enable emote mode")
 	parser.add_argument("--speak", action="store_true", help="Enable TTS output")
 	parser.add_argument(
@@ -572,7 +569,6 @@ if __name__ == "__main__":
 
 	asyncio.run(
 		main(
-			debug=args.debug,
 			emote=args.emote,
 			speak=args.speak,
 			track_camera=args.track_camera,

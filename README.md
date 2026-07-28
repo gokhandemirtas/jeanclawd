@@ -108,7 +108,7 @@ Last active application session:
 uv run python main.py --session e4f97131-0c00-439b-b25b-41ff8e88774c
 ```
 
-CLI flags: `--debug`, `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
+CLI flags: `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
 `--telegram`, `--keepalive`, `--session SESSION_UUID`.
 
 Telegram requires `TELEGRAM_BOT_TOKEN` in `.env`; start it with:
