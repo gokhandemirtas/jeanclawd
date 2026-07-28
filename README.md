@@ -18,8 +18,8 @@ Package name: `jeanclawd` (see `pyproject.toml`).
   (plus LM Studio / OpenAI-compatible providers) with six friendly voice IDs and
   persona-aware expression tags.
 - **Vision** — VLM-backed image description (`POST /vision`, `/vision` command).
-- **9 personas** — switchable identities with distinct tones and voices, including an alien observer,
-  a systems-thinking mentor, and an improvisational storyteller.
+- **10 personas** — switchable identities with distinct tones and voices, including an alien observer,
+  a systems-thinking mentor, an improvisational storyteller, and Mr Meowsky the cat.
 - **Persistent memory** — completed turns are stored as `Interaction` documents and sent to
   LangMem, which maintains one compact structured user profile in MongoDB using the generalist model.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small

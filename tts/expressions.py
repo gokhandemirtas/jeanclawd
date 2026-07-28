@@ -1,5 +1,6 @@
 """Supertonic expression tags and persona-aware speech decoration."""
 
+import hashlib
 import os
 import re
 
@@ -35,6 +36,197 @@ _TAG_REPEAT_COUNTS = {
 	"cough": 3,
 }
 
+# The alien voice gets a separate speech script. Keeping this deterministic makes
+# retries sound consistent while still giving each source word a varied shape.
+_ALIEN_SYLLABLES = ALIEN_SYLLABLES = (
+	# Lovecraft-style UH
+	"cthul",
+	"cthulu",
+	"cthuhl",
+	"cthugha",
+	"ghul",
+	"ghula",
+	"ch peth peth",
+	"ghun",
+	"rhul",
+	"rhula",
+	"rhugha",
+	"thul",
+	"shak shak",
+	"thulak",
+	# Lovecraft-style OH
+	"rlyeh",
+	"rlyeha",
+	"rlyoha",
+	"rloh",
+	"rlohe",
+	"rlohen",
+	"ogh",
+	"ogha",
+	"oghen",
+	"oghul",
+	"ctho",
+	"cthoka",
+	"cthono",
+	# Lovecraft-style EH
+	"fhtagn",
+	"fhtagna",
+	"fhtagne",
+	"fhehn",
+	"fhehna",
+	"fhehl",
+	"ctheh",
+	"cthehn",
+	"cthehl",
+	"gheh",
+	"ghehn",
+	"ghehl",
+	# Hybrid guttural
+	"kthuloh",
+	"kthuleh",
+	"kthunoh",
+	"ghthul",
+	"ghthuleh",
+	"ghthuno",
+	"rrlyeh",
+	"rrlyoha",
+	"rrlyehn",
+	"chlul",
+	"chlula",
+	"chluno",
+	# Your original vowel-extended base
+	"acha",
+	"achek",
+	"aklik",
+	"ctacha",
+	"cthena",
+	"paka",
+	"ecka",
+	"cka",
+	"cata",
+	"tata",
+	"acklapa",
+	"epa",
+	"klopa",
+	# Guttural clusters (vowel-rich)
+	"ghara",
+	"ack tak",
+	"ghora",
+	"can deh lah",
+	"khara",
+	"aniyya shak shak shak",
+	"khora",
+	"khura",
+	"khula tah",
+	"rrika",
+	"rruka",
+	"ek ek ek",
+	"thaka",
+	"theka",
+	"thoka",
+	"thuka",
+	# Click-like but ASCII
+	"pakh glohhk",
+	"tkeli",
+	"tkolo",
+	"tkula",
+	"ukh blukh",
+	"ckeli",
+	"ckolo",
+	"ckula",
+	"cpet pet",
+	"kleka",
+	"klika",
+	"kloka",
+	"jerrrrr",
+	"pckala",
+	"aniyya",
+	"pckolo",
+)
+
+_ALIEN_TAG_RE = re.compile(
+	r"<(?:laugh|breath|sigh|sad|cough|scream|throatclear|angry|yawn)>"
+)
+_ALIEN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
+
+
+def alienize_for_speech(text: str) -> str:
+	"""Render text as cryptic alien phonemes for audio only.
+
+	Expression tags are retained so Supertonic can still perform laughs, breaths,
+	and similar effects. The visible assistant response is never passed here.
+	"""
+	if not text.strip():
+		return text
+
+	word_index = 0
+
+	def replace_word(match: re.Match[str]) -> str:
+		nonlocal word_index
+		word = match.group(0)
+		digest = hashlib.blake2b(f"{word_index}:{word}".encode(), digest_size=8).digest()
+		word_index += 1
+		count = 2 + digest[0] % 3
+		parts = [
+			re.sub(
+				r"[^A-Za-z']+",
+				"",
+				_ALIEN_SYLLABLES[digest[offset] % len(_ALIEN_SYLLABLES)],
+			)
+			for offset in range(1, count + 1)
+		]
+		return " ".join(parts)
+
+	# Split around tags first so they remain exact and are not spoken as words.
+	segments = _ALIEN_TAG_RE.split(text)
+	tags = _ALIEN_TAG_RE.findall(text)
+	phonemes: list[str] = []
+	for index, segment in enumerate(segments):
+		phonemes.append(_ALIEN_WORD_RE.sub(replace_word, segment))
+		if index < len(tags):
+			phonemes.append(tags[index])
+	return "".join(phonemes)
+
+
+_CAT_SOUNDS = (
+	"meow",
+	"merrk",
+	"meoooow?",
+	"mrrrkk",
+	"meaaawww!!!!",
+	"mrrrow",
+	"brk. brkew?meowmeow mrk",
+)
+
+
+def catize_for_speech(text: str) -> str:
+	"""Render text as meows and mrrks for Mr Meowsky's audio only."""
+	if not text.strip():
+		return text
+
+	word_index = 0
+
+	def replace_word(match: re.Match[str]) -> str:
+		nonlocal word_index
+		digest = hashlib.blake2b(
+			f"cat:{word_index}:{match.group(0)}".encode(), digest_size=8
+		).digest()
+		word_index += 1
+		count = 2 + digest[0] % 3
+		return " ".join(
+			_CAT_SOUNDS[digest[offset] % len(_CAT_SOUNDS)] for offset in range(1, count + 1)
+		)
+
+	segments = _ALIEN_TAG_RE.split(text)
+	tags = _ALIEN_TAG_RE.findall(text)
+	meows: list[str] = []
+	for index, segment in enumerate(segments):
+		meows.append(_ALIEN_WORD_RE.sub(replace_word, segment))
+		if index < len(tags):
+			meows.append(tags[index])
+	return "".join(meows)
+
+
 _PERSONA_GUIDANCE: dict[str, str] = {
 	"jean": "warm, calm, friendly; use breath or an occasional laugh when it feels natural",
 	"jerk": "sarcastic and superior; use sigh, yawn, throatclear, and laugh noticeably more often",
@@ -42,7 +234,11 @@ _PERSONA_GUIDANCE: dict[str, str] = {
 	"kimi": "bright and enthusiastic; favor laugh and breath",
 	"borg": "logical and emotionless; use no tags unless one is genuinely necessary",
 	"fred": "paranoid and alarmed; favor throatclear, cough, angry, and occasional sigh",
+	"ztyntchtch": "cryptic alien observer; use sparse breaths and throat-clears around translated utterances",
+	"mr_meowsky": "an expressive cat; use occasional meow-related vocal color",
 }
+
+
 class _DecoratedSpeech(BaseModel):
 	text: str = Field(
 		description="The original response with optional Supertonic tags inserted"
@@ -51,6 +247,7 @@ class _DecoratedSpeech(BaseModel):
 
 def _repeat_expression_tags(text: str) -> str:
 	"""Repeat only known tags to improve Supertonic's unreliable tag activation."""
+
 	def replace(match: re.Match[str]) -> str:
 		tag = match.group(1)
 		count = _TAG_REPEAT_COUNTS.get(tag, 1)
@@ -65,10 +262,20 @@ def decorate_for_speech(text: str) -> str:
 	This is deliberately best-effort: a failed second LLM pass must never prevent the
 	assistant from speaking the original response.
 	"""
-	if not text.strip() or os.getenv("TTS_PROVIDER", "local") != "local":
+	if not text.strip():
 		return text
 
 	persona_id = get_active_persona_id()
+	if persona_id in {"ztyntchtch", "mr_meowsky"}:
+		# Persona-specific vocalizations are intended for audio only. This path
+		# also applies to remote TTS providers.
+		if os.getenv("TTS_PROVIDER", "local") != "local":
+			return (
+				alienize_for_speech(text)
+				if persona_id == "ztyntchtch"
+				else catize_for_speech(text)
+			)
+
 	guidance = _PERSONA_GUIDANCE.get(
 		persona_id, "natural, restrained, and conversational"
 	)
@@ -97,6 +304,8 @@ Rules:
   preface, explanation, or replacement text.
 """
 	try:
+		if os.getenv("TTS_PROVIDER", "local") != "local":
+			return text
 		result = generate_structured_output(
 			model_name=os.getenv("MODEL_GENERALIST", ""),
 			user_prompt=f"SOURCE RESPONSE (copy this text; insert tags only):\n{text}\nEND SOURCE RESPONSE",
@@ -107,7 +316,18 @@ Rules:
 		)
 		# Preserve the editor's words exactly; only expand expression markers for
 		# Supertonic's known tag-activation quirk.
-		return _repeat_expression_tags(result.text)
+		decorated = _repeat_expression_tags(result.text)
+		if persona_id == "ztyntchtch":
+			return alienize_for_speech(decorated)
+		if persona_id == "mr_meowsky":
+			return catize_for_speech(decorated)
+		return decorated
 	except Exception as exc:
-		logger.warning(f"[tts] Expression editor failed ({exc}); speaking original response")
+		logger.warning(
+			f"[tts] Expression editor failed ({exc}); speaking fallback response"
+		)
+		if persona_id == "ztyntchtch":
+			return alienize_for_speech(text)
+		if persona_id == "mr_meowsky":
+			return catize_for_speech(text)
 		return text
