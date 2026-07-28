@@ -416,9 +416,22 @@ async def main(
 				from tts.expressions import decorate_for_speech
 				from tts.tts import speak as tts_speak, active_voice_id
 				from agents.persona import get_active_voice_id
+				from stt.recorder import monitor_for_speech
 
 				voice_spinner = _ProgressSpinner("Synthesizing voice…")
 				voice_spinner.start()
+				tts_stop_event = threading.Event()
+				barge_in_event = threading.Event()
+				monitor_stop_event = threading.Event()
+				monitor_thread = None
+				if listen:
+					monitor_thread = threading.Thread(
+						target=monitor_for_speech,
+						args=(monitor_stop_event, barge_in_event),
+						kwargs={"cancel_event": tts_stop_event},
+						daemon=True,
+					)
+					monitor_thread.start()
 				try:
 					# News is already formatted by its dedicated skill. Read the exact
 					# displayed briefing rather than sending it through persona decoration.
@@ -431,9 +444,16 @@ async def main(
 						tts_speak,
 						spoken_response,
 						get_active_voice_id() or active_voice_id,
+						tts_stop_event,
 					)
 				finally:
+					monitor_stop_event.set()
+					if monitor_thread:
+						monitor_thread.join(timeout=1.0)
 					voice_spinner.stop()
+				if barge_in_event.is_set():
+					console.print("[dim]Barge-in detected — listening…[/dim]")
+					conversation_active = True
 
 			logger.timing(_elapsed)
 

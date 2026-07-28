@@ -342,13 +342,17 @@ def _sanitize_for_speech(text: str) -> str:
 	return " ".join(text.split())
 
 
-def speak(text: str, voice_id: str = active_voice_id):
+def speak(
+	text: str,
+	voice_id: str = active_voice_id,
+	cancel_event: threading.Event | None = None,
+):
 	text = _sanitize_for_speech(text)
 	if not text:
 		logger.warning("No text provided for TTS, skipping")
 		return
 
-	stop_event = threading.Event()
+	stop_event = cancel_event or threading.Event()
 	listener = threading.Thread(target=_escape_listener, args=(stop_event,), daemon=True)
 	listener.start()
 

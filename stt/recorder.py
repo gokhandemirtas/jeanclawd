@@ -1,5 +1,6 @@
 import math
 import tempfile
+import threading
 
 import numpy as np
 import sounddevice as sd
@@ -13,6 +14,41 @@ _MIN_SPEECH_SECONDS = 0.3  # discard recordings shorter than this
 _SILENCE_CHUNKS = int(_SILENCE_SECONDS * _SAMPLE_RATE / _CHUNK_FRAMES)
 _MIN_SPEECH_CHUNKS = int(_MIN_SPEECH_SECONDS * _SAMPLE_RATE / _CHUNK_FRAMES)
 _BAR_WIDTH = 20
+
+
+def monitor_for_speech(
+	stop_event: threading.Event,
+	speech_event: threading.Event,
+	*,
+	cancel_event: threading.Event | None = None,
+	start_chunks: int = 3,
+) -> None:
+	"""Set ``speech_event`` when microphone speech is detected.
+
+	This lightweight monitor is used during TTS playback. It deliberately does
+	not save audio; the normal recorder starts after playback is interrupted.
+	Headset use keeps the assistant's output out of this signal in practice.
+	"""
+	consecutive_speech = 0
+	try:
+		with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16") as stream:
+			while not stop_event.is_set():
+				data, _ = stream.read(_CHUNK_FRAMES)
+				rms = float(np.sqrt(np.mean(data.astype(np.float32) ** 2)))
+				if rms >= _SILENCE_RMS:
+					consecutive_speech += 1
+					if consecutive_speech >= start_chunks:
+						speech_event.set()
+						if cancel_event is not None:
+							cancel_event.set()
+						stop_event.set()
+						return
+				else:
+					consecutive_speech = 0
+	except Exception as e:
+		# Barge-in is optional: a microphone failure must not break TTS.
+		from utils.log import logger
+		logger.warning(f"[stt] Barge-in microphone monitor unavailable: {e}")
 
 
 def _vu_bar(rms: float) -> str:
