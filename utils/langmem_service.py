@@ -208,6 +208,7 @@ async def record_interaction(
 ) -> None:
 	"""Persist the turn and submit it to LangMem in the background."""
 	from db.schemas import Interaction
+	from utils.observability import emit, span
 
 	if session_id is None:
 		from utils.session_service import get_active_session_id
@@ -220,7 +221,8 @@ async def record_interaction(
 		assistant_message=answer,
 		intent=intent,
 	)
-	await interaction.insert()
+	with span("interaction_write", intent=intent or "unknown"):
+		await interaction.insert()
 
 	from utils.session_service import maybe_generate_session_title, touch_session
 
@@ -229,6 +231,7 @@ async def record_interaction(
 	task = asyncio.create_task(
 		_extract_turn(question, answer, user_id=user_id, interaction_id=str(interaction.id))
 	)
+	emit("memory_extraction_queued", intent=intent or "unknown")
 	_EXTRACTION_TASKS.add(task)
 	task.add_done_callback(_track_task)
 

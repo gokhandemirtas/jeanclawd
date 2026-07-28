@@ -14,6 +14,8 @@ def get_queue() -> asyncio.Queue:
 
 def enqueue(name: str, coro) -> None:
     get_queue().put_nowait((name, coro))
+    from utils.observability import emit
+    emit("queue_enqueued", task=name, depth=get_queue().qsize())
 
 
 def pending_count() -> int:
@@ -37,8 +39,10 @@ async def worker() -> None:
     q = get_queue()
     while True:
         name, coro = await q.get()
+        from utils.observability import span
         try:
-            await coro
+            with span("queue_task", task=name, depth=q.qsize()):
+                await coro
         except asyncio.CancelledError:
             pass
         except Exception:

@@ -63,35 +63,37 @@ async def _transcribe_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def _process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, user_text: str, audio_reply: bool = False) -> None:
-    """Run intent classification or planner on user_text and reply."""
-    from agents.intent_classifier import run_intent_classifier
+	"""Run intent classification or planner on user_text and reply."""
+	from agents.intent_classifier import run_intent_classifier
+	from utils.observability import request_context
 
-    chat_id = update.effective_chat.id
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+	chat_id = update.effective_chat.id
+	await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-    try:
-        if user_text.startswith("@planner"):
-            from agents.planner import run_planner
-            from utils.inference_gate import foreground_inference
-            from utils.langmem_service import record_interaction
+	with request_context("telegram", "message", chat_id=chat_id, audio_reply=audio_reply):
+		try:
+			if user_text.startswith("@planner"):
+				from agents.planner import run_planner
+				from utils.inference_gate import foreground_inference
+				from utils.langmem_service import record_interaction
 
-            task = user_text[len("@planner"):].strip()
-            if not task:
-                await update.message.reply_text("Please provide a task. Example: @planner check the weather and set a reminder for 8am")
-                return
-            async with foreground_inference():
-                response = await run_planner(task)
-            await record_interaction(task, response, intent="PLANNER")
-        else:
-            response = await run_intent_classifier(user_text)
+				task = user_text[len("@planner"):].strip()
+				if not task:
+					await update.message.reply_text("Please provide a task. Example: @planner check the weather and set a reminder for 8am")
+					return
+				async with foreground_inference():
+					response = await run_planner(task)
+				await record_interaction(task, response, intent="PLANNER")
+			else:
+				response = await run_intent_classifier(user_text)
 
-        if audio_reply or _tts_enabled:
-            await _reply_audio(update, response)
-        else:
-            await update.message.reply_text(await _fit_response(response))
-    except Exception as e:
-        logger.error(f"Telegram handler error: {e}")
-        await update.message.reply_text("Sorry, something went wrong. Please try again.")
+			if audio_reply or _tts_enabled:
+				await _reply_audio(update, response)
+			else:
+				await update.message.reply_text(await _fit_response(response))
+		except Exception as e:
+			logger.error(f"Telegram handler error: {e}")
+			await update.message.reply_text("Sorry, something went wrong. Please try again.")
 
 
 async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

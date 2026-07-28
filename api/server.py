@@ -674,7 +674,9 @@ _CORS_HEADERS = {
 
 @web.middleware
 async def log_middleware(request: web.Request, handler):
-	response = await handler(request)
+	from utils.observability import request_context
+	with request_context("api", f"{request.method} {request.path}"):
+		response = await handler(request)
 	if request.path != "/health":
 		logger.info(f"{request.method} {request.path} → {response.status}")
 	return response

@@ -21,16 +21,18 @@ async def route(
 	await maybe_compress_history()
 
 	skill = get_skill(intent)
+	from utils.observability import span
 	sig = inspect.signature(skill.handle)
 	kwargs: dict = {}
 	if "on_token" in sig.parameters:
 		kwargs["on_token"] = on_token
 	if "voice_mode" in sig.parameters:
 		kwargs["voice_mode"] = voice_mode
-	try:
-		result = skill.handle(user_input, **kwargs)
-	except TypeError:
-		result = skill.handle(user_input)
+	with span("skill_execution", skill=intent):
+		try:
+			result = skill.handle(user_input, **kwargs)
+		except TypeError:
+			result = skill.handle(user_input)
 	if inspect.isawaitable(result):
 		result = await result
 	# Deep research already produces a user-facing document path. Wrapping it in

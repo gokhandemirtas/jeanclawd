@@ -625,7 +625,7 @@ async def cmd_introspect() -> None:
 			try:
 				content = read_file(path, max_bytes=64_000)
 			except (OSError, ValueError, PermissionError) as exc:
-				logger.info(f"[introspect] Skipping {path}: {exc}")
+				logger.event("introspection_file_skipped", file=path, error_type=type(exc).__name__)
 				continue
 			parts = [content[i : i + max_chars] for i in range(0, len(content), max_chars)] or [""]
 			for part_index, part in enumerate(parts):
@@ -647,7 +647,7 @@ async def cmd_introspect() -> None:
 		return batches
 
 	try:
-		logger.info("[introspect] Starting read-only codebase inspection")
+		logger.event("introspection_progress", phase="started")
 		inventory = exposed_files()
 		text_files = [
 			path
@@ -655,8 +655,8 @@ async def cmd_introspect() -> None:
 			if path.startswith("introspections/") is False
 			and Path(path).suffix.lower() in {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".txt", ".ini", ".cfg", ".sql"}
 		]
-		logger.info(f"[introspect] Inventory complete — {len(inventory)} exposed files, {len(text_files)} text files")
-		logger.info("[introspect] Reading CODEBASE.md")
+		logger.event("introspection_progress", phase="inventory", exposed_files=len(inventory), text_files=len(text_files))
+		logger.event("introspection_progress", phase="reading_architecture", file="CODEBASE.md")
 		architecture_map = architecture()
 		memory_parts = []
 		for reflection_path in list_reflections(limit=10):
@@ -666,13 +666,13 @@ async def cmd_introspect() -> None:
 				continue
 		prior_memory = "\n\n".join(memory_parts[-5:]) or "No prior introspection records available."
 		batches = _chunks(text_files)
-		logger.info(f"[introspect] Prepared {len(batches)} bounded inspection batches")
+		logger.event("introspection_progress", phase="batches_prepared", batches=len(batches))
 
 		from utils.llm_structured_output import generate_structured_output
 
 		saved = 0
 		for index, (scope, source_batch) in enumerate(batches, 1):
-			logger.info(f"[introspect] Batch {index}/{len(batches)} — inspecting {scope}")
+			logger.event("introspection_batch_started", batch=index, total_batches=len(batches), scope=scope)
 			prompt = (
 				"Perform a read-only architectural introspection of this codebase batch. "
 				"Use only the supplied facade output as evidence. Do not invent files, behavior, "
@@ -715,10 +715,10 @@ async def cmd_introspect() -> None:
 					scope=f"{scope}-{index}",
 				)
 				saved += 1
-				logger.info(f"[introspect] Saved batch reflection: {path}")
+				logger.event("introspection_batch_completed", batch=index, scope=scope, reflection_path=path)
 			except Exception as exc:
-				logger.error(f"[introspect] Batch {index} failed: {exc}")
-		logger.info(f"[introspect] Complete — saved {saved}/{len(batches)} batch reflections")
+				logger.event("introspection_batch_failed", level="ERROR", batch=index, scope=scope, error_type=type(exc).__name__)
+		logger.event("introspection_completed", saved=saved, total_batches=len(batches))
 	except Exception as exc:
 		logger.error(f"Introspection failed: {exc}")
 

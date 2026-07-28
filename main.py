@@ -395,7 +395,13 @@ async def main(
 						if not done.done():
 							done.set_exception(e)
 
-				enqueue("query", _queued_generate())
+				async def _observed_query() -> None:
+					from utils.observability import request_context
+
+					with request_context("terminal", "query", voice=listen, speak=speak):
+						await _queued_generate()
+
+				enqueue("query", _observed_query())
 
 				_start = time.time()
 				response = await done

@@ -286,24 +286,26 @@ def synthesise(
 		listener = None
 
 	try:
-		if TTS_PROVIDER == "local":
-			_local_synthesise(text, output_path, voice_id, cancel_event)
-		else:
-			if not cancel_event.is_set():
-				ctx = (
-					Live(
-						Spinner("dots", text=Text("Synthesising audio…", style="dim")),
-						console=_console,
-						transient=True,
-					)
-					if _show_spinner
-					else contextlib.nullcontext()
-				)
-				with ctx:
-					wav_bytes = _remote_synthesise_bytes(text, voice_id)
+		from utils.observability import span
+		with span("tts_synthesis", provider=TTS_PROVIDER, voice=voice_id, input_chars=len(text)):
+			if TTS_PROVIDER == "local":
+				_local_synthesise(text, output_path, voice_id, cancel_event)
+			else:
 				if not cancel_event.is_set():
-					with open(output_path, "wb") as f:
-						f.write(wav_bytes)
+					ctx = (
+						Live(
+							Spinner("dots", text=Text("Synthesising audio…", style="dim")),
+							console=_console,
+							transient=True,
+						)
+						if _show_spinner
+						else contextlib.nullcontext()
+					)
+					with ctx:
+						wav_bytes = _remote_synthesise_bytes(text, voice_id)
+					if not cancel_event.is_set():
+						with open(output_path, "wb") as f:
+							f.write(wav_bytes)
 	finally:
 		if owned:
 			cancel_event.set()

@@ -69,6 +69,7 @@ def describe_image_sync(image_bytes: bytes, prompt: str = _DEFAULT_PROMPT) -> st
 
 	image_bytes = _resize_if_needed(image_bytes)
 	mime = _detect_mime(image_bytes)
+	from utils.observability import span
 	b64 = base64.b64encode(image_bytes).decode()
 
 	logger.debug(f"[vlm] Sending {len(image_bytes):,} bytes ({mime}) to {model}")
@@ -88,11 +89,12 @@ def describe_image_sync(image_bytes: bytes, prompt: str = _DEFAULT_PROMPT) -> st
 	}
 
 	logger.debug(f"[vlm] Sending {len(image_bytes):,} bytes ({mime}) to {model}")
-	resp = requests.post(
-		f"{base}/chat/completions", headers=headers, json=payload, timeout=60
-	)
-	resp.raise_for_status()
-	description = resp.json()["choices"][0]["message"]["content"].strip()
+	with span("vision_inference", model=model, input_bytes=len(image_bytes), mime=mime):
+		resp = requests.post(
+			f"{base}/chat/completions", headers=headers, json=payload, timeout=60
+		)
+		resp.raise_for_status()
+		description = resp.json()["choices"][0]["message"]["content"].strip()
 	logger.debug(f"[vlm] Description: {description[:120]}…")
 	return description
 

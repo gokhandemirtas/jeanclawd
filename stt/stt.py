@@ -19,6 +19,9 @@ def transcribe(audio_path: str) -> str:
     Returns:
         Transcribed text string
     """
+    from utils.observability import span
+
     model = _get_model()
-    result = model.transcribe(audio_path, language="en")
-    return result["text"].strip()
+    with span("stt_transcription", provider=type(model).__name__):
+        result = model.transcribe(audio_path, language="en")
+        return result["text"].strip()

@@ -47,9 +47,21 @@ def generate_structured_output(
 		else get_provider()
 	)
 	_update_context_meter(system_prompt, user_prompt, pydantic_model)
+	from utils.observability import span
+	from utils.resource_monitor import count_tokens
+
+	input_tokens = count_tokens(system_prompt) + count_tokens(user_prompt)
 
 	messages = [
 		{"role": "system", "content": system_prompt},
 		{"role": "user", "content": user_prompt},
 	]
-	return provider.complete(messages, pydantic_model)
+	with span(
+		"llm_request",
+		provider=type(provider).__name__,
+		model=model_name,
+		input_tokens=input_tokens,
+		max_tokens=max_tokens,
+		structured=True,
+	):
+		return provider.complete(messages, pydantic_model)

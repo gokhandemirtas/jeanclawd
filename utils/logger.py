@@ -29,11 +29,14 @@ def init_file_logging(path: str) -> None:
 		_log_file = open(path, "w", buffering=1)
 
 
-def _write(level: str, msg: str) -> None:
+def _write(level: str, msg: str, fields: dict | None = None) -> None:
 	global _log_file
 	if _log_file:
 		with _file_lock:
-			entry = json.dumps({"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "msg": msg})
+			entry_data = {"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "msg": msg}
+			if fields:
+				entry_data.update(fields)
+			entry = json.dumps(entry_data, ensure_ascii=False, default=str)
 			# Keep even an unexpectedly large traceback from exceeding the file cap.
 			if len(entry.encode("utf-8")) >= _MAX_LOG_BYTES:
 				entry = json.dumps({
@@ -86,6 +89,14 @@ def error(msg: str) -> None:
 	_write("ERROR", msg)
 	if _debug_enabled:
 		_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
+
+
+def event(name: str, *, level: str = "INFO", **fields) -> None:
+	"""Write a structured operational event without changing the console UX."""
+	_safe_fields = {key: value for key, value in fields.items() if value is not None}
+	_write(level, name, {"event": name, **_safe_fields})
+	if _debug_enabled and level != "DEBUG":
+		_console.print(f"[dim][{level}] event={escape(name)}[/dim]")
 
 
 def exception(msg: str) -> None:
