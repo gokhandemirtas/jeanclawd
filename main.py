@@ -248,6 +248,14 @@ async def main(
 
 	greeting = await generate_greeting()
 	console.print(greeting)
+	conversation_active = False
+	conversation_idle_timeout = float(os.getenv("VOICE_CONVERSATION_IDLE_TIMEOUT", "8"))
+	exit_phrases = {
+		"stop listening",
+		"go to sleep",
+		"goodbye",
+		"end conversation",
+	}
 
 	while True:
 		try:
@@ -255,12 +263,23 @@ async def main(
 				from stt import get_stt_provider
 				from stt.wakeword import listen_for_wakeword
 				from stt.recorder import record_until_silence
-				console.print("[dim]Listening… (say 'hey jarvis')[/dim]")
-				await asyncio.to_thread(listen_for_wakeword)
+				if conversation_active:
+					console.print(
+						f"[dim]Conversation mode… speak within {conversation_idle_timeout:g}s "
+						"(say 'stop listening' to exit)[/dim]"
+					)
+				else:
+					console.print("[dim]Listening… (say 'hey jarvis')[/dim]")
+					await asyncio.to_thread(listen_for_wakeword)
 				console.print("[dim]🎙  Recording…[/dim]", end="\r")
-				audio_path, too_short = await asyncio.to_thread(record_until_silence)
+				audio_path, too_short = await asyncio.to_thread(
+					record_until_silence,
+					wait_for_speech=conversation_active,
+					initial_silence_seconds=conversation_idle_timeout,
+				)
 				if too_short:
 					os.unlink(audio_path)
+					conversation_active = False
 					continue
 				console.print("[dim]Transcribing…[/dim]", end="\r")
 				try:
@@ -269,11 +288,16 @@ async def main(
 					os.unlink(audio_path)
 				if not user_input:
 					continue
+				if user_input.casefold().strip().rstrip(".!?") in exit_phrases:
+					conversation_active = False
+					console.print("[dim]Conversation mode ended. Say 'hey jarvis' to start again.[/dim]")
+					continue
 				# Guard against Whisper hallucinations (single word repeated many times)
 				words = user_input.split()
 				if len(words) > 6 and len(set(w.lower() for w in words)) <= 2:
 					continue
 				console.print(f"[cyan]You:[/cyan] {user_input}")
+				conversation_active = True
 			elif _prompt_session is not None:
 				user_input = (await _prompt_session.prompt_async("❯ ")).strip()
 			else:
