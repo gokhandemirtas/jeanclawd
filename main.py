@@ -230,7 +230,6 @@ async def main(
 	boot(
 		connections=connections,
 		flags={
-			"debug": debug,
 			"emote": emote,
 			"speak": speak,
 			"listen": listen,
