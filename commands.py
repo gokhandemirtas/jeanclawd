@@ -575,6 +575,254 @@ async def cmd_look(args: str) -> None:
 	logger.info(f"Image description:\n{description}")
 
 
+async def cmd_introspect() -> None:
+	"""Inspect the safe codebase in bounded batches and persist assessments."""
+	import os
+	from collections import defaultdict
+	from pathlib import Path
+
+	from pydantic import BaseModel, Field
+	from rich.console import Console
+	from rich.live import Live
+	from rich.spinner import Spinner
+
+	from utils.self_inspector import (
+		architecture,
+		exposed_files,
+		list_reflections,
+		read_file,
+		read_reflection,
+		record_reflection,
+	)
+
+	class _Introspection(BaseModel):
+		purpose_and_capabilities: str | list[str] = Field(
+			description="What this application is for and what capabilities the inspected code exposes"
+		)
+		inspected: str | list[str] = Field(description="Files, modules, and architectural areas actually inspected")
+		findings: str | list[str] = Field(description="Evidence-based findings; distinguish facts from uncertainty")
+		recommendations: str | list[str] = Field(
+			default="No recommendations recorded.",
+			description="Recommendations only when purpose_and_capabilities supports them; otherwise use the default",
+		)
+
+	def _as_markdown(value: str | list[str]) -> str:
+		"""Normalize model prose or list-shaped output for the reflection file."""
+		if isinstance(value, list):
+			return "\n".join(f"- {item}" for item in value if str(item).strip())
+		return value
+
+	def _scope(path: str) -> str:
+		return Path(path).parts[0] if len(Path(path).parts) > 1 else "root"
+
+	def _chunks(paths: list[str], max_chars: int = 28_000) -> list[tuple[str, str]]:
+		"""Read every text file and split it into bounded model-input batches."""
+		batches: list[tuple[str, str]] = []
+		current_scope = ""
+		current: list[str] = []
+		current_chars = 0
+		for path in paths:
+			try:
+				content = read_file(path, max_bytes=64_000)
+			except (OSError, ValueError, PermissionError) as exc:
+				logger.info(f"[introspect] Skipping {path}: {exc}")
+				continue
+			parts = [content[i : i + max_chars] for i in range(0, len(content), max_chars)] or [""]
+			for part_index, part in enumerate(parts):
+				label = f"--- {path}"
+				if len(parts) > 1:
+					label += f" (part {part_index + 1}/{len(parts)})"
+				label += " ---\n"
+				block = label + part
+				path_scope = _scope(path)
+				if current and (path_scope != current_scope or current_chars + len(block) > max_chars):
+					batches.append((current_scope, "\n\n".join(current)))
+					current = []
+					current_chars = 0
+				current_scope = path_scope
+				current.append(block)
+				current_chars += len(block)
+		if current:
+			batches.append((current_scope, "\n\n".join(current)))
+		return batches
+
+	try:
+		logger.info("[introspect] Starting read-only codebase inspection")
+		inventory = exposed_files()
+		text_files = [
+			path
+			for path in inventory
+			if path.startswith("introspections/") is False
+			and Path(path).suffix.lower() in {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".txt", ".ini", ".cfg", ".sql"}
+		]
+		logger.info(f"[introspect] Inventory complete — {len(inventory)} exposed files, {len(text_files)} text files")
+		logger.info("[introspect] Reading CODEBASE.md")
+		architecture_map = architecture()
+		memory_parts = []
+		for reflection_path in list_reflections(limit=10):
+			try:
+				memory_parts.append(read_reflection(Path(reflection_path).name, max_bytes=4_000))
+			except (OSError, ValueError, PermissionError):
+				continue
+		prior_memory = "\n\n".join(memory_parts[-5:]) or "No prior introspection records available."
+		batches = _chunks(text_files)
+		logger.info(f"[introspect] Prepared {len(batches)} bounded inspection batches")
+
+		from utils.llm_structured_output import generate_structured_output
+
+		saved = 0
+		for index, (scope, source_batch) in enumerate(batches, 1):
+			logger.info(f"[introspect] Batch {index}/{len(batches)} — inspecting {scope}")
+			prompt = (
+				"Perform a read-only architectural introspection of this codebase batch. "
+				"Use only the supplied facade output as evidence. Do not invent files, behavior, "
+				"or capabilities. State uncertainty explicitly. Recommendations are allowed only "
+				"after identifying the application's purpose and the capabilities actually observed.\n\n"
+				f"Complete safe inventory: {len(inventory)} files; this batch contains {scope} sources.\n"
+				f"Architecture map:\n{architecture_map}\n\n"
+				f"Prior introspection memory:\n{prior_memory}\n\n"
+				f"Current source batch:\n{source_batch}"
+			)
+			try:
+				with Live(
+					Spinner("dots", text=f"Introspecting {scope} ({index}/{len(batches)})…"),
+					console=Console(stderr=True),
+					refresh_per_second=10,
+					transient=True,
+				):
+					result = await asyncio.to_thread(
+						generate_structured_output,
+						model_name=os.environ["MODEL_GENERALIST"],
+						user_prompt=prompt,
+						system_prompt=(
+							"You are performing a private developer-only codebase introspection. "
+							"Return concise Markdown-compatible text in the requested fields. "
+							"Never suggest changing behavior merely to make self-modification easier."
+						),
+						pydantic_model=_Introspection,
+						max_tokens=2_048,
+						temperature=0.1,
+					)
+				purpose = _as_markdown(result.purpose_and_capabilities)
+				inspected = _as_markdown(result.inspected)
+				findings = _as_markdown(result.findings)
+				recommendations = _as_markdown(result.recommendations)
+				path = record_reflection(
+					f"Inventory: {len(inventory)} exposed files.\n\n{inspected}",
+					findings,
+					recommendations,
+					purpose_and_capabilities=purpose,
+					scope=f"{scope}-{index}",
+				)
+				saved += 1
+				logger.info(f"[introspect] Saved batch reflection: {path}")
+			except Exception as exc:
+				logger.error(f"[introspect] Batch {index} failed: {exc}")
+		logger.info(f"[introspect] Complete — saved {saved}/{len(batches)} batch reflections")
+	except Exception as exc:
+		logger.error(f"Introspection failed: {exc}")
+
+
+async def cmd_introspection(args: str) -> None:
+	"""Answer a developer question using the persisted introspection records."""
+	import os
+
+	from pydantic import BaseModel, Field
+	from rich.console import Console
+	from rich.live import Live
+	from rich.spinner import Spinner
+
+	from utils.self_inspector import list_reflections, read_reflection
+
+	question = args.strip()
+	if not question:
+		logger.info("Usage: /introspection <question>")
+		return
+
+	class _Answer(BaseModel):
+		answer: str = Field(description="A concise evidence-based answer to the developer's question")
+
+	try:
+		paths = list_reflections(limit=100)
+		if not paths:
+			logger.info("No introspection records found. Run /introspect first.")
+			return
+
+		records = []
+		for path in paths:
+			try:
+				records.append((path, read_reflection(path.rsplit("/", 1)[-1], max_bytes=64_000)))
+			except (OSError, ValueError, PermissionError) as exc:
+				logger.info(f"[introspection] Skipping {path}: {exc}")
+
+		batches: list[str] = []
+		current: list[str] = []
+		current_chars = 0
+		for path, record in records:
+			block = f"\n--- {path} ---\n{record}"
+			if current and current_chars + len(block) > 24_000:
+				batches.append("\n".join(current))
+				current = []
+				current_chars = 0
+			current.append(block)
+			current_chars += len(block)
+		if current:
+			batches.append("\n".join(current))
+
+		logger.info(f"[introspection] Asking about {len(records)} records in {len(batches)} batches")
+		from utils.llm_structured_output import generate_structured_output
+
+		batch_answers = []
+		for index, batch in enumerate(batches, 1):
+			logger.info(f"[introspection] Analyzing memory batch {index}/{len(batches)}")
+			with Live(
+				Spinner("dots", text=f"Reading introspection memory ({index}/{len(batches)})…"),
+				console=Console(stderr=True),
+				refresh_per_second=10,
+				transient=True,
+			):
+				result = await asyncio.to_thread(
+					generate_structured_output,
+					model_name=os.environ["MODEL_GENERALIST"],
+					user_prompt=(
+						f"Developer question: {question}\n\n"
+						"Answer using only the following persisted introspection records. "
+						"Separate evidence from uncertainty and do not invent capabilities.\n"
+						+ batch
+					),
+					system_prompt="You are reviewing the agent's private introspection memory for a developer.",
+					pydantic_model=_Answer,
+					max_tokens=1_024,
+					temperature=0.1,
+				)
+			batch_answers.append(result.answer)
+
+		logger.info("[introspection] Synthesizing the answer")
+		with Live(
+			Spinner("dots", text="Synthesizing introspection answer…"),
+			console=Console(stderr=True),
+			refresh_per_second=10,
+			transient=True,
+		):
+			final = await asyncio.to_thread(
+				generate_structured_output,
+				model_name=os.environ["MODEL_GENERALIST"],
+				user_prompt=(
+					f"Developer question: {question}\n\n"
+					"Synthesize a direct answer from these batch analyses. "
+					"Mention uncertainty where the records do not establish a fact.\n\n"
+					+ "\n\n".join(batch_answers)
+				),
+				system_prompt="You are the agent's introspection-memory question-answering layer.",
+				pydantic_model=_Answer,
+				max_tokens=1_024,
+				temperature=0.1,
+			)
+		logger.info(final.answer)
+	except Exception as exc:
+		logger.error(f"Introspection query failed: {exc}")
+
+
 async def cmd_help() -> None:
 	logger.info(
 		"Available commands:\n"
@@ -593,6 +841,8 @@ async def cmd_help() -> None:
 		"  /note [title]      — save a note from the current conversation context\n"
 		"  /planner <task>    — run an autonomous multi-step planning agent\n"
 		"  /look <path> [q]   — describe an image via the VLM and inject into context\n"
+		"  /introspect        — inspect the safe codebase facade and save findings\n"
+		"  /introspection <q> — ask a developer question about saved introspections\n"
 		"  /help              — show this message"
 	)
 
@@ -613,6 +863,8 @@ _COMMANDS = {
 	"/note": cmd_note,
 	"/planner": cmd_planner,
 	"/look": cmd_look,
+	"/introspect": cmd_introspect,
+	"/introspection": cmd_introspection,
 	"/help": cmd_help,
 }
 

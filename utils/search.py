@@ -171,7 +171,7 @@ def _extract_page(url: str) -> str:
 	try:
 		import httpx
 		from bs4 import BeautifulSoup
-		response = httpx.get(url, timeout=8.0, follow_redirects=True, headers={"User-Agent": "pydantic-aida/1.0"})
+		response = httpx.get(url, timeout=8.0, follow_redirects=True, headers={"User-Agent": "jeanclawd/1.0"})
 		response.raise_for_status()
 		soup = BeautifulSoup(response.text, "html.parser")
 		for tag in soup(("script", "style", "nav", "footer", "header", "aside", "form")):

@@ -15,7 +15,7 @@ Add to claude_desktop_config.json (~Library/Application Support/Claude/...):
       "mcpServers": {
         "jeanclawd": {
           "command": "uv",
-          "args": ["--directory", "/ABS/PATH/TO/pydantic-aida", "run", "mcp_server.py"]
+          "args": ["--directory", "/ABS/PATH/TO/jeanclawd", "run", "mcp_server.py"]
         }
       }
     }

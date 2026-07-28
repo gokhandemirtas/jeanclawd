@@ -1,4 +1,4 @@
-# pydantic-aida
+# jeanclawd
 
 A personal AI assistant framework built with Python, Pydantic, and local LLMs. Modular
 skill-based architecture with persistent memory, multi-modal I/O (text + voice + vision),
@@ -168,7 +168,7 @@ interface pipelines, known issues, and the document inventory) see
 ## Project layout
 
 ```
-pydantic-aida/
+jeanclawd/
 ├── main.py                  # CLI entry + REPL loop
 ├── commands.py              # 16 slash commands
 ├── pyproject.toml           # package "jeanclawd", uv-managed deps

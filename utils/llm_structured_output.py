@@ -1,8 +1,30 @@
-from typing import Type, TypeVar
-from pydantic import BaseModel
+import json
 import os
+from typing import Type, TypeVar
+
+from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _update_context_meter(
+	system_prompt: str,
+	user_prompt: str,
+	pydantic_model: Type[BaseModel],
+) -> None:
+	"""Publish the estimated structured-request size for the live monitor."""
+	try:
+		from utils.resource_monitor import count_tokens, push_context_to_file, set_context_used
+
+		# Providers append a JSON schema/template to the system prompt. Include
+		# its size so structured requests are not understated in the meter.
+		schema_text = json.dumps(pydantic_model.model_json_schema(), ensure_ascii=False)
+		used = count_tokens(system_prompt) + count_tokens(user_prompt) + count_tokens(schema_text)
+		set_context_used(used)
+		push_context_to_file()
+	except Exception:
+		# Observability must never prevent a model request from running.
+		pass
 
 
 def generate_structured_output(
@@ -24,6 +46,7 @@ def generate_structured_output(
 		if intent_model and model_name.strip() == intent_model
 		else get_provider()
 	)
+	_update_context_meter(system_prompt, user_prompt, pydantic_model)
 
 	messages = [
 		{"role": "system", "content": system_prompt},

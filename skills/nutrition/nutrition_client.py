@@ -4,7 +4,7 @@ from utils.log import logger
 THEMEALDB_BASE = "https://www.themealdb.com/api/json/v1/1"
 OPENFOODFACTS_BASE = "https://world.openfoodfacts.org/cgi/search.pl"
 
-HEADERS = {"User-Agent": "pydantic-aida/1.0 (personal assistant)"}
+HEADERS = {"User-Agent": "jeanclawd/1.0 (personal assistant)"}
 
 
 async def search_recipes(query: str) -> list[dict]:
