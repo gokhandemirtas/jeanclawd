@@ -34,14 +34,6 @@ async def cmd_clear() -> None:
 	logger.info("Conversation history cleared.")
 
 
-async def cmd_history() -> None:
-	text = _format_history()
-	if not text:
-		logger.info("No conversation history yet.")
-	else:
-		logger.info(f"Session history\n{text}")
-
-
 async def cmd_session(args: str) -> None:
 	"""Create, list, resume, or close resumable conversation sessions."""
 	from utils.session_service import (
@@ -86,23 +78,6 @@ async def cmd_session(args: str) -> None:
 		logger.info("Sessions:\n" + "\n".join(lines))
 
 
-async def cmd_planner(args: str) -> None:
-	from agents.planner import run_planner
-	from utils.inference_gate import foreground_inference
-	from utils.langmem_service import record_interaction
-
-	task = args.strip()
-	if not task:
-		logger.info("Please provide a task. Usage: /planner <task>")
-		return
-
-	logger.info(f"Running agent on: {task}")
-	async with foreground_inference():
-		response = await run_planner(task)
-	await record_interaction(task, response, intent="PLANNER")
-	logger.info(response)
-
-
 async def cmd_ctx() -> None:
 	import os
 
@@ -124,66 +99,6 @@ async def cmd_ctx() -> None:
 	bar = "█" * filled + "░" * (bar_width - filled)
 
 	logger.info(f"Context usage: {used:,} / {n_ctx:,} tokens ({pct:.1f}%)\n[{bar}]")
-
-
-async def cmd_note(args: str) -> None:
-	"""Create a note from the current conversation context.
-
-	Usage:
-	  /note                  — auto-generate title + content from recent exchange
-	  /note <title>          — use provided title, generate content from context
-	"""
-	import os
-	from typing import Optional
-	from pydantic import BaseModel, Field
-	from skills.conversation.skill import get_current_topic
-	from skills.notes.create import handle_create_note_from_context
-	from db.schemas import NoteCategory
-	from utils.llm_structured_output import generate_structured_output
-
-	recent = _format_history()
-	if not recent and not args:
-		logger.info("Nothing to note — no conversation history and no title provided.")
-		return
-
-	topic = get_current_topic() or ""
-
-	class _NoteFromContext(BaseModel):
-		title: str = Field(description="Short plain text title for this note")
-		content: str = Field(
-			description="Markdown content summarising what should be remembered"
-		)
-		category: Optional[NoteCategory] = Field(
-			default=None,
-			description="Category: read, listen, watch, eat, visit. Omit if none applies.",
-		)
-
-	user_title_hint = f"The user wants to title it: {args}\n\n" if args else ""
-	prompt = (
-		f"{user_title_hint}"
-		f"Current topic: {topic}\n\n"
-		f"Recent conversation:\n{recent[-1500:]}"  # last 1500 chars of history
-	)
-
-	extracted = generate_structured_output(
-		model_name=os.environ["MODEL_GENERALIST"],
-		user_prompt=prompt,
-		system_prompt=(
-			"Extract a note from this conversation. "
-			"Title: plain text, concise. "
-			"Content: markdown, capture what the user should remember. "
-			"Category: read/listen/watch/eat/visit only if clearly applicable."
-		),
-		pydantic_model=_NoteFromContext,
-		max_tokens=512,
-	)
-
-	result = await handle_create_note_from_context(
-		title=extracted.title,
-		content=extracted.content,
-		category=extracted.category,
-	)
-	logger.info(result)
 
 
 async def cmd_memories(args: str) -> None:
@@ -908,7 +823,6 @@ async def cmd_help() -> None:
 	logger.info(
 		"Available commands:\n"
 		"  /clear             — wipe the in-memory conversation history\n"
-		"  /history           — print session history to the terminal\n"
 		"  /session [list|new|resume|close] — manage resumable sessions\n"
 		"  /persona [id] [v]  — switch persona and voice\n"
 		"  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
@@ -919,8 +833,6 @@ async def cmd_help() -> None:
 		"  /forget-memory <field> — clear one LangMem profile field\n"
 		"  /apocalypse        — wipe interactions and LangMem profile memory\n"
 		"  /ctx               — show context window usage for the current session\n"
-		"  /note [title]      — save a note from the current conversation context\n"
-		"  /planner <task>    — run an autonomous multi-step planning agent\n"
 		"  /look <path> [q]   — describe an image via the VLM and inject into context\n"
 		"  /introspect        — inspect the safe codebase facade and save findings\n"
 		"  /introspection <q> — ask a developer question about saved introspections\n"
@@ -930,7 +842,6 @@ async def cmd_help() -> None:
 
 _COMMANDS = {
 	"/clear": cmd_clear,
-	"/history": cmd_history,
 	"/session": cmd_session,
 	"/persona": cmd_persona,
 	"/voice": cmd_voice,
@@ -941,8 +852,6 @@ _COMMANDS = {
 	"/forget-memory": cmd_forget,
 	"/apocalypse": cmd_apocalypse,
 	"/ctx": cmd_ctx,
-	"/note": cmd_note,
-	"/planner": cmd_planner,
 	"/look": cmd_look,
 	"/introspect": cmd_introspect,
 	"/introspection": cmd_introspection,

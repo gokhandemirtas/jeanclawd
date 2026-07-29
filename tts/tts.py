@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import io
+import multiprocessing
 import os
 import re
 import select
@@ -122,24 +123,88 @@ def _get_local_tts():
 	return _local_tts
 
 
+def _tts_chunks(text: str, max_chars: int = 120) -> list[str]:
+	"""Split text into bounded pieces so cancellation can be observed promptly."""
+	chunks: list[str] = []
+	current = ""
+	for word in text.split():
+		# Keep unusually long tokens bounded too (URLs are normally removed, but
+		# this also protects the model from arbitrary user text).
+		words = [word[i : i + max_chars] for i in range(0, len(word), max_chars)]
+		for part in words:
+			if current and len(current) + 1 + len(part) > max_chars:
+				chunks.append(current)
+				current = ""
+			if current:
+				current += " "
+			current += part
+	if current:
+		chunks.append(current)
+	return chunks
+
+
+def _local_synthesis_worker(conn, text: str, voice_id: str) -> None:
+	"""Generate audio outside the caller process so native inference is killable."""
+	try:
+		with _local_tts_lock:
+			tts = _get_local_tts()
+			style = tts.get_voice_style(voice_name=_resolve_voice(voice_id))
+			for part in _tts_chunks(text):
+				wav, _duration = tts.synthesize(
+					text=part,
+					voice_style=style,
+					total_steps=8,
+					speed=1.05,
+					# Alien/cat speech expands each source word into several tokens. Keep
+					# chunks below Supertonic's long-sequence ONNX shape limit.
+					max_chunk_length=120,
+					lang=_active_tts_lang(),
+					verbose=False,
+				)
+				conn.send(("chunk", np.asarray(wav).squeeze()))
+		conn.send(("done", None))
+	except Exception as exc:
+		try:
+			conn.send(("error", repr(exc)))
+		except (BrokenPipeError, EOFError):
+			pass
+	finally:
+		conn.close()
+
+
 def _synthesise_local(text: str, voice_id: str, cancel_event: threading.Event):
 	if cancel_event.is_set():
 		return None, None
-	with _local_tts_lock:
-		tts = _get_local_tts()
-		style = tts.get_voice_style(voice_name=_resolve_voice(voice_id))
-		wav, _duration = tts.synthesize(
-			text=text,
-			voice_style=style,
-			total_steps=8,
-			speed=1.05,
-			# Alien/cat speech expands each source word into several tokens. Keep
-			# chunks below Supertonic's long-sequence ONNX shape limit.
-			max_chunk_length=120,
-			lang=_active_tts_lang(),
-			verbose=False,
-		)
-	return np.asarray(wav).squeeze(), 44100
+
+	# ONNX inference does not expose a cancellation callback. Running it in a
+	# child process lets Escape terminate an in-progress native call immediately.
+	ctx = multiprocessing.get_context("spawn")
+	parent_conn, child_conn = ctx.Pipe(duplex=False)
+	worker = ctx.Process(target=_local_synthesis_worker, args=(child_conn, text, voice_id))
+	worker.start()
+	child_conn.close()
+	parts: list[np.ndarray] = []
+	try:
+		while True:
+			if cancel_event.is_set():
+				worker.terminate()
+				worker.join(timeout=1.0)
+				return None, None
+			if parent_conn.poll(0.05):
+				kind, value = parent_conn.recv()
+				if kind == "chunk":
+					parts.append(value)
+				elif kind == "done":
+					return np.concatenate(parts) if parts else None, 44100
+				elif kind == "error":
+					raise RuntimeError(f"local TTS worker failed: {value}")
+			elif not worker.is_alive():
+				raise RuntimeError("local TTS worker exited before completing")
+	finally:
+		if worker.is_alive():
+			worker.terminate()
+		worker.join(timeout=1.0)
+		parent_conn.close()
 
 
 def enable_tts(enabled: bool = True) -> None:
@@ -231,7 +296,7 @@ def _local_synthesise(
 	start_time = time.time()
 	ctx = (
 		Live(
-			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
+			Spinner("dots", text=Text("Synthesizing audio response", style="dim")),
 			console=_console,
 			transient=True,
 		)
@@ -253,7 +318,7 @@ def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
 	start_time = time.time()
 	spinner_ctx = (
 		Live(
-			Spinner("dots", text=Text("Synthesising audio…", style="dim")),
+			Spinner("dots", text=Text("Synthesizing audio response", style="dim")),
 			console=_console,
 			transient=True,
 		)
@@ -265,11 +330,21 @@ def _local_speak(text: str, voice_id: str, stop_event: threading.Event) -> None:
 	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
 	if wav is None or stop_event.is_set():
 		return
-	with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
-		for i in range(0, len(wav), 1024):
-			if stop_event.is_set():
-				break
-			stream.write(wav[i : i + 1024].astype(np.float32).reshape(-1, 1))
+	playback_ctx = (
+		Live(
+			Spinner("dots", text=Text("Playing audio response", style="dim")),
+			console=_console,
+			transient=True,
+		)
+		if _show_spinner
+		else contextlib.nullcontext()
+	)
+	with playback_ctx:
+		with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as stream:
+			for i in range(0, len(wav), 1024):
+				if stop_event.is_set():
+					break
+				stream.write(wav[i : i + 1024].astype(np.float32).reshape(-1, 1))
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -307,7 +382,7 @@ def synthesise(
 				if not cancel_event.is_set():
 					ctx = (
 						Live(
-							Spinner("dots", text=Text("Synthesising audio…", style="dim")),
+							Spinner("dots", text=Text("Synthesizing audio response", style="dim")),
 							console=_console,
 							transient=True,
 						)
@@ -339,10 +414,30 @@ def _remote_stream_speak(text: str, voice_id: str, stop_event: threading.Event) 
 		"speed": 1.8,
 		"lang": _active_tts_lang(),
 	}
-	response = requests.post(TTS_HOST, json=payload, timeout=60)
-	response.raise_for_status()
+	generation_ctx = (
+		Live(
+			Spinner("dots", text=Text("Synthesizing audio response", style="dim")),
+			console=_console,
+			transient=True,
+		)
+		if _show_spinner
+		else contextlib.nullcontext()
+	)
+	with generation_ctx:
+		response = requests.post(TTS_HOST, json=payload, timeout=60)
+		response.raise_for_status()
 	logger.debug(f"Voice generation finished in {time.time() - start_time:.2f}s")
-	_play_wav_bytes(response.content, stop_event)
+	playback_ctx = (
+		Live(
+			Spinner("dots", text=Text("Playing audio response", style="dim")),
+			console=_console,
+			transient=True,
+		)
+		if _show_spinner
+		else contextlib.nullcontext()
+	)
+	with playback_ctx:
+		_play_wav_bytes(response.content, stop_event)
 
 
 def _sanitize_for_speech(text: str) -> str:

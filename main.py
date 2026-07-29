@@ -421,8 +421,6 @@ async def main(
 				from agents.persona import get_active_voice_id
 				from stt.recorder import monitor_for_speech
 
-				voice_spinner = _ProgressSpinner("Synthesizing voice…")
-				voice_spinner.start()
 				tts_stop_event = threading.Event()
 				barge_in_event = threading.Event()
 				monitor_stop_event = threading.Event()
@@ -453,7 +451,6 @@ async def main(
 					monitor_stop_event.set()
 					if monitor_thread:
 						monitor_thread.join(timeout=1.0)
-					voice_spinner.stop()
 				if barge_in_event.is_set():
 					console.print("[dim]Barge-in detected — listening…[/dim]")
 					conversation_active = True

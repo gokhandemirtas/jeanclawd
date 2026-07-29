@@ -124,12 +124,11 @@ uv run python main.py --telegram
 
 ## Slash commands
 
-16 in-REPL commands — see [CODEBASE.md](CODEBASE.md) for the full table. Highlights:
+15 in-REPL commands — see [CODEBASE.md](CODEBASE.md) for the full table. Highlights:
 
 - `/persona [id] [voice]` — switch identity
 - `/change-model` — choose an available model by purpose
 - `/memories [q]` — list or search long-term memory
-- `/planner <task>` — multi-step tool use
 - `/forget-memory <field>` — clear one LangMem profile field
 - `/help` — list all commands
 
@@ -214,8 +213,6 @@ install the MongoDB plugin from `/plugins`. Configure it in read-only mode befor
 
 ## Known issues
 
-- **Planner is explicit-only** — `/planner`, `@planner`, and the planner API/MCP entry
-  points work, but natural-language planner routing is not a registered skill.
 - **Reasoning fallback is rarely used** — `skills/conversation/reasoning_engine.py` has a
   legacy import path that should be cleaned up if non-streaming reasoning is enabled.
 

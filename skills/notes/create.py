@@ -53,7 +53,7 @@ async def handle_create_note(query: str) -> str:
 
 
 async def handle_create_note_from_context(title: str, content: str, category: Optional[NoteCategory] = None) -> str:
-    """Create a note directly from pre-composed title/content (used by /note command)."""
+    """Create a note directly from pre-composed title and content."""
     note = Note(
         created_at=datetime.now(),
         title=title,

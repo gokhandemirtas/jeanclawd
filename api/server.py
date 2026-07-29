@@ -72,21 +72,6 @@ async def handle_query(request: web.Request) -> web.Response:
 			logger.error(f"[api/query] vision call failed: {e}")
 			return web.json_response({"error": "VLM inference failed"}, status=503)
 
-	if query.startswith("/planner"):
-		task = query[len("/planner") :].strip()
-		if not task:
-			return web.json_response(
-				{"error": "task is required. Usage: /planner <task>"}, status=400
-			)
-		from agents.planner import run_planner
-		from utils.inference_gate import foreground_inference
-		from utils.langmem_service import record_interaction
-
-		async with foreground_inference():
-			response = await run_planner(task)
-		await record_interaction(task, response, intent="PLANNER")
-		return web.json_response({"response": response})
-
 	from agents.intent_classifier import run_intent_classifier
 
 	response = await run_intent_classifier(query)
@@ -154,23 +139,9 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 				queue.put_nowait({"stage": "done", "text": description})
 				return
 
-			if query.startswith("/planner"):
-				task = query[len("/planner") :].strip()
-				if not task:
-					queue.put_nowait({"stage": "error", "error": "task is required"})
-					return
-				on_status("Building your plan")
-				from agents.planner import run_planner
-				from utils.inference_gate import foreground_inference
-				from utils.langmem_service import record_interaction
-
-				async with foreground_inference():
-					response = await run_planner(task)
-				await record_interaction(task, response, intent="PLANNER")
-			else:
-				response = await run_intent_classifier(
-					query, on_token=on_token, on_status=on_status
-				)
+			response = await run_intent_classifier(
+				query, on_token=on_token, on_status=on_status
+			)
 			queue.put_nowait({"stage": "done", "text": response})
 		except Exception as e:
 			logger.error(f"[api/query/ws] pipeline failed: {e}")
