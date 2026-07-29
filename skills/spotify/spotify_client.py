@@ -129,6 +129,22 @@ class SpotifyClient:
             if item and item.get("name") and item.get("uri")
         ]
 
+    async def get_playlist_items(self, playlist_id: str) -> list[dict]:
+        """Return the tracks/episodes in a playlist, following API pagination."""
+        items: list[dict] = []
+        offset = 0
+        limit = 50
+        while True:
+            data = await self._get(
+                f"/playlists/{playlist_id}/items",
+                params={"limit": limit, "offset": offset},
+            )
+            page = (data or {}).get("items", [])
+            items.extend(item for item in page if item)
+            if not page or not (data or {}).get("next"):
+                return items
+            offset += len(page)
+
     async def play_playlist(self, device_id: Optional[str], playlist_uri: str) -> None:
         params = {"device_id": device_id} if device_id else None
         await self._put("/me/player/play", json={"context_uri": playlist_uri}, params=params)

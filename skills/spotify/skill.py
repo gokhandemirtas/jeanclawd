@@ -32,6 +32,7 @@ Actions:
 - QUEUE: add a song to the queue
 - LIST_DEVICES: list available/connected Spotify devices
 - LIST_PLAYLISTS: list the user's saved playlists
+- LIST_PLAYLIST_TRACKS: show the tracks in one of the user's playlists
 
 For PLAY and QUEUE involving a single song, set `target` to the search query (e.g. "Bohemian Rhapsody Queen").
 For PLAY_PLAYLIST, set `target` to the playlist name as the user said it.
@@ -57,9 +58,12 @@ class _SpotifyAction(BaseModel):
 		"QUEUE",
 		"LIST_DEVICES",
 		"LIST_PLAYLISTS",
+		"LIST_PLAYLIST_TRACKS",
+		"VOLUME",
 	]
 	target: Optional[str] = Field(
-		None, description="Search query for PLAY/QUEUE, or playlist name for PLAY_PLAYLIST"
+		None,
+		description="Search query, playlist name, or playlist name for LIST_PLAYLIST_TRACKS",
 	)
 	targets: Optional[list[str]] = Field(
 		None,
@@ -127,6 +131,7 @@ async def handle_spotify(query: str) -> str:
 		token = await _auth.get_token()
 		client = SpotifyClient(token)
 
+		device_id = None
 		if action.device:
 			devices = await client.get_devices()
 			match = _resolve_device(action.device, devices)
@@ -135,7 +140,7 @@ async def handle_spotify(query: str) -> str:
 			else:
 				names = ", ".join(d["name"] for d in devices) or "none found"
 				return f"Couldn't find a device matching '{action.device}'. Available: {names}."
-		else:
+		elif action.action not in ("LIST_DEVICES", "LIST_PLAYLISTS", "LIST_PLAYLIST_TRACKS"):
 			device_id = await client.get_active_device_id()
 
 		if action.action == "LIST_DEVICES":
@@ -154,6 +159,37 @@ async def handle_spotify(query: str) -> str:
 				return "No playlists found in your Spotify library."
 			lines = [f"- {p['name']} ({p['track_count']} tracks)" for p in playlists]
 			return "Your Spotify playlists:\n" + "\n".join(lines)
+
+		if action.action == "LIST_PLAYLIST_TRACKS":
+			name_hint = action.target or query
+			playlists = await client.get_user_playlists()
+			if not playlists:
+				return "No playlists found in your Spotify library."
+			from rank_bm25 import BM25Okapi
+
+			corpus = [p["name"].lower().split() for p in playlists]
+			bm25 = BM25Okapi(corpus)
+			scores = bm25.get_scores(name_hint.lower().split())
+			best_idx = int(scores.argmax())
+			match = playlists[best_idx] if scores[best_idx] > 0 else None
+			if not match:
+				return f"I couldn't find a playlist matching '{name_hint}'."
+
+			playlist_id = match["uri"].rsplit(":", 1)[-1]
+			items = await client.get_playlist_items(playlist_id)
+			tracks = []
+			for item in items:
+				track = item.get("item") or item.get("track")
+				if not track or not track.get("name"):
+					continue
+				artists = ", ".join(artist["name"] for artist in track.get("artists", []))
+				tracks.append(f"{track['name']}" + (f" — {artists}" if artists else ""))
+			if not tracks:
+				return f"The playlist '{match['name']}' has no playable tracks."
+			return (
+				f"Tracks in '{match['name']}' ({len(tracks)}):\n"
+				+ "\n".join(f"{index}. {track}" for index, track in enumerate(tracks, 1))
+			)
 
 		if action.action == "PLAY_PLAYLIST":
 			name_hint = action.target or query
