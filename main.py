@@ -34,13 +34,26 @@ from utils.pending_plan import (
 
 try:
 	from prompt_toolkit import PromptSession
-	from prompt_toolkit.completion import WordCompleter
+	from prompt_toolkit.completion import Completer, Completion
 
-	_completer = WordCompleter(
-		sorted(_COMMANDS.keys()) + ["/quit"],
-		sentence=True,
-	)
-	_prompt_session: PromptSession | None = PromptSession(completer=_completer)
+	from connectors.registry import connector_ids
+
+	class _CommandCompleter(Completer):
+		"""Complete slash commands and connector IDs after ``/connect``."""
+
+		def get_completions(self, document, complete_event):
+			text = document.text_before_cursor
+			if text.lower().startswith("/connect "):
+				prefix = text.split(None, 1)[1]
+				for service_id in connector_ids():
+					if service_id.startswith(prefix.lower()):
+						yield Completion(service_id, start_position=-len(prefix))
+				return
+			for command in sorted(_COMMANDS) + ["/quit"]:
+				if command.startswith(text.lower()):
+					yield Completion(command, start_position=-len(text))
+
+	_prompt_session: PromptSession | None = PromptSession(completer=_CommandCompleter())
 except ImportError:
 	_prompt_session = None
 

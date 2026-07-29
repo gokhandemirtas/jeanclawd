@@ -1,30 +1,13 @@
-"""Abstract base class for skill authentication providers."""
+"""Backward-compatible name for the connector contract.
 
-from abc import ABC, abstractmethod
+Skills historically imported ``AuthProvider`` from this module.  Keep that
+API stable while making connectors the shared extension point for both skills
+and the ``/connect`` command.
+"""
+
+from connectors.base import Connector
 
 
-class AuthProvider(ABC):
-    """Defines how a skill authenticates with an external service.
+AuthProvider = Connector
 
-    The router calls `is_connected()` before every skill dispatch. If False,
-    it calls `connect()` which runs the full interactive auth flow and returns
-    a user-facing status message. On success, the router retries the original
-    skill automatically.
-    """
-
-    service_id: str    # machine-readable key stored in ServiceCredentials (e.g. "spotify")
-    display_name: str  # shown to the user (e.g. "Spotify")
-
-    @abstractmethod
-    async def is_connected(self) -> bool:
-        """Return True if valid credentials exist in the DB and the service is usable."""
-        ...
-
-    @abstractmethod
-    async def connect(self) -> str:
-        """Run the full interactive auth flow.
-
-        Should block until complete (success or failure) and return a
-        user-facing message describing the result.
-        """
-        ...
+__all__ = ["AuthProvider"]

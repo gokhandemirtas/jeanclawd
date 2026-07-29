@@ -49,6 +49,13 @@ Beanie registers these application documents:
 
 LangMem owns its separate MongoDB collection and is not registered as a Beanie document.
 
+## Connectors
+
+`connectors/` contains the `Connector` base class, automatic module discovery, and the
+built-in Spotify and Philips Hue connection flows. Adding a concrete connector module makes
+it available to `/connect` and its autocomplete picker. `utils/auth/` retains compatibility
+imports for skills that use the older `AuthProvider` names.
+
 ## Providers and configuration
 
 `providers/` supports LM Studio, llama.cpp, OpenAI-compatible endpoints, and OpenAI. The

@@ -313,53 +313,47 @@ async def cmd_connect(args: str) -> None:
 	"""Connect a service that requires an auth flow.
 
 	Usage:
-	  /connect spotify   — OAuth2 browser flow (opens browser, catches redirect on :8888)
-	  /connect hue       — Hue link-button flow (press the button on the bridge first)
+	  /connect <service> — choose from the registered connector flows
 	"""
+	from connectors.registry import connector_ids, get_connector
+
 	service = args.strip().lower()
+	if not service:
+		try:
+			from prompt_toolkit import PromptSession
+			from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
-	if service == "spotify":
-		from utils.auth.spotify import SpotifyAuthProvider
-
-		auth = SpotifyAuthProvider()
-		already = await auth.is_connected()
-		if already:
-			logger.info(
-				"Spotify is already connected. Reconnecting will overwrite the stored tokens."
+			picker = PromptSession(
+				completer=FuzzyCompleter(WordCompleter(connector_ids(), sentence=True))
 			)
+			logger.info("Select a connector (Tab to autocomplete, Ctrl-C to cancel).")
+			service = (await picker.prompt_async("  connector ❯ ")).strip().lower()
+		except (ImportError, KeyboardInterrupt, EOFError):
+			logger.info("Cancelled.")
+			return
+
+	connector = get_connector(service)
+	if connector is None:
+		available = ", ".join(connector_ids()) or "none"
+		logger.info(f"Unknown connector '{service}'. Available: {available}")
+		return
+
+	if await connector.is_connected():
 		logger.info(
-			"Opening Spotify auth in browser — you can keep chatting while you complete the flow."
+			f"{connector.display_name} is already connected. "
+			"Reconnecting may overwrite stored credentials."
 		)
-
-		async def _spotify():
-			result = await auth.connect()
-			logger.info(result)
-
-		asyncio.create_task(_spotify())
-
-	elif service == "hue":
-		from utils.auth.hue import HueAuthProvider
-
-		auth = HueAuthProvider()
-		already = await auth.is_connected()
-		if already:
-			logger.info(
-				"Hue is already paired. Reconnecting will overwrite the stored credentials."
-			)
-		logger.info(
-			"Press the link button on your Hue bridge now — connecting in the background."
-		)
-
-		async def _hue():
-			result = await auth.connect()
-			logger.info(result)
-
-		asyncio.create_task(_hue())
-
-	elif not service:
-		logger.info("Usage: /connect <service>  (spotify | hue)")
+	if connector.service_id == "spotify":
+		logger.info("Opening Spotify auth in browser — you can keep chatting while you complete the flow.")
+	elif connector.service_id == "hue":
+		logger.info("Press the link button on your Hue bridge now — connecting in the background.")
 	else:
-		logger.info(f"Unknown service '{service}'. Available: spotify, hue")
+		logger.info(f"Starting {connector.display_name} connection in the background.")
+
+	async def _connect() -> None:
+		logger.info(await connector.connect())
+
+	asyncio.create_task(_connect())
 
 
 async def cmd_voice(args: str) -> None:
@@ -828,7 +822,7 @@ async def cmd_help() -> None:
 		"  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
 		"  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
 		"  /change-model      — choose an available model by purpose\n"
-		"  /connect <service> — authenticate a service (spotify | hue)\n"
+		"  /connect <service> — authenticate a registered service\n"
 		"  /memories [q]      — list/search LangMem profile fields\n"
 		"  /forget-memory <field> — clear one LangMem profile field\n"
 		"  /apocalypse        — wipe interactions and LangMem profile memory\n"

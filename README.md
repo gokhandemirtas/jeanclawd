@@ -174,7 +174,8 @@ interface pipelines, known issues, and the document inventory) see
 ```
 jeanclawd/
 ├── main.py                  # CLI entry + REPL loop
-├── commands.py              # 16 slash commands
+├── commands.py              # slash command implementations
+├── connectors/               # discoverable external-service connectors
 ├── pyproject.toml           # package "jeanclawd", uv-managed deps
 ├── agents/                  # routing, intent classification, personas
 ├── providers/               # lmstudio, llamacpp, openai_compatible, openai
@@ -187,6 +188,13 @@ jeanclawd/
 ├── fixtures/                # tickers.json + test fixtures
 └── logs/                    # app.log + supervisord logs
 ```
+
+### Adding a connector
+
+Create a module under `connectors/` with a concrete `Connector` subclass from
+`connectors.base`. Set `service_id`, `display_name`, and optionally `description`, then
+implement `is_connected()` and `connect()`. The registry discovers it automatically, so it
+appears in `/connect` autocomplete without editing `commands.py`.
 
 ## Development
 
