@@ -57,9 +57,10 @@ list. Key variables:
 |----------|---------|---------|
 | `INFERENCE_PROVIDER` | LLM backend | `lmstudio` |
 | `MODEL_GENERALIST` | Large model: chat, wrapping, routing, reasoning | `qwen3-30b-a3b-instruct-2507-mlx` |
-| `MODEL_RESEARCH` | Dedicated model for deep-search planning and synthesis | `Qwen3-14B-4bit` |
+| `MODEL_RESEARCH` | Dedicated model for deep research and synthesis | `Qwen3-14B-4bit` |
 | `MODEL_INTENT` | Lean model for stateless classification | `meta-llama-3.1-8b-instruct` |
 | `MODEL_VLM` | Vision-language model for `/vision` | `qwen/qwen3-vl-4b` |
+| `MODEL_PLANNING` | Optional dedicated model for multi-step planning | unset (uses generalist) |
 | `MODEL_HOST` | LLM endpoint | `http://localhost:1234/v1` |
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
 | `TTS_PROVIDER` | Text-to-speech backend | `local` / `lmstudio` / `remote` |
@@ -123,7 +124,7 @@ uv run python main.py --telegram
 16 in-REPL commands — see [CODEBASE.md](CODEBASE.md) for the full table. Highlights:
 
 - `/persona [id] [voice]` — switch identity
-- `/model [name]` — fuzzy-pick a loaded LM Studio model
+- `/change-model` — choose an available model by purpose
 - `/memories [q]` — list or search long-term memory
 - `/planner <task>` — multi-step tool use
 - `/forget-memory <field>` — clear one LangMem profile field

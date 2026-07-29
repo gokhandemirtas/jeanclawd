@@ -198,6 +198,30 @@ def _track_task(task: asyncio.Task) -> None:
 		logger.exception("[langmem] background extraction task failed")
 
 
+async def close_memory_store() -> None:
+	"""Cancel background extraction and close the MongoDB store cleanly."""
+	global _STORE_CONTEXT, _STORE, _MANAGER, _EMBEDDINGS
+
+	tasks = list(_EXTRACTION_TASKS)
+	for task in tasks:
+		if not task.done():
+			task.cancel()
+	if tasks:
+		await asyncio.gather(*tasks, return_exceptions=True)
+	_EXTRACTION_TASKS.clear()
+
+	if _STORE_CONTEXT is not None:
+		try:
+			_STORE_CONTEXT.__exit__(None, None, None)
+		except Exception:
+			logger.exception("[langmem] failed to close MongoDB store")
+		finally:
+			_STORE_CONTEXT = None
+			_STORE = None
+			_MANAGER = None
+			_EMBEDDINGS = None
+
+
 async def record_interaction(
 	question: str,
 	answer: str,

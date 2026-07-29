@@ -106,7 +106,7 @@ async def _select_next_action(task: str, steps: list[tuple[str, str, str]]) -> P
     )
     return await asyncio.to_thread(
         generate_structured_output,
-        model_name=os.environ["MODEL_GENERALIST"],
+		model_name=os.environ.get("MODEL_PLANNING") or os.environ["MODEL_GENERALIST"],
         user_prompt=prompt,
         system_prompt="You are a planning agent. Choose the next tool to call.",
         pydantic_model=PlannerAction,

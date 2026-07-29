@@ -481,6 +481,9 @@ async def main(
 			logger.error(f"An error occurred: {e}")
 			console.print("\nSorry, I encountered an error. Let's try again.\n")
 
+	from utils.langmem_service import close_memory_store
+	await close_memory_store()
+
 
 def _print_resume_hint() -> None:
 	from utils.session_service import get_active_session_id

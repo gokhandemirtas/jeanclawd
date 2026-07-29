@@ -165,25 +165,15 @@ def alienize_for_speech(text: str) -> str:
 
 _CAT_SOUNDS = [
 	"meow",
-	"mew",
-	"mao",
+	"meuw !",
+	"maooo ! ",
 	"maow",
-	"miah",
 	"miaow",
-	"nyah",
-	"nyao",
-	"nyae",
-	"purr",
-	"pruh",
-	"prrr",
-	"raw",
-	"raow",
-	"yow",
-	"yowl",
-	"chirp",
-	"chup",
-	"mrr",
-	"hrrm",
+	"mrk miaow?",
+	"<breath><breath>MAW!!!",
+	"miah ?",
+	"miaow",
+	"mew <laugh><laugh><laugh>",
 ]
 
 

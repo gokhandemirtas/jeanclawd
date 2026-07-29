@@ -1,6 +1,7 @@
 """Built-in slash commands for the assistant CLI."""
 
 import asyncio
+import os
 
 from utils.log import logger
 
@@ -244,73 +245,153 @@ async def cmd_apocalypse() -> None:
 		logger.error(f"apocalypse failed: {e}")
 
 
-async def cmd_model(args: str) -> None:
-	"""Switch the active generalist model.
+_MODEL_PURPOSES: dict[str, tuple[str, str]] = {
+	"generalist": ("Generalist chat and reasoning", "MODEL_GENERALIST"),
+	"intent": ("Intent classification and query rewriting", "MODEL_INTENT"),
+	"vision": ("Vision and image description", "MODEL_VLM"),
+	"embedding": ("Memory and semantic embeddings", "MODEL_EMBEDDING"),
+	"planning": ("Multi-step planning", "MODEL_PLANNING"),
+	"research": ("Deep research", "MODEL_RESEARCH"),
+}
 
-	Usage:
-	  /model          — interactive fuzzy picker from loaded LM Studio models
-	  /model <name>   — switch directly by model id
+
+_EMBEDDING_MODEL_HINTS = (
+	"embed",
+	"bge-",
+	"e5-",
+	"gte-",
+	"jina-embeddings",
+	"minilm",
+	"mxbai-embed",
+	"nomic-embed",
+	"snowflake-arctic-embed",
+	"text-embedding",
+)
+
+
+def _is_embedding_model(model: dict) -> bool:
+	"""Classify embedding models from endpoint metadata and conservative ID hints.
+
+	The OpenAI /models schema does not require a capability field, so the ID
+	patterns are a fallback for providers such as LM Studio that return only IDs.
 	"""
-	import os
+	metadata = [
+		model.get("id", ""),
+		model.get("type", ""),
+		model.get("task", ""),
+		model.get("architecture", ""),
+		model.get("capabilities", ""),
+	]
+	haystack = " ".join(str(value).lower() for value in metadata)
+	return any(hint in haystack for hint in _EMBEDDING_MODEL_HINTS)
 
+
+async def _inference_models() -> list[dict] | None:
+	"""Return model records advertised by the configured inference endpoint."""
 	import aiohttp
 
 	host = os.getenv("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
-
 	try:
 		async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
 			async with session.get(f"{host}/models") as resp:
 				if resp.status != 200:
 					logger.error(f"Failed to fetch models (HTTP {resp.status}).")
-					return
+					return None
 				data = await resp.json()
-	except Exception as e:
-		logger.error(f"Could not reach inference server: {e}")
+	except Exception as exc:
+		logger.error(f"Could not reach inference server: {exc}")
+		return None
+
+	records: list[dict] = []
+	seen: set[str] = set()
+	for model in data.get("data", []):
+		if not isinstance(model, dict) or not isinstance(model.get("id"), str):
+			continue
+		if model["id"] not in seen:
+			records.append(model)
+			seen.add(model["id"])
+	return records
+
+
+async def cmd_change_model(args: str) -> None:
+	"""Choose a model purpose, then select an available endpoint model for it."""
+	model_records = await _inference_models()
+	if not model_records:
+		logger.info("No models found at the inference endpoint.")
 		return
 
-	models = [m["id"] for m in data.get("data", [])]
-
-	if not models:
-		logger.info("No models found.")
-		return
-
-	target = args.strip()
-	if target:
-		if target not in models:
-			available = "\n".join(f"  {m}" for m in models)
-			logger.info(f"'{target}' not in loaded models. Available:\n{available}")
-			return
-		selected = target
-	else:
+	purpose = args.strip().lower()
+	if not purpose:
 		try:
 			from prompt_toolkit import PromptSession
 			from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
-			picker = PromptSession(
-				completer=FuzzyCompleter(WordCompleter(models, sentence=True))
+			purpose_picker = PromptSession(
+				completer=FuzzyCompleter(
+					WordCompleter(list(_MODEL_PURPOSES), sentence=True)
+				)
 			)
 			logger.info(
-				f"{len(models)} model(s) loaded. Tab to autocomplete, Enter to confirm, Ctrl-C to cancel."
+				"Model purpose:\n" + "\n".join(
+					f"  {key:<10} — {description} (current: {os.getenv(env_key, 'unset')})"
+					for key, (description, env_key) in _MODEL_PURPOSES.items()
+				)
 			)
-			selected = (await picker.prompt_async("  model ❯ ")).strip()
+			purpose = (await purpose_picker.prompt_async("  purpose ❯ ")).strip().lower()
 		except (ImportError, KeyboardInterrupt, EOFError):
 			logger.info("Cancelled.")
 			return
 
-		if not selected:
-			logger.info("No model selected.")
-			return
-		if selected not in models:
-			logger.error(f"'{selected}' not recognised.")
-			return
+	if purpose not in _MODEL_PURPOSES:
+		logger.info(f"Unknown purpose '{purpose}'. Choose: {', '.join(_MODEL_PURPOSES)}")
+		return
 
-	os.environ["MODEL_GENERALIST"] = selected
+	description, env_key = _MODEL_PURPOSES[purpose]
+	if purpose == "embedding":
+		candidate_records = [model for model in model_records if _is_embedding_model(model)]
+	else:
+		candidate_records = [model for model in model_records if not _is_embedding_model(model)]
+	candidates = [model["id"] for model in candidate_records]
+	if not candidates:
+		if purpose == "embedding":
+			logger.info(
+				"No embedding model was identifiable from the inference endpoint metadata or model IDs."
+			)
+		else:
+			logger.info("No non-embedding models were found for this purpose.")
+		return
 
-	import providers
+	try:
+		from prompt_toolkit import PromptSession
+		from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
-	providers._provider = None
+		model_picker = PromptSession(
+			completer=FuzzyCompleter(WordCompleter(candidates, sentence=True))
+		)
+		logger.info(
+			f"{description}. {len(candidates)} compatible model(s) available. "
+			"Tab to autocomplete, Enter to confirm, Ctrl-C to cancel."
+		)
+		selected = (await model_picker.prompt_async("  model ❯ ")).strip()
+	except (ImportError, KeyboardInterrupt, EOFError):
+		logger.info("Cancelled.")
+		return
 
-	logger.info(f"Active model → {selected}")
+	if not selected:
+		logger.info("No model selected.")
+		return
+	if selected not in candidates:
+		logger.error(f"'{selected}' is not advertised by the inference endpoint.")
+		return
+
+	os.environ[env_key] = selected
+	if env_key in {"MODEL_GENERALIST", "MODEL_INTENT"}:
+		import providers
+
+		providers._provider = None
+		providers._intent_provider = None
+
+	logger.info(f"{description} model → {selected} ({env_key})")
 
 
 async def cmd_connect(args: str) -> None:
@@ -832,7 +913,7 @@ async def cmd_help() -> None:
 		"  /persona [id] [v]  — switch persona and voice\n"
 		"  /voice [id]        — switch voice only (interactive picker or direct ID)\n"
 		"  /news-length [s|m|l] — set news detail level (short | medium | long)\n"
-		"  /model [name]      — switch the active model (fuzzy picker, or pass name directly)\n"
+		"  /change-model      — choose an available model by purpose\n"
 		"  /connect <service> — authenticate a service (spotify | hue)\n"
 		"  /memories [q]      — list/search LangMem profile fields\n"
 		"  /forget-memory <field> — clear one LangMem profile field\n"
@@ -854,7 +935,7 @@ _COMMANDS = {
 	"/persona": cmd_persona,
 	"/voice": cmd_voice,
 	"/news-length": cmd_news_length,
-	"/model": cmd_model,
+	"/change-model": cmd_change_model,
 	"/connect": cmd_connect,
 	"/memories": cmd_memories,
 	"/forget-memory": cmd_forget,
