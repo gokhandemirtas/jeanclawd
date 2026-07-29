@@ -39,7 +39,7 @@ def _active_tts_lang() -> str:
 	"""Use Portuguese for the alien voice, otherwise the configured language."""
 	from agents.persona import get_active_persona_id
 
-	return "hr" if get_active_persona_id() == "ztyntchtch" else TTS_LANG
+	return "el" if get_active_persona_id() == "ztyntchtch" else TTS_LANG
 
 
 def _load_model_adapter():

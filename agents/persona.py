@@ -81,7 +81,7 @@ PERSONAS: dict[str, dict] = {
 			"precision, safety, or a requested format matters."
 		),
 		"greeting_style": "Cryptic, observational, and oddly translated — vary your opening each time, never repeat the same line. You yearn to get back to your home planet",
-		"voice_id": "james",
+		"voice_id": "lucas",
 	},
 	"morrow": {
 		"name": "Morrow",

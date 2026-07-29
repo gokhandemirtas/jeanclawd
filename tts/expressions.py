@@ -38,23 +38,37 @@ _TAG_REPEAT_COUNTS = {
 
 # The alien voice gets a separate speech script. Keeping this deterministic makes
 # retries sound consistent while still giving each source word a varied shape.
-_ALIEN_SYLLABLES = ALIEN_SYLLABLES = (
+_ALIEN_SYLLABLES = [
+	# 80% chitter-clicks (16 words)
+	"tckruk ech!",
+	"thktck ach!",
+	"skrup kych",
+	"tskek cyk",
+	"kchkch krrr",
+	"tchirr kchch eh",
+	"krakchchch ah",
+	"skritch",
+	"tchok ack",
+	"pchek chk",
+	"chraptysk",
+	"tapytkch",
+	"skrohkych",
+	"chkrek ack",
+	"tskap tch",
+	"ptck hck",
 	"aaach peth path",
 	"bahunnnn eck!!",
-	"tck tck trrrr hulak",
-	"bhab hab rab",
+	"tck tck kchch",
 	"cthommm kah",
 	"ktkah'fhehl",
 	"ahhhhhh chommm",
-	"ktktkt tohm brap",
-	"tsckkckskaprom hrap",
+	"ckckttohm brap",
+	"tsckkskaprom hrap",
 	"chu chuch AKH lul!",
 	"ph phuch tchaah acha",
 	"hap tam hap",
 	"ahk lagk hmorrrr",
-	"thk thk thk turrrrr",
-	"chk chk chk hurrrr TAP",
-	"tckha pakap tch nuhtah",
+	"chk chkchk hurrrr TAP",
 	"eckannn hak",
 	"ka pap mak",
 	"taptah nok",
@@ -63,16 +77,16 @@ _ALIEN_SYLLABLES = ALIEN_SYLLABLES = (
 	"tch ghor'aaah",
 	"tkhap khum kar hap",
 	"khora tck tck toooom",
-	"pooom tah",
 	"brah thk hok",
-	"thaka akh!",
+	"thakakh akh!",
 	"pakh glohhk",
-	"ukh blukh",
-	"cpet pet?",
 	"klopkap akh",
-	"KHUNH!",
 	"pkolohk oh palok",
-)
+	"fhoooom",
+	"ptoomp",
+	"kchchckhc",
+]
+
 
 _ALIEN_TAG_RE = re.compile(
 	r"<(?:laugh|breath|sigh|sad|cough|scream|throatclear|angry|yawn)>"
@@ -83,7 +97,7 @@ _ALIEN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
 # 0.5 means 30 human words produce approximately 15 alien words.
 try:
 	ALIEN_SPEECH_WORD_RATIO = max(
-		0.05, min(2.0, float(os.getenv("ALIEN_SPEECH_WORD_RATIO", "0.25")))
+		0.05, min(2.0, float(os.getenv("ALIEN_SPEECH_WORD_RATIO", "0.5")))
 	)
 except ValueError:
 	ALIEN_SPEECH_WORD_RATIO = 0.5
