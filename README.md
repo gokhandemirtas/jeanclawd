@@ -61,6 +61,9 @@ list. Key variables:
 | `MODEL_INTENT` | Lean model for stateless classification | `meta-llama-3.1-8b-instruct` |
 | `MODEL_VLM` | Vision-language model for `/vision` | `qwen/qwen3-vl-4b` |
 | `MODEL_PLANNING` | Optional dedicated model for multi-step planning | unset (uses generalist) |
+| `MEMORY_MAX_ITEMS` | Maximum relevant memories injected into a chat turn | `2` |
+| `MEMORY_MAX_CHARS` | Maximum injected memory text size | `500` |
+| `MEMORY_COOLDOWN_TURNS` | Turns before a recently used memory can be reused | `4` |
 | `MODEL_HOST` | LLM endpoint | `http://localhost:1234/v1` |
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
 | `TTS_PROVIDER` | Text-to-speech backend | `local` / `lmstudio` / `remote` |

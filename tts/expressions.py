@@ -12,10 +12,11 @@ from utils import logger
 
 # Supported by Supertonic 3. Keep this list in one place so prompts and
 # validation cannot drift apart when the model's expression vocabulary grows.
+# "breath": "an audible breath",
+# "sigh": "a sigh", """
+
 EXPRESSION_TAGS: dict[str, str] = {
 	"laugh": "a short natural laugh",
-	"breath": "an audible breath",
-	"sigh": "a sigh",
 	"scream": "a brief scream; use very sparingly",
 	"throatclear": "a throat-clearing sound",
 	"sad": "a sad vocal expression",
