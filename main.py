@@ -153,6 +153,12 @@ async def main(
 	telegram: bool = False,
 	session_id: str | None = None,
 ) -> None:
+	# These directories contain local runtime state and are intentionally not
+	# tracked. Create them on first run so a fresh checkout is self-contained.
+	from pathlib import Path
+
+	for runtime_dir in ("logs", "memory", "storage", "introspections"):
+		Path(runtime_dir).mkdir(parents=True, exist_ok=True)
 	logger.init_file_logging("logs/app.log")
 
 	asyncio.create_task(worker())
@@ -515,24 +521,12 @@ async def _record_interaction(question: str, answer: str, *, intent: str | None 
 def _keepalive_loop(forwarded_args: list[str]) -> None:
 	"""Restart loop that inherits the terminal — required for the interactive CLI.
 
-	Supervisord captures stdin and breaks prompt_toolkit; subprocess.run inherits
-	the parent's stdio so the REPL works normally. Exits cleanly on returncode 0
+	The child process inherits the parent's stdio so the REPL works normally.
+	Exits cleanly on returncode 0
 	(Ctrl+C / /quit); aborts after 3 rapid crashes (< 5 s uptime) to avoid
 	looping forever on unrecoverable errors like a bound port.
 	"""
 	import subprocess
-	import pathlib
-
-	# If supervisord is running and managing this process, shut it down first
-	# to avoid two keepalive mechanisms fighting over the same port.
-	sock = pathlib.Path(__file__).parent / "logs" / "supervisor.sock"
-	if sock.exists():
-		supervisorctl = pathlib.Path(__file__).parent / ".venv" / "bin" / "supervisorctl"
-		conf = pathlib.Path(__file__).parent / "supervisord.conf"
-		subprocess.run([str(supervisorctl), "-c", str(conf), "shutdown"],
-			capture_output=True)
-		time.sleep(1)
-
 	_RAPID_CRASH_THRESHOLD = 5.0
 	_MAX_RAPID_CRASHES = 3
 
@@ -569,7 +563,7 @@ if __name__ == "__main__":
 	parser.add_argument("--server", action="store_true", help="Start the API server")
 	parser.add_argument("--listen", action="store_true", help="Enable microphone voice input (push-to-talk)")
 	parser.add_argument("--telegram", action="store_true", help="Enable the Telegram bot")
-	parser.add_argument("--keepalive", action="store_true", help="Run under supervisord (auto-restart on crash)")
+	parser.add_argument("--keepalive", action="store_true", help="Restart automatically after a crash")
 	parser.add_argument("--session", help="Resume an existing session by UUID")
 	args = parser.parse_args()
 

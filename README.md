@@ -34,18 +34,34 @@ Package name: `jeanclawd` (see `pyproject.toml`).
 - **Python** `>=3.11.14`
 - **[uv](https://github.com/astral-sh/uv)** for dependency management (never `pip` —
   keeps `pyproject.toml` / `uv.lock` in sync)
+- **Docker Desktop** (or another Docker Engine with Compose) for the bundled MongoDB
 - **MongoDB** (port 27017, db `langbox`)
 - **LM Studio** (or another OpenAI-compatible LLM server on `:1234`) for inference
+
+The supported and tested environment is macOS on Apple Silicon. Windows is not supported:
+the dependency set includes MLX-based packages (`mlx-audio` and `mlx-whisper`), and MLX
+does not publish compatible Windows wheels. `uv sync` therefore cannot install the complete
+environment on Windows. Linux may work for non-MLX paths, but is not currently a tested
+target.
 
 ## Installation
 
 ```bash
-# Clone, then sync dependencies via uv
+# Clone, start MongoDB, then sync dependencies via uv
+docker compose -f db/docker-compose.yml up -d
 uv sync
 
 # Copy and edit env
 cp .env.template .env
 $EDITOR .env
+```
+
+The Compose file uses `admin` / `admin` and the `langbox` database by default. If you
+change those values, use the same values in `.env` before starting the application.
+Verify MongoDB is running with:
+
+```bash
+docker compose -f db/docker-compose.yml ps
 ```
 
 ## Configuration
@@ -68,7 +84,11 @@ list. Key variables:
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
 | `TTS_PROVIDER` | Text-to-speech backend | `local` / `lmstudio` / `remote` |
 | `MONGODB_*` | MongoDB connection | `localhost:27017`, db `langbox` |
-| `*_API_KEY` | External services | Tavily, OpenRouteService, Spotify, Spoonacular, Hue |
+| `*_API_KEY` | External service credentials | Required when using the skill that owns the service |
+
+The external-service credentials are not optional for their corresponding skills. The
+application can start without them, but a request that activates a service skill will need
+that service's API key or account credentials configured in `.env`.
 
 ### Recommended models (LM Studio, 64 GB unified RAM)
 
@@ -100,12 +120,44 @@ uv run python main.py --server
 # API server standalone
 uv run python -m api.server
 
-# Supervised auto-restart
+# Auto-restart on crash
 uv run python main.py --keepalive
 
 # Resume a previous session
 uv run python main.py --session SESSION_UUID
 ```
+
+## Live monitor
+
+`monitor.py` is a separate Textual dashboard for watching the running application. Start
+the assistant first, then run the monitor in another terminal:
+
+```bash
+uv run python monitor.py
+```
+
+It tails `logs/app.log` as newline-delimited JSON and shows the application log levels
+`DEBUG`, `INFO`, `WARN`, and `ERROR`. The **Events** tab displays structured log events
+with their extra fields. The **LLM PERF** filter highlights
+`llm_generation_completed` events, including prompt/completion token counts, server and
+end-to-end throughput, and server/client time-to-first-token measurements.
+
+The monitor also displays live process resources: CPU usage, system memory, swap when
+available, NVIDIA VRAM when NVML is available, and the current LLM context-window usage.
+The context meter is read from `logs/context.json`, which the application updates while
+preparing LLM requests. It is separate from `app.log` and is not a conversational or
+database log.
+
+To inspect a different JSON-lines log file:
+
+```bash
+uv run python monitor.py --log path/to/another.log
+```
+
+The monitor starts at the end of an existing file and displays new entries as they arrive.
+It does not inspect MongoDB, external-service logs, or historical entries before startup
+unless they are appended after the monitor begins. Use `a` to toggle auto-scroll, `c` to
+clear the dashboard, `y` to copy the selected or filtered results, and `q` to quit.
 
 Last active application session:
 
@@ -180,10 +232,8 @@ first completed turn is given a strict two- or three-word title by the small int
 Resuming a session restores that conversational context without making its facts
 session-specific.
 
-Two-tier routing is a settled design decision — tool-use was explicitly rejected because
-models don't call tools consistently in practice. See
-[`.claude/memory/project_architecture.md`](.claude/memory/project_architecture.md) for
-rationale.
+Two-tier routing is a settled design decision: the application routes requests through
+intent classification and skill-specific handlers rather than relying on model tool use.
 
 For the full architecture reference (every skill, every env var, every API route, the
 interface pipelines, known issues, and the document inventory) see
@@ -204,9 +254,9 @@ jeanclawd/
 ├── api/                     # aiohttp server (22 routes) + OpenAPI
 ├── stt/  tts/               # speech I/O providers
 ├── utils/                   # langmem_service, inference_gate, ...
-├── storage/  memory/        # local state + feedback notes
+├── storage/  memory/        # runtime state directories, created automatically if absent
 ├── fixtures/                # tickers.json + test fixtures
-└── logs/                    # app.log + supervisord logs
+└── logs/                    # runtime application logs
 ```
 
 ### Adding a connector

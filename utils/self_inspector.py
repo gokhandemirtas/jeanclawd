@@ -26,7 +26,6 @@ _MAX_REFLECTION_FIELD = 12_000
 _DENIED_NAMES = {
 	".env",
 	".env.*",
-	".claude/*",
 	".git",
 	".venv",
 	"venv",

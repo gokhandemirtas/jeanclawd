@@ -57,9 +57,11 @@ logs/
 # macOS
 .DS_Store
 
-.claude/*
+supervisord.conf
 
 storage/*
+
+memory/*
 
 deep-research/*
 introspections/*

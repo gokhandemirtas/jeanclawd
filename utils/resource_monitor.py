@@ -92,7 +92,7 @@ def push_context_to_file() -> None:
 
   Uses a temp file + os.replace for atomicity so the Textual monitor (which
   polls at 1Hz) never sees a half-written file. The path is anchored to this
-  module's location, so it works regardless of CWD (supervisord, `uv run` from
+  module's location, so it works regardless of CWD (a process manager, `uv run` from
   a subdirectory, etc.). Failures log at WARNING so they're visible — the
   meter is observability but the user should know if it's broken.
   """
