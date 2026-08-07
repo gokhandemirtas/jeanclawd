@@ -7,6 +7,7 @@ import lmstudio as lms
 import requests
 
 from utils.messages import AIMessage, HumanMessage, SystemMessage
+from utils.lmstudio_metrics import iter_with_metrics
 
 
 def _build_chat(messages: list) -> lms.Chat:
@@ -69,7 +70,7 @@ class _LMStudioLLM:
 		model = self._get_model()
 
 		def _run() -> str:
-			return "".join(f.content for f in model.respond_stream(chat))
+			return "".join(iter_with_metrics(model, chat, self._model_name))
 
 		text = await asyncio.to_thread(_run)
 		return AIMessage(content=text)
@@ -82,8 +83,8 @@ class _LMStudioLLM:
 
 		async def _producer():
 			def _run():
-				for fragment in model.respond_stream(chat):
-					loop.call_soon_threadsafe(queue.put_nowait, fragment.content)
+				for content in iter_with_metrics(model, chat, self._model_name):
+					loop.call_soon_threadsafe(queue.put_nowait, content)
 				loop.call_soon_threadsafe(queue.put_nowait, None)
 
 			await asyncio.to_thread(_run)
@@ -107,7 +108,7 @@ class _LMStudioAgent:
 		messages = inputs.get("messages", [])
 		chat = _build_chat(messages)
 		model = lms.llm(self._model_name)
-		response_text = "".join(f.content for f in model.respond_stream(chat))
+		response_text = "".join(iter_with_metrics(model, chat, self._model_name))
 		return {"messages": [*messages, AIMessage(content=response_text)]}
 
 

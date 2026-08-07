@@ -164,10 +164,9 @@ async def main(
 		logger.debug("Emote mode enabled")
 
 	if speak:
-		from tts.tts import enable_tts, set_spinner
+		from tts.tts import enable_tts
 
 		enable_tts()
-		set_spinner(False)  # spinner corrupts streamed text in CLI mode
 		logger.debug("TTS enabled")
 
 	if listen:

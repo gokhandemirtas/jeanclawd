@@ -7,8 +7,6 @@ Usage:
 
 import argparse
 import json
-import math
-import time
 from pathlib import Path
 
 from rich.markup import escape
@@ -46,13 +44,42 @@ def _fmt_mb(mb: float) -> str:
 	return f"{mb / 1024:.2f} GB" if mb >= 1024 else f"{mb:.0f} MB"
 
 
+def _fmt_metric(value, suffix: str = "") -> str:
+	"""Format an optional metric without making missing values look like zero."""
+	if value is None:
+		return "—"
+	if isinstance(value, float):
+		return f"{value:.2f}{suffix}"
+	return f"{value}{suffix}"
+
+
+def _performance_text(entry: dict) -> str:
+	"""Return the compact, human-readable view for an LLM performance event."""
+	model = escape(str(entry.get("model", "unknown model")))
+	prompt = _fmt_metric(entry.get("prompt_tokens"))
+	completion = _fmt_metric(entry.get("completion_tokens"))
+	server_tps = _fmt_metric(entry.get("server_tokens_per_second"), " tok/s")
+	measured_tps = _fmt_metric(entry.get("measured_tokens_per_second"), " tok/s")
+	end_to_end_tps = _fmt_metric(entry.get("end_to_end_tokens_per_second"), " tok/s")
+	server_ttft = _fmt_metric(entry.get("server_ttft_ms"), " ms")
+	client_ttft = _fmt_metric(entry.get("client_ttft_ms"), " ms")
+	return (
+		f"[dim]{entry.get('ts', '')}[/dim] [bold yellow]LLM PERF[/bold yellow] "
+		f"[bold]{model}[/bold]\n"
+		f"  tokens: prompt={prompt}, completion={completion}  "
+		f"throughput: server={server_tps}, measured={measured_tps}, "
+		f"end-to-end={end_to_end_tps}  "
+		f"TTFT: server={server_ttft}, client={client_ttft}"
+	)
+
+
 def _resource_markup() -> str:
 	lines: list[str] = []
 
 	# CPU
 	pct = psutil.cpu_percent(interval=None)
 	bar = _rbar(pct, 100)
-	lines.append(f"[bold cyan]CPU[/bold cyan]")
+	lines.append("[bold cyan]CPU[/bold cyan]")
 	lines.append(f"[{bar}] [bold]{pct:.1f}%[/bold]")
 	lines.append("")
 
@@ -61,21 +88,26 @@ def _resource_markup() -> str:
 	used_mb = vm.used / 1024**2
 	total_mb = vm.total / 1024**2
 	bar = _rbar(used_mb, total_mb)
-	lines.append(f"[bold cyan]Memory[/bold cyan]")
+	lines.append("[bold cyan]Memory[/bold cyan]")
 	lines.append(f"[{bar}]")
 	lines.append(f"[bold]{_fmt_mb(used_mb)}[/bold] / {_fmt_mb(total_mb)}")
 	lines.append("")
 
 	# Swap
-	sw = psutil.swap_memory()
-	if sw.total > 0:
-		sw_used = sw.used / 1024**2
-		sw_total = sw.total / 1024**2
-		bar = _rbar(sw_used, sw_total)
-		lines.append(f"[bold cyan]Swap[/bold cyan]")
-		lines.append(f"[{bar}]")
-		lines.append(f"[bold]{_fmt_mb(sw_used)}[/bold] / {_fmt_mb(sw_total)}")
-		lines.append("")
+	try:
+		sw = psutil.swap_memory()
+		if sw.total > 0:
+			sw_used = sw.used / 1024**2
+			sw_total = sw.total / 1024**2
+			bar = _rbar(sw_used, sw_total)
+			lines.append("[bold cyan]Swap[/bold cyan]")
+			lines.append(f"[{bar}]")
+			lines.append(f"[bold]{_fmt_mb(sw_used)}[/bold] / {_fmt_mb(sw_total)}")
+			lines.append("")
+	except OSError:
+		# macOS can reject the swap query when virtual memory statistics are
+		# temporarily unavailable. The rest of the monitor remains useful.
+		pass
 
 	# NVIDIA VRAM
 	try:
@@ -206,6 +238,7 @@ class MonitorApp(App):
 	BINDINGS = [
 		Binding("a", "toggle_autoscroll", "auto-scroll"),
 		Binding("c", "clear", "clear"),
+		Binding("y", "copy_results", "copy selection/results"),
 		Binding("q", "quit", "quit"),
 	]
 
@@ -229,6 +262,7 @@ class MonitorApp(App):
 							yield Button("ALL", id="btn-ALL", classes="-active")
 							for lvl in ALL_LEVELS:
 								yield Button(lvl, id=f"btn-{lvl}")
+							yield Button("LLM PERF", id="btn-LLM_PERF")
 							yield Button("CLEAR", id="btn-clear", variant="warning")
 						yield Label(self._stats_text(), id="stats")
 						yield RichLog(id="log-view", highlight=False, markup=True, wrap=True)
@@ -246,10 +280,8 @@ class MonitorApp(App):
 		self.set_interval(1.0, self._poll_resources)
 
 	def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-		"""Keep log-only controls out of the Events tab."""
-		show_log_controls = event.pane.id == "tab-logs"
-		self.query_one("#filter-bar").display = show_log_controls
-		self.query_one("#stats").display = show_log_controls
+		"""Keep the shared filter available on both Logs and Events tabs."""
+		self.query_one("#stats").display = event.pane.id == "tab-logs"
 
 	def _poll_resources(self) -> None:
 		self.query_one("#resources", Static).update(_resource_markup())
@@ -287,15 +319,28 @@ class MonitorApp(App):
 			self._counts[level] = self._counts.get(level, 0) + 1
 			self._entries.append(entry)
 
-			if self._active_filter in ("ALL", level):
+			if self._entry_matches_filter(entry):
 				self._render_entry(log_view, entry)
 			if entry.get("event"):
 				self._event_entries.append(entry)
-				self._render_event(entry)
+				if self._entry_matches_filter(entry):
+					self._render_event(entry)
 
 		self.query_one("#stats", Label).update(self._stats_text())
 
+	def _entry_matches_filter(self, entry: dict) -> bool:
+		if self._active_filter == "ALL":
+			return True
+		if self._active_filter == "LLM_PERF":
+			return entry.get("event") == "llm_generation_completed"
+		return entry.get("level", "INFO") == self._active_filter
+
 	def _render_entry(self, log_view: RichLog, entry: dict) -> None:
+		if self._active_filter == "LLM_PERF" and entry.get("event") == "llm_generation_completed":
+			log_view.write(_performance_text(entry))
+			if self._auto_scroll:
+				log_view.scroll_end(animate=False)
+			return
 		ts = entry.get("ts", "")
 		level = entry.get("level", "INFO")
 		msg = entry.get("msg", "")
@@ -351,6 +396,45 @@ class MonitorApp(App):
 		self._event_entries.clear()
 		self.query_one("#stats", Label).update(self._stats_text())
 
+	def _entry_text(self, entry: dict, event_view: bool = False) -> str:
+		"""Return a plain-text representation suitable for clipboard copying."""
+		if not event_view:
+			return f"{entry.get('ts', '')} {entry.get('level', 'INFO'):<5} {entry.get('msg', '')}"
+		fields = {
+			key: value
+			for key, value in entry.items()
+			if key not in {"ts", "level", "msg", "event"}
+		}
+		return (
+			f"{entry.get('ts', '')} {entry.get('level', 'INFO'):<5} "
+			f"{entry.get('event', entry.get('msg', 'event'))} "
+			f"{json.dumps(fields, ensure_ascii=False, default=str)}"
+		).rstrip()
+
+	def action_copy_results(self) -> None:
+		"""Copy selected text, or all entries matching the active filter."""
+		selected = self.screen.get_selected_text()
+		if selected:
+			self.copy_to_clipboard(selected)
+			self.notify("Copied selection to clipboard")
+			return
+
+		tabs = self.query_one("#log-tabs", TabbedContent)
+		is_events = tabs.active == "tab-events"
+		entries = self._event_entries if is_events else self._entries
+		text = "\n".join(
+			self._entry_text(entry, event_view=is_events)
+			for entry in entries
+			if self._entry_matches_filter(entry)
+		)
+		if not text:
+			self.notify("No matching log entries to copy", severity="warning")
+			return
+		self.copy_to_clipboard(text)
+		self.notify(
+			f"Copied {len(text.splitlines())} filtered result(s) to clipboard"
+		)
+
 	def on_button_pressed(self, event: Button.Pressed) -> None:
 		btn_id = event.button.id
 
@@ -359,7 +443,7 @@ class MonitorApp(App):
 			return
 
 		level = btn_id.replace("btn-", "") if btn_id else None
-		if level not in ("ALL", *ALL_LEVELS):
+		if level not in ("ALL", *ALL_LEVELS, "LLM_PERF"):
 			return
 
 		for btn in self.query("#filter-bar Button"):
@@ -369,10 +453,14 @@ class MonitorApp(App):
 		self._active_filter = level
 		log_view = self.query_one("#log-view", RichLog)
 		log_view.clear()
+		event_view = self.query_one("#event-view", RichLog)
+		event_view.clear()
 
 		for entry in self._entries:
-			if level == "ALL" or entry.get("level") == level:
+			if self._entry_matches_filter(entry):
 				self._render_entry(log_view, entry)
+				if entry.get("event"):
+					self._render_event(entry)
 
 
 def main() -> None:

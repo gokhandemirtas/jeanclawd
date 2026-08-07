@@ -7,7 +7,8 @@ WEATHER — the user wants weather or forecast information
 FINANCE_STOCKS — the user wants stock, crypto, or market data
 TRANSPORTATION — the user wants directions or a route between two places
 REMINDER — the user wants to set a timer, alarm, or reminder
-NEWSFEED — the user wants news headlines or current events
+NEWSFEED — the user wants today's/latest/current news, news headlines, world
+news, or a current-events briefing such as "what's happening in the world"
 NUTRITION — the user wants recipe, nutrition, or food preparation information
 INFORMATION_QUERY — the user wants a quick factual answer (a person, place, definition, date, measurement)
 NOTES — the user explicitly wants to save, read, list, or delete a personal note
@@ -25,6 +26,7 @@ Key distinctions:
 - "Stop the music", "stop playing", or "stop" in a music context is SPOTIFY, not HOME_CONTROL.
 - SEARCH vs INFORMATION_QUERY: INFORMATION_QUERY is a quick lookup ("how tall is X", "what year was Y built"). SEARCH is a broader research request ("research X", "find information about Y", "look up Z").
 - Any question containing a temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" requires live or externally verified information. Route it to the appropriate live-data intent (usually INFORMATION_QUERY or SEARCH), never CHAT, even when the underlying subject is familiar or general knowledge.
+- Broad current-events requests such as "what's happening in the world", "today's news", and "latest headlines" are NEWSFEED, not CHAT or INFORMATION_QUERY.
 - This applies generically to people, offices, laws, prices, products, rankings, events, technology, organizations, and any other changing subject. Do not rely on a memorized answer for a time-qualified question.
 - Any message starting with or containing "research", "search for", "look up", or "find information" is SEARCH, not CHAT or INFORMATION_QUERY.
 - When in doubt, CHAT is the safe default.

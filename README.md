@@ -113,6 +113,26 @@ Last active application session:
 uv run python main.py --session e4f97131-0c00-439b-b25b-41ff8e88774c
 ```
 
+### LM Studio performance
+
+Every native LM Studio generation writes a structured `llm_generation_completed`
+event to `logs/app.log`. The event includes LM Studio's tokenizer-backed
+`prompt_tokens`, `completion_tokens`, `server_tokens_per_second`, and
+`server_ttft_ms`, plus client-observed `client_ttft_ms`, `wall_time_ms`, and
+`measured_tokens_per_second`.
+
+Watch the measurements while JeanClawd is running:
+
+```bash
+tail -f logs/app.log | jq 'select(.event == "llm_generation_completed")'
+```
+
+For comparing models on the same machine, use `server_tokens_per_second` and
+`server_ttft_ms`. For perceived application performance, use
+`client_ttft_ms` and `end_to_end_tokens_per_second`. Run several requests with
+the same prompt and generation limit, discard the first request if it includes
+model loading, and compare medians rather than a single result.
+
 CLI flags: `--speak`, `--emote`, `--server`, `--listen`, `--track_camera`,
 `--telegram`, `--keepalive`, `--session SESSION_UUID`.
 

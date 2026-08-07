@@ -5,6 +5,7 @@ import lmstudio as lms
 from json_repair import repair_json
 
 from .base import InferenceProvider
+from utils.lmstudio_metrics import iter_with_metrics
 
 def _make_template(response_format: Type[BaseModel]) -> str:
 	"""Build a fill-in-the-blank JSON template from a Pydantic model.
@@ -42,6 +43,7 @@ _JSON_INSTRUCTION = (
 class LMStudioProvider(InferenceProvider):
 	def __init__(self, model_key: str, temperature: float = 0, max_tokens: int = -1):
 		config: dict = {"temperature": temperature, "max_tokens": max_tokens}
+		self._model_key = model_key
 		self._model = lms.llm(model_key, config=config)
 
 	def _build_chat(self, messages: list[dict], system_override: str | None = None) -> lms.Chat:
@@ -63,8 +65,7 @@ class LMStudioProvider(InferenceProvider):
 		original_system = next((m["content"] for m in messages if m["role"] == "system"), "")
 		system = original_system + "\n\n" + _JSON_INSTRUCTION.format(template=template)
 		chat = self._build_chat(messages, system_override=system)
-		for fragment in self._model.respond_stream(chat):
-			yield fragment.content
+		yield from iter_with_metrics(self._model, chat, self._model_key)
 
 	def complete(
 		self,
@@ -84,7 +85,7 @@ class LMStudioProvider(InferenceProvider):
 
 	def respond(self, messages: list[dict]) -> str:
 		chat = self._build_chat(messages)
-		return "".join(f.content for f in self._model.respond_stream(chat))
+		return "".join(iter_with_metrics(self._model, chat, self._model_key))
 
 	def context_length(self) -> int:
 		return self._model.get_context_length()

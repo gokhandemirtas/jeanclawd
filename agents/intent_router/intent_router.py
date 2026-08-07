@@ -1,8 +1,35 @@
 import inspect
+import re
 from collections.abc import Callable
 
 from agents.intent_classifier.intent_classifier import IntentLiteral
 from skills import get_skill
+
+
+_OFFER_MARKERS = re.compile(
+	r"\b(?:i can|i could|i'll|i will|let me|would you like me to|want me to)\b",
+	re.IGNORECASE,
+)
+
+
+def _lock_offered_intent(intent: IntentLiteral, response: str) -> None:
+	"""Lock a clearly offered follow-up action for a short confirmation.
+
+	CHAT often offers to perform a live-data action without ending in a
+	question, e.g. "I can give you a quick overview of what's happening in the
+	world."  Preserve that intent so "yeah, go ahead" can execute the skill.
+	Do not lock arbitrary mentions of news: the response must also contain an
+	explicit offer marker.
+	"""
+	if intent != "CHAT" or not _OFFER_MARKERS.search(response):
+		return
+
+	from agents.intent_classifier.intent_classifier import _keyword_classify
+	from skills.conversation.skill import set_pending_intent
+
+	offered_intent = _keyword_classify(response)
+	if offered_intent in {"NEWSFEED", "WEATHER", "FINANCE_STOCKS", "SEARCH"}:
+		set_pending_intent(offered_intent)
 
 
 async def route(
@@ -59,9 +86,10 @@ async def route(
 
 	# Auto-lock the next turn to this intent when the response ends with a question
 	# (e.g. "Which playlist?", "What time?"). The lock is single-use: consumed and
-	# cleared by consume_pending_intent() on the next turn. If the user's reply
-	# also ends with "?", a fresh lock is set; otherwise the chain breaks.
+	# cleared by consume_pending_intent() on the next turn. Offered actions below
+	# use the same handoff for confirmations such as "yeah, go ahead".
 	if final.rstrip().endswith("?"):
 		set_pending_intent(intent)
+	_lock_offered_intent(intent, final)
 
 	return final

@@ -46,6 +46,30 @@ _SEARCH_PREFIXES = (
 	"where to buy",
 )
 
+# Explicit daily-news requests should always execute the NEWSFEED skill.  If
+# these are left to the conversational router, it may answer from model
+# knowledge and incorrectly present that answer as today's news.
+_NEWSFEED_PHRASES = (
+	"news today",
+	"today's news",
+	"todays news",
+	"latest news",
+	"current news",
+	"news headlines",
+	"today's headlines",
+	"todays headlines",
+	"headlines today",
+	"world news",
+	"global news",
+	"what's happening in the world",
+	"whats happening in the world",
+	"what is happening in the world",
+	"what's happening around the world",
+	"whats happening around the world",
+	"what is happening around the world",
+	"global developments",
+)
+
 # These are session/conversation-management requests, not web searches. Keep
 # them deterministic because a small routing model may interpret "where were
 # we" literally as a grammar/search query.
@@ -92,9 +116,11 @@ _DATETIME_QUERIES = frozenset(
 
 def _keyword_classify(text: str) -> IntentLiteral | None:
 	"""Fast pre-check for high-confidence intents that small models routinely miss."""
-	t = text.lower().strip()
+	t = text.lower().strip().replace("\u2018", "'").replace("\u2019", "'")
 	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
 		return "CHAT"
+	if any(phrase in t for phrase in _NEWSFEED_PHRASES):
+		return "NEWSFEED"
 	# Reminder listing is unambiguous and must not fall through to NOTES just
 	# because it contains the generic word "list".
 	if "reminder" in t and any(
