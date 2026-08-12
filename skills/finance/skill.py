@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -130,7 +131,22 @@ def _format_current_snapshot(ticker_symbol: str, ticker: yf.Ticker) -> str:
     market_cap = fi.get("marketCap") or fi.get("market_cap")
     currency = fi.get("currency", "USD")
 
+    last_trade_time = fi.get("lastTradeTime") or fi.get("last_trade_time")
+    if last_trade_time:
+        try:
+            if isinstance(last_trade_time, (int, float)):
+                last_trade_time = datetime.fromtimestamp(last_trade_time, tz=timezone.utc)
+            elif last_trade_time.tzinfo is None:
+                last_trade_time = last_trade_time.replace(tzinfo=timezone.utc)
+            as_of = last_trade_time.isoformat(timespec="seconds")
+        except (AttributeError, TypeError, ValueError, OSError):
+            as_of = str(last_trade_time)
+    else:
+        as_of = None
+
     lines = [f"Ticker: {ticker_symbol}"]
+    if as_of:
+        lines.append(f"Market data as of: {as_of}")
     if price:
         lines.append(f"Current price: {price:.2f} {currency}")
     if prev_close and price:

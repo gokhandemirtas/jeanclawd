@@ -260,7 +260,9 @@ async def _synthesize(original_query: str, observations: list[str], references: 
         "Use short paragraphs of no more than 2–3 sentences, and insert a blank line "
         "whenever the topic or comparison point changes. No bullet points unless comparing multiple items. "
         "Cite factual claims with source markers such as [S1] when supported by the research. "
-        "Do not invent sources or citations. Do not mention the research process — just answer the question directly."
+        "Do not invent sources, citations, companies, manufacturers, or URLs. "
+        "If the research does not support a claim, say that it could not be verified. "
+        "Do not mention the research process — just answer the question directly."
     )
     research = "\n\n".join(f"Research note {i + 1}:\n{obs}" for i, obs in enumerate(observations))
     source_list = "\n".join(f"[S{i}] {url}" for i, url in enumerate(references, 1)) or "(none)"
@@ -360,7 +362,7 @@ async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]
 		report_observations.append(f"Query: {step.query}\nResult: {result}")
 		logger.debug(f"[deep_research] Observation: {result[:120]}…")
 
-	if observations:
+	if observations and references:
 		_status(f"Max steps reached — synthesising from {len(observations)} finding(s)")
 		t_synth = time.time()
 		answer = await _synthesize(original_query, observations, references, length_hint)

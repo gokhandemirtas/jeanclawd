@@ -2,10 +2,8 @@ import os
 from datetime import datetime
 from enum import Enum
 
-from utils.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from agents.agent_factory import create_llm
 from skills.information.prompts import informationIntentPrompt
 from utils.llm_structured_output import generate_structured_output
 from utils.log import logger
@@ -43,17 +41,8 @@ def _get_contextual_answer(keyword: str) -> str:
     return f"Current date and time: {now.strftime('%A, %B %d, %Y %H:%M:%S')}."
 
 
-async def _llm_fallback(query: str) -> str:
-  llm = create_llm(model_name=os.environ.get("MODEL_GENERALIST"), temperature=0.3)
-  response = await llm.ainvoke([
-    SystemMessage(content="Answer the user's question as accurately as possible using your training data."),
-    HumanMessage(content=query),
-  ])
-  return f"I am answering this using my training data: {response.content}"
-
-
 async def handle_information_query(query: str) -> str:
-  """Handle general knowledge queries — DDG first, LLM fallback with disclaimer."""
+  """Answer information queries only when live search provides evidence."""
   try:
     intent = _classify_intent(query)
     logger.debug(f"Information intent: query_type={intent.query_type}, keyword={intent.keyword}")
@@ -66,5 +55,5 @@ async def handle_information_query(query: str) -> str:
   if web_results:
     return web_results
 
-  logger.debug("Search engines returned no results, falling back to LLM")
-  return await _llm_fallback(query)
+  logger.warning("[information] Search engines returned no verifiable results")
+  return "I couldn't find reliable sources to verify that, so I won't guess."

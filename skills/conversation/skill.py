@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import time
 from collections import deque
 from collections.abc import Callable
 
@@ -165,16 +166,26 @@ _PERSONAL_CONTEXT_QUERY = re.compile(
 # When a non-CHAT skill asks a clarifying question, lock the next turn to that skill
 # so the user's answer routes back correctly instead of being reclassified from scratch.
 _pending_intent: str | None = None
+_pending_intent_expires_at: float | None = None
+_PENDING_INTENT_TTL_SECONDS = max(5.0, float(os.getenv("PENDING_INTENT_TTL_SECONDS", "60")))
 
 def set_pending_intent(intent: str) -> None:
-	global _pending_intent
+	global _pending_intent, _pending_intent_expires_at
+	# CHAT is context, not a pending action. A generic conversational question
+	# must never pin the next unrelated request to CHAT.
+	if intent == "CHAT":
+		return
 	_pending_intent = intent
+	_pending_intent_expires_at = time.monotonic() + _PENDING_INTENT_TTL_SECONDS
 
 
 def consume_pending_intent() -> str | None:
-	global _pending_intent
+	global _pending_intent, _pending_intent_expires_at
 	val = _pending_intent
+	if _pending_intent_expires_at is not None and time.monotonic() >= _pending_intent_expires_at:
+		val = None
 	_pending_intent = None
+	_pending_intent_expires_at = None
 	return val
 
 
@@ -463,10 +474,11 @@ async def _compress_oldest() -> None:
 
 def restore_session_context(summary: str | None, interactions: list) -> None:
 	"""Restore durable session context into the in-process conversation state."""
-	global _rolling_summary, _current_topic, _pending_intent, _memory_turn
+	global _rolling_summary, _current_topic, _pending_intent, _pending_intent_expires_at, _memory_turn
 	_rolling_summary = summary
 	_current_topic = None
 	_pending_intent = None
+	_pending_intent_expires_at = None
 	_memory_turn = 0
 	_recent_memory_turns.clear()
 	_history.clear()

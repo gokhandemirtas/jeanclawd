@@ -46,6 +46,23 @@ _SEARCH_PREFIXES = (
 	"where to buy",
 )
 
+_FINANCE_PHRASES = (
+	"stock",
+	"share price",
+	"share prices",
+	"market cap",
+	"market capitalization",
+	"valuation",
+	"ticker",
+	"stock price",
+	"stock quote",
+	"share price",
+	"trading at",
+	"p/e",
+	"pe ratio",
+	"dividend",
+)
+
 # Explicit daily-news requests should always execute the NEWSFEED skill.  If
 # these are left to the conversational router, it may answer from model
 # knowledge and incorrectly present that answer as today's news.
@@ -121,6 +138,12 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 		return "CHAT"
 	if any(phrase in t for phrase in _NEWSFEED_PHRASES):
 		return "NEWSFEED"
+	# Stock and valuation requests need fresh provider data. Keep this ahead of
+	# the model so a short query such as "Microsoft stock" cannot become CHAT.
+	if any(phrase in t for phrase in _FINANCE_PHRASES) and not any(
+		phrase in t for phrase in ("stock photo", "stock image", "stock footage")
+	):
+		return "FINANCE_STOCKS"
 	# Reminder listing is unambiguous and must not fall through to NOTES just
 	# because it contains the generic word "list".
 	if "reminder" in t and any(

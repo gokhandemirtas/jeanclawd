@@ -84,10 +84,10 @@ async def route(
 		if intent != "CHAT":
 			await _safe_extract_topic(user_input, result)
 
-	# Auto-lock the next turn to this intent when the response ends with a question
-	# (e.g. "Which playlist?", "What time?"). The lock is single-use: consumed and
-	# cleared by consume_pending_intent() on the next turn. Offered actions below
-	# use the same handoff for confirmations such as "yeah, go ahead".
+	# Keep a non-CHAT skill for one likely answer turn when it asks a question
+	# (e.g. "Which playlist?", "What time?"). set_pending_intent rejects CHAT,
+	# and the state also expires after its short TTL. Offered actions below use
+	# the same handoff for confirmations such as "yeah, go ahead".
 	if final.rstrip().endswith("?"):
 		set_pending_intent(intent)
 	_lock_offered_intent(intent, final)

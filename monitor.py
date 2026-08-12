@@ -354,6 +354,8 @@ class MonitorApp(App):
 		ts = entry.get("ts", "")
 		level = entry.get("level", "INFO")
 		name = entry.get("event", entry.get("msg", "event"))
+		if name.startswith("skill_execution_") and entry.get("skill"):
+			name = f"{name} [{entry['skill']}]"
 		fields = {
 			key: value
 			for key, value in entry.items()
