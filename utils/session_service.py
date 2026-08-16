@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 _active_session_id: UUID | None = None
+_last_conversation_gap_seconds: float | None = None
 
 
 class _SessionTitle(BaseModel):
@@ -21,9 +22,11 @@ def get_active_session_id() -> UUID | None:
 
 
 async def create_session(*, user_id: str = "default", title: str | None = None) -> UUID:
+	global _last_conversation_gap_seconds
 	from db.schemas import Session
 
 	now = datetime.now()
+	_last_conversation_gap_seconds = None
 	session_id = uuid4()
 	await Session(
 		session_id=session_id,
@@ -44,6 +47,7 @@ async def initialize_session(*, user_id: str = "default") -> UUID:
 
 
 async def resume_session(session_id: str | UUID, *, user_id: str = "default") -> UUID:
+	global _last_conversation_gap_seconds
 	from db.schemas import Interaction, Session
 
 	parsed = session_id if isinstance(session_id, UUID) else UUID(session_id)
@@ -54,11 +58,24 @@ async def resume_session(session_id: str | UUID, *, user_id: str = "default") ->
 		Interaction.session_id == str(parsed), Interaction.user_id == user_id
 	).sort("-created_at").limit(20).to_list()
 	interactions.reverse()
+	# Capture this before marking the session active. The greeting is generated
+	# immediately afterwards and needs the gap from the previous conversation.
+	if interactions:
+		_last_conversation_gap_seconds = max(
+			0.0, (datetime.now() - session.last_active_at).total_seconds()
+		)
+	else:
+		_last_conversation_gap_seconds = None
 	await _activate(parsed, summary=session.summary, interactions=interactions)
 	session.status = "active"
 	session.last_active_at = datetime.now()
 	await session.save()
 	return parsed
+
+
+def get_last_conversation_gap_seconds() -> float | None:
+	"""Return the elapsed time captured when the active session was resumed."""
+	return _last_conversation_gap_seconds
 
 
 async def list_sessions(*, user_id: str = "default", limit: int = 20) -> list:

@@ -13,7 +13,7 @@ self-contained query that can be sent to that skill. GLiNER entities, if supplie
 are hints only: do not use them for conjunction parsing, task segmentation, or intent
 assignment. The intent must be one of the public intent literals exactly: HOME_CONTROL,
 WEATHER, FINANCE_STOCKS, TRANSPORTATION, REMINDER, NEWSFEED, INFORMATION_QUERY, NOTES,
-SEARCH, SPOTIFY, PLANNER, NUTRITION, or CHAT. Do not return internal action names such
+SEARCH, SPOTIFY, PLANNER, NUTRITION, INTROSPECTION, or CHAT. Do not return internal action names such
 as turn_light, set_reminder, or research_topic. Return structured JSON matching the
 requested schema.
 """

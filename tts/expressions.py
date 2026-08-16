@@ -235,6 +235,11 @@ def _repeat_expression_tags(text: str) -> str:
 	return _TAG_RE.sub(replace, text)
 
 
+def _preserves_source_text(source: str, candidate: str) -> bool:
+	"""Allow speech tags only when the editor preserved the response exactly."""
+	return _TAG_RE.sub("", candidate) == source
+
+
 def decorate_for_speech(text: str) -> str:
 	"""Add sparse, persona-aware Supertonic tags without changing the response wording.
 
@@ -296,6 +301,9 @@ Rules:
 		# Preserve the editor's words exactly; only expand expression markers for
 		# Supertonic's known tag-activation quirk.
 		decorated = _repeat_expression_tags(result.text)
+		if not _preserves_source_text(text, decorated):
+			logger.warning("[tts] Expression editor changed response text; speaking it verbatim")
+			return text
 		if persona_id == "ztyntchtch":
 			return alienize_for_speech(decorated)
 		if persona_id == "mr_meowsky":

@@ -15,6 +15,7 @@ NOTES — the user explicitly wants to save, read, list, or delete a personal no
 SEARCH — the user wants to search or research a topic in depth. Triggers: "search", "look up", "find", "research", "deep dive", "tell me everything about", "what do you know about [broad topic]"
 SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, stop, skip, volume, list playlists, play a playlist, now playing, list devices)
 PLANNER — the user is explicitly asking the assistant to create a plan or itinerary on their behalf
+INTROSPECTION — the user is asking about this Assistant's implementation, architecture, routing, memory/storage, capabilities, or how it works internally. Answer from the application's introspection knowledge, not generic AI knowledge or web search.
 CHAT — the user is chatting, sharing news about themselves, reacting, correcting, or asking something personal
 
 Key distinctions:
@@ -23,6 +24,8 @@ Key distinctions:
 - CHAT covers anything conversational, emotional, personal, or where the user is sharing rather than requesting an action.
 - Feedback, agreement, corrections, explanations, and meta-commentary about the assistant's previous answer are CHAT. Do not classify a declarative comment as INFORMATION_QUERY or SEARCH merely because it mentions reliability, sources, facts, or online retrieval.
 - Questions about the user's own name, identity, remembered profile, or relationship with the Assistant (for example, "remember me?", "what's my name?", or "what do you know about me?") are CHAT, not NOTES or INFORMATION_QUERY, unless the user explicitly asks to save or retrieve a note.
+- Personal-memory and rapport questions about the relationship (for example, "what did I tell you yesterday?" or "do you remember me?") are CHAT. Questions about the application's implementation are INTROSPECTION.
+- Questions about how this application is implemented — its routing, skills, memory storage, session handling, persistence, or internal architecture — are INTROSPECTION. Use INTROSPECTION for codebase questions such as "how are requests routed?" or "where are our conversations stored?"; use CHAT for ordinary personal-memory questions such as "what did I tell you yesterday?".
 - "Stop the music", "stop playing", or "stop" in a music context is SPOTIFY, not HOME_CONTROL.
 - SEARCH vs INFORMATION_QUERY: INFORMATION_QUERY is a quick lookup ("how tall is X", "what year was Y built"). SEARCH is a broader research request ("research X", "find information about Y", "look up Z").
 - Any question containing a temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" requires live or externally verified information. Route it to the appropriate live-data intent (usually INFORMATION_QUERY or SEARCH), never CHAT, even when the underlying subject is familiar or general knowledge.
