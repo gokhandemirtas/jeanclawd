@@ -152,7 +152,8 @@ _recent_memory_turns: dict[str, int] = {}
 _EXPLICIT_MEMORY_QUERY = re.compile(
 	r"\b(?:what\s+do\s+you\s+know|what\s+do\s+you\s+remember|"
 	r"what(?:'s| is| are)\s+my\s+(?:profile|information|name|location|occupation|"
-	r"interests?|likes?|dislikes?|preferences?|relationships?)|"
+	r"interests?|likes?|dislikes?|preferences?|relationships?|"
+	r"birth(?:day|date)|date\s+of\s+birth|age)|"
 	r"remember\s+(?:me|about\s+me)|my\s+profile)\b",
 	re.IGNORECASE,
 )
@@ -593,11 +594,11 @@ async def handle_conversation(
 	return final
 
 
-def _bounded_memory_text(text: str) -> str:
+def _bounded_memory_text(text: str, *, max_chars: int = _MEMORY_MAX_CHARS) -> str:
 	"""Keep injected memory small enough that it cannot dominate a reply."""
-	if len(text) <= _MEMORY_MAX_CHARS:
+	if len(text) <= max_chars:
 		return text
-	return text[: _MEMORY_MAX_CHARS].rsplit("\n", 1)[0].rstrip()
+	return text[:max_chars].rsplit("\n", 1)[0].rstrip()
 
 
 async def _memory_context_for_query(query: str) -> str:
@@ -616,12 +617,15 @@ async def _memory_context_for_query(query: str) -> str:
 
 	try:
 		if explicit:
-			context = await get_profile_context(limit=50)
+			# Broad profile questions need the complete profile. The default
+			# compact budget can otherwise truncate relationship fields after a
+			# long likes/interests section.
+			context = await get_profile_context(limit=100)
 			if context:
 				for fact in context.splitlines():
 					if fact.startswith("-"):
 						_recent_memory_turns[fact] = _memory_turn
-			return _bounded_memory_text(context)
+			return _bounded_memory_text(context, max_chars=4_000)
 
 		from utils.langmem_service import search_relevant_memories
 
@@ -633,7 +637,11 @@ async def _memory_context_for_query(query: str) -> str:
 		for memory in candidates:
 			fact = f"- User memory (about the human user, not the Assistant): {memory}"
 			last_used = _recent_memory_turns.get(fact)
-			if last_used is not None and _memory_turn - last_used <= _MEMORY_COOLDOWN_TURNS:
+			if (
+				not explicit
+				and last_used is not None
+				and _memory_turn - last_used <= _MEMORY_COOLDOWN_TURNS
+			):
 				continue
 			memories.append(fact)
 			if len(memories) >= _MEMORY_MAX_ITEMS:
