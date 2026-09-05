@@ -80,6 +80,11 @@ list. Key variables:
 | `MEMORY_MAX_ITEMS` | Maximum relevant memories injected into a chat turn | `2` |
 | `MEMORY_MAX_CHARS` | Maximum injected memory text size | `500` |
 | `MEMORY_COOLDOWN_TURNS` | Turns before a recently used memory can be reused | `4` |
+| `MAX_HISTORY_MESSAGES` | Recent in-process messages retained for immediate follow-ups | `12` |
+| `CHAT_PROMPT_MAX_TOKENS` | Approximate hard budget for a complete CHAT prompt | `4000` |
+| `CHAT_CONTEXT_MAX_TOKENS` | Maximum tokens allocated to summary and recent turns | `1400` |
+| `SUMMARY_MAX_CHARS` | Maximum rolling-summary size | `1200` |
+| `HISTORY_*_MAX_CHARS` | Maximum size of compact recent user/assistant entries | `400` / `600` |
 | `MODEL_HOST` | LLM endpoint | `http://localhost:1234/v1` |
 | `STT_PROVIDER` | Speech-to-text backend | `mlx` (Apple Silicon) or `whisper` |
 | `TTS_PROVIDER` | Text-to-speech backend | `local` / `lmstudio` / `remote` |
@@ -209,7 +214,7 @@ uv run python main.py --telegram
 The application has three interfaces, but one canonical memory model:
 
 ```
-CLI / REST / Telegram / MCP
+CLI / REST / Telegram
   → query resolution and intent routing
   → registered skill or CHAT handler
   → response (optionally streamed or spoken)
@@ -220,8 +225,8 @@ It stores one structured profile per user in the MongoDB `LangMem` collection. T
 store uses the configured local embedding model and MongoDB vector index for semantic retrieval.
 ```
 
-The interfaces follow the same conceptual stages, while API, Telegram, and MCP use the
-shared intent-classifier entry point and the CLI keeps its own streaming path. The CLI
+The interfaces follow the same conceptual stages, while API and Telegram use the shared
+intent-classifier entry point and the CLI keeps its own streaming path. The CLI
 also resolves memory-backed phrases such as “my favourite band” before routing. In-process
 conversation history is only for short-term follow-ups; cross-session knowledge comes from
 the LangMem profile.
@@ -281,13 +286,8 @@ before committing.
 ## MongoDB inspection
 
 `utils/mongodb_access.py` provides bounded, read-only access using the `MONGODB_*`
-variables in `.env`. The project MCP server exposes this through `mongo_inventory` and
-`mongo_find`; neither tool can insert, update, or delete data.
-
-For a general MongoDB connection available directly to Codex, MongoDB also publishes an
-official Codex Plugin bundling its MCP server and MongoDB agent skills. Add the marketplace
-with `codex plugin marketplace add mongodb/agent-skills`, start a new Codex session, then
-install the MongoDB plugin from `/plugins`. Configure it in read-only mode before use.
+variables in `.env`. `utils/mongodb_access.py` provides bounded, read-only diagnostics;
+it cannot insert, update, or delete data.
 
 ## Known issues
 

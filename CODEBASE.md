@@ -1,7 +1,7 @@
 # Codebase architecture
 
 This document describes the current application. The project is a local-first personal
-assistant with CLI, REST/WebSocket, Telegram, and MCP interfaces.
+assistant with CLI, REST/WebSocket, and Telegram interfaces.
 
 ## Runtime flow
 

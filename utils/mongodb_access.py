@@ -1,4 +1,4 @@
-"""Read-only MongoDB access for diagnostics and MCP tools.
+"""Read-only MongoDB access for diagnostics.
 
 This module deliberately exposes no insert, update, or delete operations.
 """
