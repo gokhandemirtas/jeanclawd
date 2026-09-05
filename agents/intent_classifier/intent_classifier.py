@@ -175,14 +175,14 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 		return "CHAT"
 	if any(phrase in t for phrase in _NEWSFEED_PHRASES):
 		return "NEWSFEED"
+	if any(phrase in t for phrase in _NOTE_PHRASES):
+		return "NOTES"
 	# Stock and valuation requests need fresh provider data. Keep this ahead of
 	# the model so a short query such as "Microsoft stock" cannot become CHAT.
 	if any(phrase in t for phrase in _FINANCE_PHRASES) and not any(
 		phrase in t for phrase in ("stock photo", "stock image", "stock footage")
 	):
 		return "FINANCE_STOCKS"
-	if any(phrase in t for phrase in _NOTE_PHRASES):
-		return "NOTES"
 	# Reminder listing is unambiguous and must not fall through to NOTES just
 	# because it contains the generic word "list".
 	if "reminder" in t and any(
