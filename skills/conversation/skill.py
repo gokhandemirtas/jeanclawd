@@ -427,14 +427,36 @@ def _chat_prompt() -> str:
 	return base
 
 
-# Shared rolling history of all exchanges (CHAT + wrapped skill responses).
-# Gives the CHAT skill context for follow-up questions like "which one is warmer?",
-# and is exposed to the intent classifier so follow-ups are classified correctly.
-MAX_HISTORY = 20  # 10 exchanges kept in full
+# Shared short-term history. Durable user facts belong in LangMem; this buffer is
+# only for immediate follow-ups and conversational tone.
+MAX_HISTORY = max(8, int(os.getenv("MAX_HISTORY_MESSAGES", "12")))
+HISTORY_USER_MAX_CHARS = max(120, int(os.getenv("HISTORY_USER_MAX_CHARS", "400")))
+HISTORY_ASSISTANT_MAX_CHARS = max(180, int(os.getenv("HISTORY_ASSISTANT_MAX_CHARS", "600")))
+SUMMARY_MAX_CHARS = max(400, int(os.getenv("SUMMARY_MAX_CHARS", "1200")))
+CHAT_CONTEXT_MAX_TOKENS = max(400, int(os.getenv("CHAT_CONTEXT_MAX_TOKENS", "1400")))
+CHAT_PROMPT_MAX_TOKENS = max(1200, int(os.getenv("CHAT_PROMPT_MAX_TOKENS", "4000")))
 _history: deque = deque(maxlen=MAX_HISTORY)
 _rolling_summary: str | None = (
-	None  # compressed summary of messages evicted from _history
+	None  # bounded summary of messages evicted from _history
 )
+
+
+def _compact_history_value(value: str, max_chars: int) -> str:
+	"""Keep history entries useful without retaining bulky tool output."""
+	value = " ".join(value.split())
+	if len(value) <= max_chars:
+		return value
+	return value[:max_chars].rsplit(" ", 1)[0].rstrip() + "…"
+
+
+def _bounded_summary(value: str | None) -> str:
+	value = " ".join((value or "").split())
+	if len(value) <= SUMMARY_MAX_CHARS:
+		return value
+	# Keep both the opening context and the newest facts/pointers appended to the
+	# summary (for example, a recently completed research report path).
+	part = max(1, (SUMMARY_MAX_CHARS - 1) // 2)
+	return value[:part].rstrip() + "…" + value[-part:].lstrip()
 
 
 async def _compress_oldest() -> None:
@@ -455,7 +477,7 @@ async def _compress_oldest() -> None:
 		lines.append(f"{role}: {msg.content}")
 	excerpt = "\n".join(lines)
 
-	existing = f"Previous summary:\n{_rolling_summary}\n\n" if _rolling_summary else ""
+	existing = f"Previous summary:\n{_bounded_summary(_rolling_summary)}\n\n" if _rolling_summary else ""
 	prompt = (
 		f"{existing}Add the following exchanges to the summary. "
 		f"Write in first person as {active_name}. Be concise — capture topics, conclusions, and anything the user shared about themselves.\n\n"
@@ -471,7 +493,7 @@ async def _compress_oldest() -> None:
 			HumanMessage(content=prompt),
 		]
 	)
-	_rolling_summary = _strip_think(response.content)
+	_rolling_summary = _bounded_summary(_strip_think(response.content))
 	_history.clear()
 	_history.extend(messages[half:])
 	from utils.session_service import update_session_summary
@@ -481,7 +503,7 @@ async def _compress_oldest() -> None:
 def restore_session_context(summary: str | None, interactions: list) -> None:
 	"""Restore durable session context into the in-process conversation state."""
 	global _rolling_summary, _current_topic, _pending_intent, _pending_intent_expires_at, _memory_turn
-	_rolling_summary = summary
+	_rolling_summary = _bounded_summary(summary)
 	_current_topic = None
 	_pending_intent = None
 	_pending_intent_expires_at = None
@@ -489,8 +511,7 @@ def restore_session_context(summary: str | None, interactions: list) -> None:
 	_recent_memory_turns.clear()
 	_history.clear()
 	for interaction in interactions:
-		_history.append(HumanMessage(content=interaction.user_message))
-		_history.append(AIMessage(content=interaction.assistant_message))
+		append_to_history(interaction.user_message, interaction.assistant_message)
 
 
 async def maybe_compress_history() -> None:
@@ -500,8 +521,10 @@ async def maybe_compress_history() -> None:
 
 
 def append_to_history(user_msg: str, assistant_msg: str) -> None:
-	_history.append(HumanMessage(content=user_msg))
-	_history.append(AIMessage(content=assistant_msg))
+	_history.append(HumanMessage(content=_compact_history_value(user_msg, HISTORY_USER_MAX_CHARS)))
+	_history.append(
+		AIMessage(content=_compact_history_value(assistant_msg, HISTORY_ASSISTANT_MAX_CHARS))
+	)
 
 
 async def compact_after_deep_research(topic: str, report_path: str) -> None:
@@ -512,7 +535,9 @@ async def compact_after_deep_research(topic: str, report_path: str) -> None:
 		f"Deep research completed on {topic}. The full findings and answer are saved at {report_path}. "
 		"Use that document if the user asks to revisit the detailed research."
 	)
-	_rolling_summary = f"{previous}\n\n{research_note}".strip() if previous else research_note
+	_rolling_summary = _bounded_summary(
+		f"{previous}\n\n{research_note}".strip() if previous else research_note
+	)
 	_history.clear()
 	_current_topic = topic
 	from utils.session_service import update_session_summary
@@ -528,6 +553,46 @@ def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
 		pairs.append((messages[i].content, messages[i + 1].content))
 		i += 2
 	return pairs
+
+
+def _fit_context_to_budget(sections: list[str], max_tokens: int = CHAT_CONTEXT_MAX_TOKENS) -> str:
+	"""Return one context block, dropping oldest detail when over budget."""
+	from utils.resource_monitor import count_tokens
+
+	kept: list[str] = []
+	used = 0
+	for section in sections:
+		section_tokens = count_tokens(section)
+		if used + section_tokens <= max_tokens:
+			kept.append(section)
+			used += section_tokens
+			continue
+		remaining = max_tokens - used
+		if remaining <= 0:
+			break
+		# Preserve section labels and the newest content while respecting the budget.
+		words = section.split()
+		short = " ".join(words[-max(20, remaining * 4) :])
+		if short and count_tokens(short) <= remaining:
+			kept.append(short)
+		break
+	return "\n\n".join(kept)
+
+
+def _chat_context_sections() -> list[str]:
+	"""Build non-overlapping context sections in oldest-to-newest order."""
+	sections: list[str] = []
+	if _rolling_summary:
+		sections.append("## Earlier conversation summary\n" + _bounded_summary(_rolling_summary))
+
+	messages = list(_history)
+	if messages:
+		lines = []
+		for msg in messages:
+			role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+			lines.append(f"{role}: {msg.content}")
+		sections.append("## Recent conversation\n" + "\n".join(lines))
+	return sections
 
 
 def _get_llm(temperature: float = 0.7, max_tokens: int = 1024):
@@ -580,8 +645,7 @@ async def handle_conversation(
 				_filter.push(token)
 		_filter.flush()
 		final = _strip_think(full_text)
-		_history.append(HumanMessage(content=user_query))
-		_history.append(AIMessage(content=final))
+		append_to_history(user_query, final)
 		await _safe_extract_topic(user_query, final)
 		return final
 
@@ -598,8 +662,7 @@ async def handle_conversation(
 	logger.debug(f"[conversation] topic='{_current_topic}'")
 
 	# Store in shared history so CHAT can reference this exchange
-	_history.append(HumanMessage(content=user_query))
-	_history.append(AIMessage(content=final))
+	append_to_history(user_query, final)
 
 	return final
 
@@ -698,14 +761,15 @@ async def handle_chat(
 			)
 		if memory_context:
 			logger.debug(f"[CHAT] Injecting memory context: {memory_context[:120]}")
-		from utils.resource_monitor import compute_chat_history_limit, count_tokens, set_context_used, push_context_to_file
+		from utils.resource_monitor import count_tokens, set_context_used, push_context_to_file
 
-		history_lines = []
-		for msg in list(_history)[-compute_chat_history_limit() :]:
-			role = "User" if isinstance(msg, HumanMessage) else "Assistant"
-			history_lines.append(f"{role}: {msg.content}")
-		if history_lines:
-			system = system + "\n\n## Conversation so far:\n" + "\n".join(history_lines)
+		context_budget = min(
+			CHAT_CONTEXT_MAX_TOKENS,
+			max(0, CHAT_PROMPT_MAX_TOKENS - count_tokens(system) - count_tokens(query)),
+		)
+		context = _fit_context_to_budget(_chat_context_sections(), max_tokens=context_budget)
+		if context:
+			system = system + "\n\n" + context
 		user_prompt = query
 		set_context_used(count_tokens(system) + count_tokens(user_prompt))
 		push_context_to_file()
@@ -720,8 +784,7 @@ async def handle_chat(
 				_filter.push(token)
 		_filter.flush()
 		final = _strip_think(full_text)
-		_history.append(HumanMessage(content=query))
-		_history.append(AIMessage(content=final))
+		append_to_history(query, final)
 		await _safe_extract_topic(query, final)
 		return final
 
@@ -739,8 +802,7 @@ async def handle_chat(
 
 		await _safe_extract_topic(query, final)
 
-		_history.append(HumanMessage(content=query))
-		_history.append(AIMessage(content=final))
+		append_to_history(query, final)
 		return final
 
 	# Compress oldest history before it gets evicted
@@ -755,19 +817,17 @@ async def handle_chat(
 		logger.debug(f"[CHAT] Injecting memory context: {memory_context[:120]}")
 		system = system + "\n\n" + memory_context
 
-	if _rolling_summary:
-		system = (
-			system + "\n\n## Summary of earlier in this conversation:\n" + _rolling_summary
-		)
+	from utils.resource_monitor import count_tokens, set_context_used, push_context_to_file
 
-	from utils.resource_monitor import compute_chat_history_limit, count_tokens, set_context_used, push_context_to_file
-
-	history_lines = []
-	for msg in list(_history)[-compute_chat_history_limit() :]:
-		role = "User" if isinstance(msg, HumanMessage) else "Assistant"
-		history_lines.append(f"{role}: {msg.content}")
-	if history_lines:
-		system = system + "\n\n## Conversation so far:\n" + "\n".join(history_lines)
+	# Summary and recent turns are assembled once, in a bounded block. Older
+	# factual details should come from durable memory rather than raw transcripts.
+	context_budget = min(
+		CHAT_CONTEXT_MAX_TOKENS,
+		max(0, CHAT_PROMPT_MAX_TOKENS - count_tokens(system) - count_tokens(query)),
+	)
+	context = _fit_context_to_budget(_chat_context_sections(), max_tokens=context_budget)
+	if context:
+		system = system + "\n\n" + context
 	set_context_used(count_tokens(system) + count_tokens(query))
 	push_context_to_file()
 
@@ -795,8 +855,7 @@ async def handle_chat(
 		).ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
 		final = _strip_think(response.content)
 
-	_history.append(HumanMessage(content=query))
-	_history.append(AIMessage(content=final))
+	append_to_history(query, final)
 	return final
 
 
