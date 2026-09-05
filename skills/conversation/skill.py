@@ -140,6 +140,7 @@ async def _safe_extract_topic(query: str, answer: str) -> None:
 
 # Tracks the active conversation topic so the intent classifier can resolve follow-ups.
 _current_topic: str | None = None
+_last_research_report_path: str | None = None
 
 # Durable memories are deliberately treated as occasional supporting context,
 # not as a second personality layer. These can be tuned without code changes.
@@ -502,9 +503,10 @@ async def _compress_oldest() -> None:
 
 def restore_session_context(summary: str | None, interactions: list) -> None:
 	"""Restore durable session context into the in-process conversation state."""
-	global _rolling_summary, _current_topic, _pending_intent, _pending_intent_expires_at, _memory_turn
+	global _rolling_summary, _current_topic, _last_research_report_path, _pending_intent, _pending_intent_expires_at, _memory_turn
 	_rolling_summary = _bounded_summary(summary)
 	_current_topic = None
+	_last_research_report_path = None
 	_pending_intent = None
 	_pending_intent_expires_at = None
 	_memory_turn = 0
@@ -529,7 +531,7 @@ def append_to_history(user_msg: str, assistant_msg: str) -> None:
 
 async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	"""Replace detailed research context with a durable pointer to its report."""
-	global _rolling_summary, _current_topic
+	global _rolling_summary, _current_topic, _last_research_report_path
 	previous = _rolling_summary.strip() if _rolling_summary else ""
 	research_note = (
 		f"Deep research completed on {topic}. The full findings and answer are saved at {report_path}. "
@@ -540,6 +542,7 @@ async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	)
 	_history.clear()
 	_current_topic = topic
+	_last_research_report_path = report_path
 	from utils.session_service import update_session_summary
 	await update_session_summary(_rolling_summary)
 
@@ -553,6 +556,33 @@ def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
 		pairs.append((messages[i].content, messages[i + 1].content))
 		i += 2
 	return pairs
+
+
+_RESEARCH_FOLLOWUP_MARKERS = re.compile(
+	r"\b(?:this|that|these|those|the above|the same|mentioned|"
+	r"associated|involved|according to|from the report)\b",
+	re.IGNORECASE,
+)
+
+
+def _is_research_followup(query: str) -> bool:
+	return bool(_RESEARCH_FOLLOWUP_MARKERS.search(query))
+
+
+def _research_followup_context(query: str) -> str:
+	"""Load only the bounded final answer from the latest research report."""
+	if not _last_research_report_path or not _is_research_followup(query):
+		return ""
+	try:
+		from pathlib import Path
+
+		content = Path(_last_research_report_path).read_text(encoding="utf-8")
+		answer = content.split("## Final answer", 1)[-1]
+		answer = answer.split("## Research notes", 1)[0].strip()
+		return _compact_history_value(answer, 5000)
+	except (OSError, UnicodeError) as exc:
+		logger.warning(f"[chat] Could not load research follow-up context: {exc}")
+		return ""
 
 
 def _fit_context_to_budget(sections: list[str], max_tokens: int = CHAT_CONTEXT_MAX_TOKENS) -> str:
@@ -579,9 +609,15 @@ def _fit_context_to_budget(sections: list[str], max_tokens: int = CHAT_CONTEXT_M
 	return "\n\n".join(kept)
 
 
-def _chat_context_sections() -> list[str]:
+def _chat_context_sections(research_context: str = "") -> list[str]:
 	"""Build non-overlapping context sections in oldest-to-newest order."""
 	sections: list[str] = []
+	if research_context:
+		sections.append(
+			"## Grounded findings from the latest research report\n"
+			+ research_context
+			+ "\nOnly state claims supported by these findings. If the answer is not present, say so."
+		)
 	if _rolling_summary:
 		sections.append("## Earlier conversation summary\n" + _bounded_summary(_rolling_summary))
 
@@ -746,6 +782,7 @@ async def handle_chat(
 
 	_VOICE_CONSTRAINT = "\n\nYou are responding to a voice message. Reply in a single short paragraph — natural when spoken aloud, no lists or markdown."
 	memory_context = await _memory_context_for_query(query)
+	research_context = _research_followup_context(query)
 
 	# Streaming path — used by CLI and voice WebSocket
 	if on_token is not None:
@@ -767,7 +804,9 @@ async def handle_chat(
 			CHAT_CONTEXT_MAX_TOKENS,
 			max(0, CHAT_PROMPT_MAX_TOKENS - count_tokens(system) - count_tokens(query)),
 		)
-		context = _fit_context_to_budget(_chat_context_sections(), max_tokens=context_budget)
+		context = _fit_context_to_budget(
+			_chat_context_sections(research_context), max_tokens=context_budget
+		)
 		if context:
 			system = system + "\n\n" + context
 		user_prompt = query
@@ -793,6 +832,9 @@ async def handle_chat(
 	if should_use_reasoning(query, recent_history):
 		logger.info("[CHAT] Using ReAct reasoning engine")
 		context_lines = []
+		if research_context:
+			context_lines.append("Grounded findings from the latest research report:")
+			context_lines.append(research_context)
 		for user_msg, assistant_msg in recent_history:
 			context_lines.append(f"User: {user_msg}")
 			context_lines.append(f"Assistant: {assistant_msg[:400]}")
@@ -825,7 +867,9 @@ async def handle_chat(
 		CHAT_CONTEXT_MAX_TOKENS,
 		max(0, CHAT_PROMPT_MAX_TOKENS - count_tokens(system) - count_tokens(query)),
 	)
-	context = _fit_context_to_budget(_chat_context_sections(), max_tokens=context_budget)
+	context = _fit_context_to_budget(
+		_chat_context_sections(research_context), max_tokens=context_budget
+	)
 	if context:
 		system = system + "\n\n" + context
 	set_context_used(count_tokens(system) + count_tokens(query))
