@@ -14,6 +14,7 @@ them based on the user's phrasing.
 import asyncio
 import os
 import re
+from difflib import SequenceMatcher
 
 from pydantic import BaseModel
 
@@ -54,9 +55,20 @@ class _SearchQuery(BaseModel):
 
 
 _TRIGGER_STRIP = re.compile(
-	r"^(deep\s+research|research|search(\s+for)?|look\s+up|find(\s+information)?(\s+about)?|deep\s+dive(\s+into)?)\s+",
+	r"^(deep\s+research|research|search(\s+for)?|look\s+up|find(\s+information)?(\s+about)?|deep\s+dive(\s+into)?)\s*[:\-]?\s+",
 	flags=re.IGNORECASE,
 )
+
+
+def _canonicalize_deep_research_trigger(query: str) -> str:
+	"""Correct a close typo in the explicit deep-research command prefix."""
+	match = re.match(r"^\s*(deep\s+\w+)(?=\s*[:\-\s])", query, flags=re.IGNORECASE)
+	if not match:
+		return query
+	candidate = re.sub(r"\s+", " ", match.group(1).strip().lower())
+	if candidate == "deep research" or SequenceMatcher(None, candidate, "deep research").ratio() < 0.90:
+		return query
+	return "deep research" + query[match.end(1) :]
 
 
 def _strip_trigger(text: str) -> str:
@@ -100,7 +112,7 @@ def _extract_topic(user_message: str, topic_hint: str = "") -> str:
 
 
 def _is_deep_research(query: str) -> bool:
-	q = query.lower()
+	q = _canonicalize_deep_research_trigger(query).lower()
 	return any(trigger in q for trigger in _DEEP_RESEARCH_TRIGGERS)
 
 
@@ -114,6 +126,7 @@ def _is_shopping_request(query: str) -> bool:
 async def run_search(query: str) -> str:
 	from skills.conversation.skill import get_current_topic
 
+	query = _canonicalize_deep_research_trigger(query)
 	topic_hint = get_current_topic() or ""
 	# A redirect such as "use the search skill" refers to the established topic;
 	# sending it through the extractor lets a small model invent an unrelated one.
