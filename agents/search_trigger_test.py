@@ -5,9 +5,10 @@ import unittest
 import skills.registry  # noqa: F401
 
 from agents.search.agent import (
-    _canonicalize_deep_research_trigger,
-    _is_deep_research,
-    _strip_trigger,
+	_canonicalize_deep_research_trigger,
+	_is_deep_research,
+	_should_use_topic_hint,
+	_strip_trigger,
 )
 
 
@@ -25,6 +26,11 @@ class SearchTriggerTests(unittest.TestCase):
 
     def test_regular_search_is_not_deep_research(self) -> None:
         self.assertFalse(_is_deep_research("search Gokhan Demirtas"))
+
+    def test_new_research_subject_does_not_inherit_old_topic(self) -> None:
+        self.assertFalse(_should_use_topic_hint("deep research: apple pie", "blue sky"))
+        self.assertTrue(_should_use_topic_hint("deep research: it", "blue sky"))
+        self.assertTrue(_should_use_topic_hint("look it up", "blue sky"))
 
 
 if __name__ == "__main__":

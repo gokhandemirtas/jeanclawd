@@ -75,6 +75,34 @@ def _strip_trigger(text: str) -> str:
 	return _TRIGGER_STRIP.sub("", text).strip()
 
 
+def _search_subject(text: str) -> str:
+	"""Return the part after an explicit search/research command prefix."""
+	return re.sub(
+		r"^(?:deep\s+research|research|search(?:\s+for)?|look\s+up|"
+		r"find(?:\s+information)?(?:\s+about)?|deep\s+dive(?:\s+into)?)"
+		r"\s*[:\-]?\s*",
+		"",
+		text.strip(),
+		flags=re.IGNORECASE,
+	).strip()
+
+
+def _should_use_topic_hint(query: str, topic_hint: str) -> bool:
+	"""Use the prior topic only for redirects or explicit contextual pronouns."""
+	if not topic_hint:
+		return False
+	if _SEARCH_REDIRECTS.fullmatch(query.strip()):
+		return True
+	subject = _search_subject(query).lower()
+	return bool(
+		re.fullmatch(
+			r"(?:about|on|for|regarding)?\s*(?:it|this|that|these|those|"
+			r"the topic|the above|the same)",
+			subject,
+		)
+	)
+
+
 def _extract_topic(user_message: str, topic_hint: str = "") -> str:
 	match = re.match(r"search\s*:\s*(.+)", user_message, flags=re.IGNORECASE)
 	if match:
@@ -128,9 +156,10 @@ async def run_search(query: str) -> str:
 
 	query = _canonicalize_deep_research_trigger(query)
 	topic_hint = get_current_topic() or ""
-	# A redirect such as "use the search skill" refers to the established topic;
-	# sending it through the extractor lets a small model invent an unrelated one.
-	topic = topic_hint if topic_hint and _SEARCH_REDIRECTS.fullmatch(query.strip()) else _extract_topic(query, topic_hint)
+	# A new explicit subject must not inherit the previous research topic. Only
+	# redirects and pronoun-only follow-ups are allowed to use that context.
+	hint = topic_hint if _should_use_topic_hint(query, topic_hint) else ""
+	topic = topic_hint if hint and _SEARCH_REDIRECTS.fullmatch(query.strip()) else _extract_topic(query, hint)
 
 	if _is_deep_research(query) or _is_shopping_request(query):
 		logger.debug(f"[search] Deep research mode for '{topic}'")
