@@ -1,4 +1,5 @@
 import time
+from difflib import SequenceMatcher
 from typing import Literal
 
 from pydantic import BaseModel
@@ -47,6 +48,27 @@ _SEARCH_PREFIXES = (
 	"where can i buy",
 	"where to buy",
 )
+
+# Fuzzy matching is intentionally limited to explicit command-like prefixes.
+# It catches high-confidence typos such as "deep resarch" without attempting
+# to spell-correct arbitrary conversational content.
+_APPROXIMATE_PREFIX_INTENTS: dict[str, IntentLiteral] = {
+	"deep research": "SEARCH",
+	"deep dive": "SEARCH",
+	"research": "SEARCH",
+	"search": "SEARCH",
+	"look up": "SEARCH",
+	"weather": "WEATHER",
+	"stock price": "FINANCE_STOCKS",
+	"share price": "FINANCE_STOCKS",
+	"set reminder": "REMINDER",
+	"list reminders": "REMINDER",
+	"list notes": "NOTES",
+	"create a note": "NOTES",
+	"latest news": "NEWSFEED",
+	"today's news": "NEWSFEED",
+	"recipe": "NUTRITION",
+}
 
 _SEAR_PREFIX = "sear:"
 
@@ -175,6 +197,17 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 		return "CHAT"
 	if any(phrase in t for phrase in _NEWSFEED_PHRASES):
 		return "NEWSFEED"
+	# Only inspect the same number of leading words as the known command. A
+	# ratio of .90 allows small typos while keeping near-miss conversations out.
+	leading_words = t.replace(":", " ").split()
+	for phrase, intent in _APPROXIMATE_PREFIX_INTENTS.items():
+		phrase_words = phrase.split()
+		if len(leading_words) < len(phrase_words):
+			continue
+		candidate = " ".join(leading_words[: len(phrase_words)])
+		if SequenceMatcher(None, candidate, phrase).ratio() >= 0.90 and candidate != phrase:
+			logger.debug(f"[intent] {intent} (approximate command prefix: '{candidate}')")
+			return intent
 	if any(phrase in t for phrase in _NOTE_PHRASES):
 		return "NOTES"
 	# Stock and valuation requests need fresh provider data. Keep this ahead of
