@@ -67,6 +67,17 @@ _FINANCE_PHRASES = (
 	"dividend",
 )
 
+_NOTE_PHRASES = (
+	"create a note",
+	"save a note",
+	"make a note",
+	"write a note",
+	"list my notes",
+	"show my notes",
+	"read my notes",
+	"delete my note",
+)
+
 # Explicit daily-news requests should always execute the NEWSFEED skill.  If
 # these are left to the conversational router, it may answer from model
 # knowledge and incorrectly present that answer as today's news.
@@ -170,10 +181,16 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 		phrase in t for phrase in ("stock photo", "stock image", "stock footage")
 	):
 		return "FINANCE_STOCKS"
+	if any(phrase in t for phrase in _NOTE_PHRASES):
+		return "NOTES"
 	# Reminder listing is unambiguous and must not fall through to NOTES just
 	# because it contains the generic word "list".
 	if "reminder" in t and any(
 		word in t for word in ("list", "show", "view", "see", "upcoming", "schedule")
+	):
+		return "REMINDER"
+	if "reminder" in t and any(
+		phrase in t for phrase in ("what reminders", "my reminders", "reminders do i have")
 	):
 		return "REMINDER"
 	if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
