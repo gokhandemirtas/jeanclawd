@@ -144,6 +144,13 @@ def _is_deep_research(query: str) -> bool:
 	return any(trigger in q for trigger in _DEEP_RESEARCH_TRIGGERS)
 
 
+def _topic_hint_for_search(query: str, topic_hint: str) -> str:
+	"""Preserve normal search locking; isolate only new deep-research topics."""
+	if not _is_deep_research(query):
+		return topic_hint
+	return topic_hint if _should_use_topic_hint(query, topic_hint) else ""
+
+
 def _is_shopping_request(query: str) -> bool:
 	q = query.lower()
 	return any(term in q for term in _SHOPPING_TERMS) and (
@@ -158,7 +165,7 @@ async def run_search(query: str) -> str:
 	topic_hint = get_current_topic() or ""
 	# A new explicit subject must not inherit the previous research topic. Only
 	# redirects and pronoun-only follow-ups are allowed to use that context.
-	hint = topic_hint if _should_use_topic_hint(query, topic_hint) else ""
+	hint = _topic_hint_for_search(query, topic_hint)
 	topic = topic_hint if hint and _SEARCH_REDIRECTS.fullmatch(query.strip()) else _extract_topic(query, hint)
 
 	if _is_deep_research(query) or _is_shopping_request(query):
