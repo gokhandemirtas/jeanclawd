@@ -28,9 +28,12 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from aiohttp import WSMsgType, web
+from dotenv import load_dotenv
 
 from tts.pipeline import process_voice_job, process_voice_ws
 from utils import logger
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Voice job queue
