@@ -109,6 +109,13 @@ async def handle_weather(query: str) -> str:
   logger.debug(f"Detected secondary intent, Location: {location}, period: {time_period}")
 
   if location == "unknown_location" or not location:
+    # Do not silently substitute a saved location when the user explicitly
+    # named a place. A weak structured-output model can return a plausible
+    # but unrelated location; answering for that place is worse than asking
+    # the user to clarify.
+    explicit_place = re.search(r"\b(?:in|for|near|around)\s+[a-z][a-z .'-]*", query, re.IGNORECASE)
+    if explicit_place:
+      return "I couldn't identify the location in that request. Which city or location should I check?"
     try:
       from utils.langmem_service import get_fact_value
       saved_location = await get_fact_value("location")
