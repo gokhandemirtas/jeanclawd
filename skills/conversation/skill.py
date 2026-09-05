@@ -771,18 +771,29 @@ async def handle_chat(
 	set_context_used(count_tokens(system) + count_tokens(query))
 	push_context_to_file()
 
-	result = await asyncio.to_thread(
-		generate_structured_output,
-		model_name=os.environ["MODEL_GENERALIST"],
-		user_prompt=query,
-		system_prompt=system,
-		pydantic_model=_ChatResponse,
-		max_tokens=512 if voice_mode else 1024,
-	)
-	final = _strip_think(result.answer)
-	if result.topic:
-		_current_topic = result.topic
-		logger.debug(f"[chat] topic='{_current_topic}'")
+	try:
+		result = await asyncio.to_thread(
+			generate_structured_output,
+			model_name=os.environ["MODEL_GENERALIST"],
+			user_prompt=query,
+			system_prompt=system,
+			pydantic_model=_ChatResponse,
+			max_tokens=512 if voice_mode else 1024,
+		)
+		final = _strip_think(result.answer)
+		if result.topic:
+			_current_topic = result.topic
+			logger.debug(f"[chat] topic='{_current_topic}'")
+	except Exception as exc:
+		# A local model can occasionally emit an empty or malformed JSON
+		# completion. Chat should remain usable even when topic extraction fails;
+		# retry the same prompt as ordinary text rather than returning HTTP 500.
+		logger.warning(f"[chat] Structured response failed ({exc}); retrying as plain text")
+		response = await _get_llm(
+			temperature=0.7,
+			max_tokens=512 if voice_mode else 1024,
+		).ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
+		final = _strip_think(response.content)
 
 	_history.append(HumanMessage(content=query))
 	_history.append(AIMessage(content=final))
