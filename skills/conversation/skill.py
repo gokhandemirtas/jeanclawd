@@ -293,6 +293,9 @@ async def resolve_query(user_input: str) -> str:
 	Returns the original query unchanged when no topic is active or the query
 	is clearly self-contained — so the happy path costs nothing.
 	"""
+	# Explicit skill prefixes are commands, not conversational follow-ups.
+	if user_input.strip().lower().startswith("sear:"):
+		return user_input
 	if not _current_topic or not _is_followup(user_input):
 		return user_input
 	llm = _get_llm(temperature=0.1, max_tokens=60)
@@ -553,6 +556,13 @@ async def handle_conversation(
 	global _current_topic
 
 	system_prompt = _data_prompt(handler_response)
+	if handler_response.startswith("SearXNG results for:"):
+		system_prompt += (
+			"\n\nThis is validated web evidence. For every factual claim, cite one or more "
+			"allowed source IDs exactly as [S1], [S2], etc. Cite ONLY sources whose "
+			"EvidenceStatus is 'page content fetched'. If the evidence is insufficient, "
+			"say that it could not be verified; do not use prior knowledge to fill gaps."
+		)
 	if voice_mode:
 		system_prompt += (
 			"\n\nRespond in a single short paragraph — spoken aloud, so no lists or markdown."

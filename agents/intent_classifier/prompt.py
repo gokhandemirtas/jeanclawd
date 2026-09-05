@@ -13,6 +13,7 @@ NUTRITION — the user wants recipe, nutrition, or food preparation information
 INFORMATION_QUERY — the user wants a quick factual answer (a person, place, definition, date, measurement)
 NOTES — the user explicitly wants to save, read, list, or delete a personal note
 SEARCH — the user wants to search or research a topic in depth. Triggers: "search", "look up", "find", "research", "deep dive", "tell me everything about", "what do you know about [broad topic]"
+SEAR — the user explicitly asks for the local SearXNG search service with a request beginning "sear:"
 SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, stop, skip, volume, list playlists, play a playlist, now playing, list devices)
 PLANNER — the user is explicitly asking the assistant to create a plan or itinerary on their behalf
 INTROSPECTION — the user is asking about this Assistant's implementation, architecture, routing, memory/storage, capabilities, or how it works internally. Answer from the application's introspection knowledge, not generic AI knowledge or web search.

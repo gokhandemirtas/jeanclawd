@@ -7,7 +7,6 @@ import uuid
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
 from threading import Lock
 from typing import Iterator
 
@@ -32,6 +31,8 @@ def emit(name: str, *, level: str = "INFO", **fields) -> None:
 	base.update(fields)
 	with _metrics_lock:
 		_counters[name] += 1
+	if name.startswith("skill_execution_") and base.get("skill"):
+		base["_display_name"] = f"{name} [{base['skill']}]"
 	logger.event(name, level=level, **base)
 
 

@@ -93,8 +93,9 @@ def error(msg: str) -> None:
 
 def event(name: str, *, level: str = "INFO", **fields) -> None:
 	"""Write a structured operational event without changing the console UX."""
+	display_name = fields.pop("_display_name", name)
 	_safe_fields = {key: value for key, value in fields.items() if value is not None}
-	_write(level, name, {"event": name, **_safe_fields})
+	_write(level, display_name, {"event": name, **_safe_fields})
 	if _debug_enabled and level != "DEBUG":
 		_console.print(f"[dim][{level}] event={escape(name)}[/dim]")
 

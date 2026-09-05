@@ -17,6 +17,7 @@ IntentLiteral = Literal[
 	"INFORMATION_QUERY",
 	"NOTES",
 	"SEARCH",
+	"SEAR",
 	"SPOTIFY",
 	"PLANNER",
 	"NUTRITION",
@@ -46,6 +47,8 @@ _SEARCH_PREFIXES = (
 	"where can i buy",
 	"where to buy",
 )
+
+_SEAR_PREFIX = "sear:"
 
 _FINANCE_PHRASES = (
 	"stock",
@@ -102,6 +105,23 @@ _CONVERSATIONAL_PATTERNS = (
 	"just testing your ability",
 )
 
+# References to something the Assistant just said are ordinary conversation,
+# including when the referenced answer came from a live-data skill. Keep these
+# deterministic so the intent model cannot mistake them for implementation
+# questions merely because they mention a claim, source, or answer.
+_PREVIOUS_ANSWER_PATTERNS = (
+	"you previously mentioned",
+	"you previously said",
+	"you mentioned earlier",
+	"you said earlier",
+	"you just mentioned",
+	"you just said",
+	"as you mentioned",
+	"as you said",
+	"what you mentioned",
+	"what you said",
+)
+
 _DATETIME_QUERIES = frozenset(
 	{
 		"todays date",
@@ -135,6 +155,11 @@ _DATETIME_QUERIES = frozenset(
 def _keyword_classify(text: str) -> IntentLiteral | None:
 	"""Fast pre-check for high-confidence intents that small models routinely miss."""
 	t = text.lower().strip().replace("\u2018", "'").replace("\u2019", "'")
+	# Explicit SearXNG requests take priority over conversational shortcuts.
+	if t.startswith(_SEAR_PREFIX) and t[len(_SEAR_PREFIX):].strip():
+		return "SEAR"
+	if any(pattern in t for pattern in _PREVIOUS_ANSWER_PATTERNS):
+		return "CHAT"
 	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
 		return "CHAT"
 	if any(phrase in t for phrase in _NEWSFEED_PHRASES):

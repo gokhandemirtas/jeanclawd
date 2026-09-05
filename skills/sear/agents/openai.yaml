@@ -1,0 +1,4 @@
+interface:
+  display_name: "SearXNG Search"
+  short_description: "Search via the local SearXNG instance"
+  default_prompt: "Use $sear to search the local SearXNG instance for a topic."

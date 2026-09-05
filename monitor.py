@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from rich.markup import escape
@@ -251,6 +252,7 @@ class MonitorApp(App):
 		self._counts: dict[str, int] = {lvl: 0 for lvl in ALL_LEVELS}
 		self._entries: list[dict] = []
 		self._event_entries: list[dict] = []
+		self._sear_mtime: int = -1
 
 	def compose(self) -> ComposeResult:
 		yield Header()
@@ -268,6 +270,8 @@ class MonitorApp(App):
 						yield RichLog(id="log-view", highlight=False, markup=True, wrap=True)
 					with TabPane("Events", id="tab-events"):
 						yield RichLog(id="event-view", highlight=False, markup=True, wrap=True)
+					with TabPane("SearXNG", id="tab-sear"):
+						yield RichLog(id="sear-view", highlight=False, markup=False, wrap=False)
 			with Vertical(id="resource-pane"):
 				yield Static(_resource_markup(), id="resources")
 		yield Footer()
@@ -282,13 +286,30 @@ class MonitorApp(App):
 	def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
 		"""Keep the shared filter available on both Logs and Events tabs."""
 		self.query_one("#stats").display = event.pane.id == "tab-logs"
+		if event.pane.id == "tab-sear":
+			self._refresh_sear_response()
 
 	def _poll_resources(self) -> None:
 		self.query_one("#resources", Static).update(_resource_markup())
 
+	def _refresh_sear_response(self) -> None:
+		path = Path(os.environ.get("SEARXNG_RAW_RESPONSE_PATH", "logs/searxng-latest.json"))
+		try:
+			mtime = path.stat().st_mtime_ns
+			if mtime == self._sear_mtime:
+				return
+			raw_response = path.read_text(encoding="utf-8")
+		except OSError:
+			return
+		self._sear_mtime = mtime
+		sear_view = self.query_one("#sear-view", RichLog)
+		sear_view.clear()
+		sear_view.write(raw_response)
+
 	# ------------------------------------------------------------------ polling
 
 	def _poll(self) -> None:
+		self._refresh_sear_response()
 		if not self._log_path.exists():
 			return
 		try:

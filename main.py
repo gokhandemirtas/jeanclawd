@@ -372,7 +372,14 @@ async def main(
 							else:
 								from agents.decomposer import decompose_request, extract_batch_request
 								batch_query = extract_batch_request(effective_query)
-								decomposition = await decompose_request(batch_query) if batch_query else None
+								# Explicit SearXNG commands must stay a single task. Do not let the
+								# general-purpose decomposer reinterpret or split the search request.
+								explicit_sear = effective_query.strip().lower().startswith("sear:")
+								decomposition = (
+									await decompose_request(batch_query)
+									if batch_query and not explicit_sear
+									else None
+								)
 								if decomposition is not None and decomposition.is_compound:
 									set_pending(decomposition.tasks)
 									lines = [f"I found {len(decomposition.tasks)} requests:"]

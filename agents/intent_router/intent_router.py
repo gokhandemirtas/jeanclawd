@@ -68,9 +68,50 @@ async def route(
 		"Finished research, please check the final document at:"
 	)
 	if skill.needs_wrapping and not document_response:
+		# Sear provenance is checked after synthesis. Streaming would expose an
+		# unvalidated draft before the fail-closed check can replace it.
+		conversation_on_token = None if intent == "SEAR" else on_token
 		final = await handle_conversation(
-			user_input, result, on_token=on_token, voice_mode=voice_mode
+			user_input, result, on_token=conversation_on_token, voice_mode=voice_mode
 		)
+		if intent == "SEAR":
+			valid_ids: set[str] = set()
+			current_id: str | None = None
+			for line in result.splitlines():
+				match = re.match(r"\[(S\d+)\]", line.strip())
+				if match:
+					current_id = match.group(1)
+				elif line.strip() == "EvidenceStatus: page content fetched" and current_id:
+					valid_ids.add(current_id)
+					current_id = None
+			cited_ids = set(re.findall(r"\[(S\d+)\]", final))
+			if not valid_ids or not cited_ids or not cited_ids.issubset(valid_ids):
+				final = "I couldn't produce a validated answer from readable SearXNG sources."
+				if valid_ids:
+					final += " The available source pages did not support a properly cited response."
+				else:
+					final += " No readable source pages were available."
+				cited_ids = set()
+			if not voice_mode and cited_ids:
+				# The synthesis model may summarize away provenance. Keep the exact
+				# URLs visible so the user can see which pages supplied the evidence.
+				sources: list[str] = []
+				current_url: str | None = None
+				current_source_id: str | None = None
+				for line in result.splitlines():
+					stripped = line.strip()
+					match = re.match(r"\[(S\d+)\]", stripped)
+					if match:
+						current_source_id = match.group(1)
+					if stripped.startswith("SourceURL:"):
+						current_url = stripped.removeprefix("SourceURL:").strip()
+					elif stripped == "EvidenceStatus: page content fetched" and current_url and current_source_id in cited_ids:
+						sources.append(current_url)
+						current_url = None
+				if sources:
+					final = final.rstrip() + "\n\nSources consulted:\n" + "\n".join(
+						f"- {url}" for url in sources
+					)
 	else:
 		append_to_history(user_input, result)
 		final = result

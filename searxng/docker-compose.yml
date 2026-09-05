@@ -1,0 +1,13 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: pydantic-aida-searxng
+    ports:
+      - "${SEARXNG_PORT:-8080}:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng_data:/var/cache/searxng
+    restart: unless-stopped
+
+volumes:
+  searxng_data:

@@ -53,6 +53,7 @@ TEST_CASES = [
 	("note: I will cook tiramisu for my friends", "NOTES"),
 	("jot down: buy milk", "NOTES"),
 	# SEARCH
+	("sear: marvel heroes between 1950 to now", "SEAR"),
 	("search hellraiser", "SEARCH"),
 	("look up Blade Runner", "SEARCH"),
 	("hellraiser", "SEARCH"),

@@ -12,6 +12,7 @@ from skills.spotify import spotify_skill
 from skills.transportation import transportation_skill
 from skills.nutrition import nutrition_skill
 from skills.weather import weather_skill
+from skills.sear import sear_skill
 from agents.search import search_skill
 from agents.planner import planner_skill
 from skills.vision import vision_skill
@@ -37,7 +38,8 @@ SKILLS: list[Skill] = [
     newsfeed_skill,
     transportation_skill,
     notes_skill,
-    search_skill,
+	search_skill,
+	sear_skill,
     spotify_skill,
     planner_skill,
 	vision_skill,

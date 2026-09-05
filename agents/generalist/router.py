@@ -20,6 +20,7 @@ or what is happening in the world. Do not answer these from memory.
 INFORMATION_QUERY — factual lookup requiring live or externally verified information: anything qualified as current, latest, today, now, present, serving, or incumbent; current people or offices; very recent events; obscure niche facts; specific URLs; local business info
 NOTES — create or retrieve personal notes
 SEARCH — user wants to search or research a topic. Triggers: "search for", "look up", "google", "research", "deep dive", "deep research", "tell me everything about", "find everything about", "comprehensive overview", "in depth", "in-depth", "full breakdown", "use the search skill", "use it" when referring to search
+SEAR — explicitly prefixed SearXNG search requests beginning with "sear:"; use the local SearXNG search service
 SPOTIFY — music playback control: play, pause, stop, resume, skip, next, previous, volume, now playing, queue, device management. Bare imperative words like "pause", "stop", "skip", "next", "resume" with no other context refer to media playback → SPOTIFY.
 PLANNER — build a multi-step plan or itinerary
 NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
