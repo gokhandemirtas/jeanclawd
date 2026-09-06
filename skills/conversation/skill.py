@@ -169,7 +169,10 @@ _PERSONAL_CONTEXT_QUERY = re.compile(
 # so the user's answer routes back correctly instead of being reclassified from scratch.
 _pending_intent: str | None = None
 _pending_intent_expires_at: float | None = None
-_PENDING_INTENT_TTL_SECONDS = max(5.0, float(os.getenv("PENDING_INTENT_TTL_SECONDS", "60")))
+_PENDING_INTENT_TTL_SECONDS = max(
+	5.0, float(os.getenv("PENDING_INTENT_TTL_SECONDS", "60"))
+)
+
 
 def set_pending_intent(intent: str) -> None:
 	global _pending_intent, _pending_intent_expires_at
@@ -184,7 +187,10 @@ def set_pending_intent(intent: str) -> None:
 def consume_pending_intent() -> str | None:
 	global _pending_intent, _pending_intent_expires_at
 	val = _pending_intent
-	if _pending_intent_expires_at is not None and time.monotonic() >= _pending_intent_expires_at:
+	if (
+		_pending_intent_expires_at is not None
+		and time.monotonic() >= _pending_intent_expires_at
+	):
 		val = None
 	_pending_intent = None
 	_pending_intent_expires_at = None
@@ -253,7 +259,8 @@ def _is_followup(text: str) -> bool:
 	# The item list and vendor constraints are the subject, even when it says
 	# "these parts" or "the following items".
 	if ("\n-" in text or "\n*" in text or "\n•" in text) and any(
-		word in text.lower() for word in ("link", "buy", "amazon", "ebay", "ali express", "aliexpress")
+		word in text.lower()
+		for word in ("link", "buy", "amazon", "ebay", "ali express", "aliexpress")
 	):
 		return False
 	# Demonstrative pronouns ("this dish", "that recipe") reference context when the
@@ -432,14 +439,14 @@ def _chat_prompt() -> str:
 # only for immediate follow-ups and conversational tone.
 MAX_HISTORY = max(8, int(os.getenv("MAX_HISTORY_MESSAGES", "12")))
 HISTORY_USER_MAX_CHARS = max(120, int(os.getenv("HISTORY_USER_MAX_CHARS", "400")))
-HISTORY_ASSISTANT_MAX_CHARS = max(180, int(os.getenv("HISTORY_ASSISTANT_MAX_CHARS", "600")))
+HISTORY_ASSISTANT_MAX_CHARS = max(
+	180, int(os.getenv("HISTORY_ASSISTANT_MAX_CHARS", "600"))
+)
 SUMMARY_MAX_CHARS = max(400, int(os.getenv("SUMMARY_MAX_CHARS", "1200")))
 CHAT_CONTEXT_MAX_TOKENS = max(400, int(os.getenv("CHAT_CONTEXT_MAX_TOKENS", "1400")))
 CHAT_PROMPT_MAX_TOKENS = max(1200, int(os.getenv("CHAT_PROMPT_MAX_TOKENS", "4000")))
 _history: deque = deque(maxlen=MAX_HISTORY)
-_rolling_summary: str | None = (
-	None  # bounded summary of messages evicted from _history
-)
+_rolling_summary: str | None = None  # bounded summary of messages evicted from _history
 
 
 def _compact_history_value(value: str, max_chars: int) -> str:
@@ -478,7 +485,11 @@ async def _compress_oldest() -> None:
 		lines.append(f"{role}: {msg.content}")
 	excerpt = "\n".join(lines)
 
-	existing = f"Previous summary:\n{_bounded_summary(_rolling_summary)}\n\n" if _rolling_summary else ""
+	existing = (
+		f"Previous summary:\n{_bounded_summary(_rolling_summary)}\n\n"
+		if _rolling_summary
+		else ""
+	)
 	prompt = (
 		f"{existing}Add the following exchanges to the summary. "
 		f"Write in first person as {active_name}. Be concise — capture topics, conclusions, and anything the user shared about themselves.\n\n"
@@ -498,12 +509,19 @@ async def _compress_oldest() -> None:
 	_history.clear()
 	_history.extend(messages[half:])
 	from utils.session_service import update_session_summary
+
 	await update_session_summary(_rolling_summary)
 
 
 def restore_session_context(summary: str | None, interactions: list) -> None:
 	"""Restore durable session context into the in-process conversation state."""
-	global _rolling_summary, _current_topic, _last_research_report_path, _pending_intent, _pending_intent_expires_at, _memory_turn
+	global \
+		_rolling_summary, \
+		_current_topic, \
+		_last_research_report_path, \
+		_pending_intent, \
+		_pending_intent_expires_at, \
+		_memory_turn
 	_rolling_summary = _bounded_summary(summary)
 	_current_topic = None
 	_last_research_report_path = None
@@ -523,9 +541,13 @@ async def maybe_compress_history() -> None:
 
 
 def append_to_history(user_msg: str, assistant_msg: str) -> None:
-	_history.append(HumanMessage(content=_compact_history_value(user_msg, HISTORY_USER_MAX_CHARS)))
 	_history.append(
-		AIMessage(content=_compact_history_value(assistant_msg, HISTORY_ASSISTANT_MAX_CHARS))
+		HumanMessage(content=_compact_history_value(user_msg, HISTORY_USER_MAX_CHARS))
+	)
+	_history.append(
+		AIMessage(
+			content=_compact_history_value(assistant_msg, HISTORY_ASSISTANT_MAX_CHARS)
+		)
 	)
 
 
@@ -544,6 +566,7 @@ async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	_current_topic = topic
 	_last_research_report_path = report_path
 	from utils.session_service import update_session_summary
+
 	await update_session_summary(_rolling_summary)
 
 
@@ -561,6 +584,13 @@ def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
 _RESEARCH_FOLLOWUP_MARKERS = re.compile(
 	r"\b(?:this|that|these|those|the above|the same|mentioned|"
 	r"associated|involved|according to|from the report)\b",
+	re.IGNORECASE,
+)
+
+_RESEARCH_ARCHIVE_MARKERS = re.compile(
+	r"\b(?:my research|previous research|earlier research|past research|"
+	r"research report|research reports|what did i research|"
+	r"across (?:the )?research|between (?:the )?research|compare .*research)\b",
 	re.IGNORECASE,
 )
 
@@ -585,7 +615,30 @@ def _research_followup_context(query: str) -> str:
 		return ""
 
 
-def _fit_context_to_budget(sections: list[str], max_tokens: int = CHAT_CONTEXT_MAX_TOKENS) -> str:
+async def _research_archive_context(query: str) -> str:
+	"""Retrieve durable research passages for archive and cross-report questions."""
+	if not _RESEARCH_ARCHIVE_MARKERS.search(query):
+		return ""
+	try:
+		from utils.research_rag import research_context
+
+		context = await research_context(query, limit=8)
+		if context:
+			return (
+				"## Retrieved passages from prior deep-research reports\n"
+				"Use these passages as the source of truth for the user's archived research. "
+				"They may come from multiple reports; preserve distinctions between reports. "
+				"Cite supported claims with the passage's source markers when present, and say "
+				"when the archived research does not establish an answer.\n\n" + context
+			)
+	except Exception:
+		logger.exception("[chat] Research archive retrieval failed")
+	return ""
+
+
+def _fit_context_to_budget(
+	sections: list[str], max_tokens: int = CHAT_CONTEXT_MAX_TOKENS
+) -> str:
 	"""Return one context block, dropping oldest detail when over budget."""
 	from utils.resource_monitor import count_tokens
 
@@ -619,7 +672,9 @@ def _chat_context_sections(research_context: str = "") -> list[str]:
 			+ "\nOnly state claims supported by these findings. If the answer is not present, say so."
 		)
 	if _rolling_summary:
-		sections.append("## Earlier conversation summary\n" + _bounded_summary(_rolling_summary))
+		sections.append(
+			"## Earlier conversation summary\n" + _bounded_summary(_rolling_summary)
+		)
 
 	messages = list(_history)
 	if messages:
@@ -761,8 +816,7 @@ async def _memory_context_for_query(query: str) -> str:
 		for fact in memories:
 			_recent_memory_turns[fact] = _memory_turn
 		return _bounded_memory_text(
-			"## USER MEMORIES — facts about the human user only:\n"
-			+ "\n".join(memories)
+			"## USER MEMORIES — facts about the human user only:\n" + "\n".join(memories)
 		)
 	except Exception:
 		logger.exception("[chat] Memory selection failed")
@@ -783,6 +837,9 @@ async def handle_chat(
 	_VOICE_CONSTRAINT = "\n\nYou are responding to a voice message. Reply in a single short paragraph — natural when spoken aloud, no lists or markdown."
 	memory_context = await _memory_context_for_query(query)
 	research_context = _research_followup_context(query)
+	archive_context = await _research_archive_context(query)
+	if archive_context:
+		research_context = f"{research_context}\n\n{archive_context}".strip()
 
 	# Streaming path — used by CLI and voice WebSocket
 	if on_token is not None:
@@ -798,7 +855,11 @@ async def handle_chat(
 			)
 		if memory_context:
 			logger.debug(f"[CHAT] Injecting memory context: {memory_context[:120]}")
-		from utils.resource_monitor import count_tokens, set_context_used, push_context_to_file
+		from utils.resource_monitor import (
+			count_tokens,
+			set_context_used,
+			push_context_to_file,
+		)
 
 		context_budget = min(
 			CHAT_CONTEXT_MAX_TOKENS,
@@ -859,7 +920,11 @@ async def handle_chat(
 		logger.debug(f"[CHAT] Injecting memory context: {memory_context[:120]}")
 		system = system + "\n\n" + memory_context
 
-	from utils.resource_monitor import count_tokens, set_context_used, push_context_to_file
+	from utils.resource_monitor import (
+		count_tokens,
+		set_context_used,
+		push_context_to_file,
+	)
 
 	# Summary and recent turns are assembled once, in a bounded block. Older
 	# factual details should come from durable memory rather than raw transcripts.

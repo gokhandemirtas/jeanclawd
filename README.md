@@ -22,6 +22,8 @@ Package name: `jeanclawd` (see `pyproject.toml`).
   a systems-thinking mentor, an improvisational storyteller, and Mr Meowsky the cat.
 - **Persistent memory** — completed turns are stored as `Interaction` documents and sent to
   LangMem, which maintains one compact structured user profile in MongoDB using the generalist model.
+- **Research archive RAG** — completed deep-research reports are chunked into MongoDB-backed
+  research documents and can be searched across reports for follow-up and comparison questions.
 - **Explicit settings** — persona, voice, Spotify device, and news length live in a small
   `UserSettings` document and are never mixed with learned user facts.
 - **Resumable sessions** — every turn belongs to a UUID-backed session that can be listed
@@ -223,6 +225,11 @@ CLI / REST / Telegram
 LangMem uses the configured `MODEL_GENERALIST` through the local OpenAI-compatible endpoint.
 It stores one structured profile per user in the MongoDB `LangMem` collection. The MongoDB
 store uses the configured local embedding model and MongoDB vector index for semantic retrieval.
+
+Completed deep-research reports are indexed separately in `ResearchDocuments` and
+`ResearchChunks`. The archive currently uses BM25 retrieval so it works with the local setup
+without requiring an embedding service. Questions mentioning prior research or comparing
+research reports retrieve passages from the archive and preserve the reports' source markers.
 ```
 
 The interfaces follow the same conceptual stages, while API and Telegram use the shared
