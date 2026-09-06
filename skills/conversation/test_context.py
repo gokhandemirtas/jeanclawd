@@ -26,6 +26,13 @@ class ConversationContextTests(unittest.TestCase):
         skill.restore_session_context("summary " * 1000, [])
         self.assertLessEqual(len(skill._rolling_summary or ""), skill.SUMMARY_MAX_CHARS)
 
+    def test_router_history_can_include_session_summary(self) -> None:
+        skill._rolling_summary = "Deep research completed on thrash metal."
+        self.assertEqual(
+            skill.get_recent_history(n=3, include_summary=True)[0],
+            ("Earlier session summary", "Deep research completed on thrash metal."),
+        )
+
     def test_context_stays_within_budget(self) -> None:
         skill._rolling_summary = "older " * 500
         for index in range(10):
@@ -49,6 +56,12 @@ class ConversationContextTests(unittest.TestCase):
             )
         self.assertIn("Burzum and Mayhem", context)
         self.assertNotIn("Private detail", context)
+
+    def test_possessive_contraction_is_recognized_as_followup(self) -> None:
+        """A common "it's" typo must still resolve to the active topic."""
+        self.assertTrue(
+            skill._is_followup("what are it's commonalities with black metal?")
+        )
 
 
 if __name__ == "__main__":

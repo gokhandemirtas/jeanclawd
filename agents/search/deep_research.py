@@ -191,7 +191,7 @@ async def _complete_research(
 
 	await compact_after_deep_research(topic, str(report_path))
 	return (
-		f"Finished research, please check the final document at: {report_path}",
+		f"Finished research, please check the final document at: deep-research/{report_path.name}",
 		references,
 	)
 

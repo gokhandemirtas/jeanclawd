@@ -32,7 +32,9 @@ async def run_intent_classifier(
 			classification_method = "pending"
 		else:
 			from agents.generalist.router import generalist_route
-			intent, confidence = await generalist_route(user_input, get_recent_history(n=3))
+			intent, confidence = await generalist_route(
+				user_input, get_recent_history(n=3, include_summary=True)
+			)
 			if confidence < 0.75 and intent != "CHAT":
 				intent = "CHAT"
 			classification_method = "generalist"

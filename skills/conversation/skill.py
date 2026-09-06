@@ -4,6 +4,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
+from pathlib import Path
 
 from utils.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -201,6 +202,7 @@ _PURE_PRONOUN_WORDS = frozenset(
 	{
 		"it",
 		"its",
+		"it's",  # Common spoken/transcribed typo for possessive "its"
 		"that",
 		"this",
 		"them",
@@ -277,8 +279,20 @@ def _is_followup(text: str) -> bool:
 	if any(phrase in lowered for phrase in _SKILL_REDIRECT_PHRASES):
 		return True
 	# Short queries with pronouns that reference the topic ("who made it",
-	# "what's its price"). Short imperative commands (no pronouns) are self-contained
+	# "what's its price"). Treat the common "it's" spelling as possessive in
+	# this context too; otherwise a follow-up such as "what are it's commonalities
+	# with black metal?" is incorrectly treated as a standalone question.
+	# Short imperative commands (no pronouns) are self-contained
 	# and must pass through unchanged.
+	if (
+		len(words) <= 12
+		and any(w in {"its", "it's"} for w in words)
+		and re.match(
+			r"^(?:what|who|where|when|why|how|which|can|could|tell|explain)\b",
+			lowered,
+		)
+	):
+		return True
 	if len(words) <= 3 and any(w in _PURE_PRONOUN_WORDS for w in words):
 		return True
 	# Only rewrite if the query is mostly pronouns with little other content
@@ -312,7 +326,7 @@ async def resolve_query(user_input: str) -> str:
 			SystemMessage(
 				content=(
 					"Expand the follow-up into a self-contained query using the topic.\n"
-					"- If the follow-up contains pronouns or demonstratives (it, its, this, these, those, them, that, they, there) that clearly refer back to the topic, replace them with the topic.\n"
+					"- If the follow-up contains pronouns or demonstratives (it, its, it's, this, these, those, them, that, they, there) that clearly refer back to the topic, replace them with the topic. Treat 'it's' as the common possessive typo for 'its' when it appears before a noun (for example, 'it's history' means 'its history').\n"
 					"- If the demonstrative describes a NEW subject being introduced (e.g. 'it's this AI that...'), leave it unchanged — the query is already self-contained.\n"
 					"- If the follow-up is a complete, self-contained imperative or command (e.g. 'lights on', 'play music', 'set a 5 min timer'), return it UNCHANGED — the topic does not apply.\n"
 					"- If the follow-up is short and clearly references the topic (e.g. 'find similar movies' + topic 'Bring Her Back' → 'find movies similar to Bring Her Back'), expand using the topic.\n"
@@ -554,9 +568,11 @@ def append_to_history(user_msg: str, assistant_msg: str) -> None:
 async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	"""Replace detailed research context with a durable pointer to its report."""
 	global _rolling_summary, _current_topic, _last_research_report_path
+	report_name = Path(report_path).name
 	previous = _rolling_summary.strip() if _rolling_summary else ""
 	research_note = (
-		f"Deep research completed on {topic}. The full findings and answer are saved at {report_path}. "
+		f"Deep research completed on {topic}. The full findings and answer are saved at "
+		f"deep-research/{report_name}. "
 		"Use that document if the user asks to revisit the detailed research."
 	)
 	_rolling_summary = _bounded_summary(
@@ -570,10 +586,14 @@ async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	await update_session_summary(_rolling_summary)
 
 
-def get_recent_history(n: int = 4) -> list[tuple[str, str]]:
-	"""Return the last n exchanges as (user, assistant) string pairs."""
+def get_recent_history(
+	n: int = 4, *, include_summary: bool = False
+) -> list[tuple[str, str]]:
+	"""Return recent exchanges, optionally prefixed with the session summary."""
 	messages = list(_history)
 	pairs = []
+	if include_summary and _rolling_summary:
+		pairs.append(("Earlier session summary", _bounded_summary(_rolling_summary)))
 	i = 0
 	while i + 1 < len(messages) and len(pairs) < n:
 		pairs.append((messages[i].content, messages[i + 1].content))
@@ -591,6 +611,17 @@ _RESEARCH_ARCHIVE_MARKERS = re.compile(
 	r"\b(?:my research|previous research|earlier research|past research|"
 	r"research report|research reports|what did i research|"
 	r"across (?:the )?research|between (?:the )?research|compare .*research)\b",
+	re.IGNORECASE,
+)
+
+_RESEARCH_SKIP_QUERIES = re.compile(
+	r"^(?:hi|hello|hey|thanks?|thank you|good morning|good evening|"
+	r"who are you|how are you|what can you do|okay|ok|yes|no)[!.?\s]*$",
+	re.IGNORECASE,
+)
+_KNOWLEDGE_QUERY_START = re.compile(
+	r"^(?:what|who|where|when|why|how|which|can you explain|tell me|"
+	r"describe|compare|give me|is there|are there)\b",
 	re.IGNORECASE,
 )
 
@@ -617,7 +648,16 @@ def _research_followup_context(query: str) -> str:
 
 async def _research_archive_context(query: str) -> str:
 	"""Retrieve durable research passages for archive and cross-report questions."""
-	if not _RESEARCH_ARCHIVE_MARKERS.search(query):
+	words = query.strip().split()
+	should_check = bool(
+		_RESEARCH_ARCHIVE_MARKERS.search(query)
+		or (
+			len(words) >= 3
+			and not _RESEARCH_SKIP_QUERIES.fullmatch(query.strip())
+			and ("?" in query or _KNOWLEDGE_QUERY_START.search(query.strip()))
+		)
+	)
+	if not should_check:
 		return ""
 	try:
 		from utils.research_rag import research_context
@@ -626,14 +666,26 @@ async def _research_archive_context(query: str) -> str:
 		if context:
 			return (
 				"## Retrieved passages from prior deep-research reports\n"
-				"Use these passages as the source of truth for the user's archived research. "
+				"Use these passages as the source of truth when they address the user's question. "
 				"They may come from multiple reports; preserve distinctions between reports. "
 				"Cite supported claims with the passage's source markers when present, and say "
-				"when the archived research does not establish an answer.\n\n" + context
+				"when the archived research does not establish an answer. Begin the answer with "
+				"'Based on my previous research,' and do not repeat that phrase elsewhere.\n\n"
+				+ context
 			)
 	except Exception:
 		logger.exception("[chat] Research archive retrieval failed")
 	return ""
+
+
+_RESEARCH_ATTRIBUTION = "Based on my previous research, "
+
+
+def _attribute_research_answer(answer: str, used_archive: bool) -> str:
+	"""Make archived-research provenance explicit when it was retrieved."""
+	if not used_archive or answer.casefold().startswith(_RESEARCH_ATTRIBUTION.casefold()):
+		return answer
+	return _RESEARCH_ATTRIBUTION + answer[:1].lower() + answer[1:]
 
 
 def _fit_context_to_budget(
@@ -876,6 +928,8 @@ async def handle_chat(
 		llm = _get_llm(temperature=0.3, max_tokens=512 if voice_mode else 1024)
 		messages = [SystemMessage(content=system), HumanMessage(content=user_prompt)]
 		full_text = ""
+		if archive_context:
+			on_token(_RESEARCH_ATTRIBUTION)
 		_filter = _ChannelFilter(on_token)
 		async for chunk in llm.astream(messages):
 			token = chunk.content
@@ -883,7 +937,7 @@ async def handle_chat(
 				full_text += token
 				_filter.push(token)
 		_filter.flush()
-		final = _strip_think(full_text)
+		final = _attribute_research_answer(_strip_think(full_text), bool(archive_context))
 		append_to_history(query, final)
 		await _safe_extract_topic(query, final)
 		return final
@@ -902,6 +956,7 @@ async def handle_chat(
 		conversation_context = "\n".join(context_lines)
 
 		final = await reason_and_act(query, conversation_context, persona=memory_context)
+		final = _attribute_research_answer(final, bool(archive_context))
 
 		await _safe_extract_topic(query, final)
 
@@ -949,7 +1004,9 @@ async def handle_chat(
 			pydantic_model=_ChatResponse,
 			max_tokens=512 if voice_mode else 1024,
 		)
-		final = _strip_think(result.answer)
+		final = _attribute_research_answer(
+			_strip_think(result.answer), bool(archive_context)
+		)
 		if result.topic:
 			_current_topic = result.topic
 			logger.debug(f"[chat] topic='{_current_topic}'")
@@ -962,7 +1019,9 @@ async def handle_chat(
 			temperature=0.7,
 			max_tokens=512 if voice_mode else 1024,
 		).ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
-		final = _strip_think(response.content)
+		final = _attribute_research_answer(
+			_strip_think(response.content), bool(archive_context)
+		)
 
 	append_to_history(query, final)
 	return final

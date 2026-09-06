@@ -1,6 +1,6 @@
 import unittest
 
-from utils.research_rag import _report_metadata, _split_chunks
+from utils.research_rag import _cosine_similarity, _report_metadata, _split_chunks
 
 
 class ResearchRagParsingTests(unittest.TestCase):
@@ -19,6 +19,10 @@ class ResearchRagParsingTests(unittest.TestCase):
 		self.assertGreater(len(chunks), 1)
 		self.assertTrue(all(section == "First" for section, _ in chunks))
 		self.assertTrue(all(len(content) <= 3500 for _, content in chunks))
+
+	def test_cosine_similarity_handles_matching_and_invalid_vectors(self) -> None:
+		self.assertAlmostEqual(_cosine_similarity([1.0, 0.0], [1.0, 0.0]), 1.0)
+		self.assertEqual(_cosine_similarity([1.0], [1.0, 0.0]), 0.0)
 
 
 if __name__ == "__main__":

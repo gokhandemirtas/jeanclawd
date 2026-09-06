@@ -147,6 +147,7 @@ class ResearchChunk(Document):
 	section: str
 	content: str
 	source_markers: list[str] = Field(default_factory=list)
+	embedding: list[float] | None = None
 
 	class Settings:
 		name = "ResearchChunks"

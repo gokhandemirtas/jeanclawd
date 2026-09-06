@@ -405,7 +405,10 @@ async def main(
 										intent = pending
 										confidence = 1.0
 									else:
-										intent, confidence = await generalist_route(effective_query, get_recent_history(n=3))
+										intent, confidence = await generalist_route(
+											effective_query,
+											get_recent_history(n=3, include_summary=True),
+										)
 										if confidence < 0.75 and intent != "CHAT":
 											logger.debug(f"[router] low confidence ({confidence:.2f}) for {intent}, falling back to CHAT")
 											intent = "CHAT"
@@ -431,7 +434,7 @@ async def main(
 
 				if streamed_visible:
 					print("\033[0m")  # reset color + newline
-				if not streamed_visible or "".join(streamed).strip() != response.strip():
+				else:
 					spinner.stop()  # ensure cleared before the logged fallback
 					logger.newline()
 					logger.info(response)

@@ -227,9 +227,9 @@ It stores one structured profile per user in the MongoDB `LangMem` collection. T
 store uses the configured local embedding model and MongoDB vector index for semantic retrieval.
 
 Completed deep-research reports are indexed separately in `ResearchDocuments` and
-`ResearchChunks`. The archive currently uses BM25 retrieval so it works with the local setup
-without requiring an embedding service. Questions mentioning prior research or comparing
-research reports retrieve passages from the archive and preserve the reports' source markers.
+`ResearchChunks`. The archive uses semantic embeddings plus BM25 rank fusion; BM25 remains
+the fallback if the local embedding endpoint is unavailable. Questions mentioning prior research
+or comparing research reports retrieve passages from the archive and preserve source markers.
 ```
 
 The interfaces follow the same conceptual stages, while API and Telegram use the shared

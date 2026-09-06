@@ -1,3 +1,4 @@
+import re
 import time
 from difflib import SequenceMatcher
 from typing import Literal
@@ -155,6 +156,15 @@ _PREVIOUS_ANSWER_PATTERNS = (
 	"what you said",
 )
 
+_RESEARCH_HISTORY_QUERY = re.compile(
+	r"\b(?:research|researched|researching)\b.*\b(?:earlier|before|previous|"
+	r"already|did\s+(?:i|you)|have\s+i)\b|"
+	r"\b(?:previous|earlier|past|our|the)\s+research\b|"
+	r"\b(?:we|you|i)\s+(?:did|conducted|completed|have\s+done|['’]ve\s+done)\s+"
+	r"research\b",
+	re.IGNORECASE,
+)
+
 _DATETIME_QUERIES = frozenset(
 	{
 		"todays date",
@@ -192,6 +202,10 @@ def _keyword_classify(text: str) -> IntentLiteral | None:
 	if t.startswith(_SEAR_PREFIX) and t[len(_SEAR_PREFIX):].strip():
 		return "SEAR"
 	if any(pattern in t for pattern in _PREVIOUS_ANSWER_PATTERNS):
+		return "CHAT"
+	# References to completed research are archive/history questions, not new
+	# research commands. This must run before the broad SEARCH prefix check.
+	if _RESEARCH_HISTORY_QUERY.search(t):
 		return "CHAT"
 	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
 		return "CHAT"
