@@ -1,10 +1,9 @@
 """LangMem integration for durable user memory.
 
 Conversation turns remain in MongoDB as interaction history. LangMem maintains
-per-turn free-form memory records in a ``LangMem`` collection, with vector
-search for semantic retrieval. The user's name is stored separately in a
-``profile`` namespace as a single structured document so it can be fetched
-instantly without a search.
+per-turn free-form memory records in a ``LangMem`` collection with vector
+search for semantic retrieval. The user's name is cached in a module-level
+dict after the first retrieval so greetings are instant on subsequent calls.
 """
 
 from __future__ import annotations
@@ -22,21 +21,15 @@ from utils.log import logger
 _STORE_CONTEXT = None
 _STORE = None
 _MANAGER = None
-_NAME_MANAGER = None
 _EMBEDDINGS = None
 _EXTRACTION_TASKS: set[asyncio.Task] = set()
+_NAME_CACHE: dict[str, str] = {}
 
 
 class Memory(BaseModel):
 	"""One durable fact about the user — stored as a separate document per fact."""
 
 	content: str = Field(description="A single explicit, durable fact about the user")
-
-
-class UserName(BaseModel):
-	"""Single structured document for instant name access — stored separately."""
-
-	name: str | None = Field(default=None, description="User's explicitly stated name")
 
 
 @dataclass(frozen=True)
@@ -51,12 +44,11 @@ _INSTRUCTIONS = """Record individual durable facts about the human User as separ
 Each memory must capture exactly ONE piece of explicitly stated information.
 Keep each memory concise — a short phrase or sentence.
 
-Record: location, occupation, relationships (family members, pets), interests,
-likes, dislikes, birth date, gender, and any other stable personal context
-the User explicitly provides.
+Record: name, location, occupation, relationships (family members, pets),
+interests, likes, dislikes, birth date, gender, and any other stable personal
+context the User explicitly provides.
 
 Do NOT record:
-- The user's name (stored separately)
 - Information about the Assistant or AI system
 - Greetings, questions, jokes, or temporary plans
 - One-time events or session-specific context
@@ -65,13 +57,6 @@ Do NOT record:
 Prefer the User's own wording. When the User corrects a fact, remove the old
 memory. Do not create a memory if the User has not explicitly shared durable
 personal information.
-"""
-
-_NAME_INSTRUCTIONS = """Maintain the user's name only.
-
-Record the name only when the User explicitly introduces themselves by name.
-Do not record nicknames, usernames, or names of other people.
-Do not infer the name from context. Never create a name from Assistant wording.
 """
 
 
@@ -170,24 +155,6 @@ def _manager():
 	return _MANAGER
 
 
-def _name_manager():
-	global _NAME_MANAGER
-	if _NAME_MANAGER is None:
-		from langmem import create_memory_store_manager
-
-		_NAME_MANAGER = create_memory_store_manager(
-			_model(),
-			schemas=[UserName],
-			instructions=_NAME_INSTRUCTIONS,
-			default_factory=lambda _config: UserName(),
-			enable_inserts=False,
-			enable_deletes=False,
-			namespace=("profile", "{langgraph_user_id}"),
-			store=_store(),
-		)
-	return _NAME_MANAGER
-
-
 def _config(user_id: str) -> dict[str, dict[str, str]]:
 	return {"configurable": {"langgraph_user_id": user_id}}
 
@@ -228,9 +195,7 @@ async def _extract_turn(
 				{"role": "user", "content": question},
 				{"role": "assistant", "content": answer},
 			]
-			cfg = _config(user_id)
-			await _manager().ainvoke({"messages": messages}, config=cfg)
-			await _name_manager().ainvoke({"messages": messages}, config=cfg)
+			await _manager().ainvoke({"messages": messages}, config=_config(user_id))
 		logger.debug(f"[langmem] processed interaction {interaction_id}")
 	except asyncio.CancelledError:
 		raise
@@ -250,7 +215,7 @@ def _track_task(task: asyncio.Task) -> None:
 
 async def close_memory_store() -> None:
 	"""Cancel background extraction and close the MongoDB store cleanly."""
-	global _STORE_CONTEXT, _STORE, _MANAGER, _NAME_MANAGER, _EMBEDDINGS
+	global _STORE_CONTEXT, _STORE, _MANAGER, _EMBEDDINGS
 
 	tasks = list(_EXTRACTION_TASKS)
 	for task in tasks:
@@ -269,8 +234,8 @@ async def close_memory_store() -> None:
 			_STORE_CONTEXT = None
 			_STORE = None
 			_MANAGER = None
-			_NAME_MANAGER = None
 			_EMBEDDINGS = None
+			_NAME_CACHE.clear()
 
 
 async def record_interaction(
@@ -311,17 +276,22 @@ async def record_interaction(
 	task.add_done_callback(_track_task)
 
 
+_NAME_RE = __import__("re").compile(
+	r"(?:name\s+is|name:|called|am)\s+([A-Z][a-zA-Z\-\']+(?:\s+[A-Z][a-zA-Z\-\']+)*)",
+	__import__("re").IGNORECASE,
+)
+
+
 async def get_user_name(user_id: str = "default") -> str | None:
-	"""Return the user's name directly from the profile namespace — no search needed."""
-	items = await _store().asearch(("profile", user_id), limit=1)
-	if not items:
-		return None
-	v = items[0].value
-	content = v.get("content") if isinstance(v, dict) else v
-	if isinstance(content, dict):
-		return content.get("name")
-	if isinstance(v, dict):
-		return v.get("name")
+	"""Return the user's name, cached after first search so greetings are instant."""
+	if user_id in _NAME_CACHE:
+		return _NAME_CACHE[user_id]
+	results = await search_relevant_memories("user name called", user_id=user_id, limit=3)
+	for fact in results:
+		m = _NAME_RE.search(fact)
+		if m:
+			_NAME_CACHE[user_id] = m.group(1).strip()
+			return _NAME_CACHE[user_id]
 	return None
 
 
@@ -358,17 +328,14 @@ async def get_fact_value(key: str, user_id: str = "default") -> str | None:
 
 
 async def get_profile_context(user_id: str = "default", limit: int = 50) -> str:
-	name = await get_user_name(user_id)
 	records = await list_memories(user_id=user_id, limit=limit)
-	if not name and not records:
+	if not records:
 		return ""
 	lines = [
 		"## USER PROFILE — facts about the human user only:",
 		"Perspective rule: every fact below belongs to the User, never to the Assistant.",
 		"Use these facts only when relevant. Do not volunteer them unprompted.",
 	]
-	if name:
-		lines.append(f"- User's name: {name}")
 	lines.extend(f"- {record.value}" for record in records)
 	return "\n".join(lines)
 
@@ -391,10 +358,8 @@ async def forget_memory(query_or_key: str, *, user_id: str = "default") -> bool:
 
 
 async def clear_memories(*, user_id: str = "default") -> int:
-	mem_items = await _store().asearch(("memories", user_id), limit=1000)
-	prof_items = await _store().asearch(("profile", user_id), limit=10)
-	for item in mem_items:
+	_NAME_CACHE.pop(user_id, None)
+	items = await _store().asearch(("memories", user_id), limit=1000)
+	for item in items:
 		await _store().adelete(tuple(item.namespace), item.key)
-	for item in prof_items:
-		await _store().adelete(tuple(item.namespace), item.key)
-	return len(mem_items) + len(prof_items)
+	return len(items)
