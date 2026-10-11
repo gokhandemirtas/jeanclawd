@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -306,16 +307,63 @@ async def list_memories(
 	return records[: max(0, limit)]
 
 
+_FIELD_SYNONYMS: dict[str, set[str]] = {
+	"location":      {"where", "from", "live", "based", "country", "city", "town",
+	                  "place", "origin", "live", "reside", "home"},
+	"name":          {"name", "call", "called", "who"},
+	"birth_date":    {"age", "born", "birthday", "birth", "old", "year", "dob"},
+	"gender":        {"gender", "sex", "pronoun", "pronouns", "male", "female"},
+	"occupation":    {"job", "work", "career", "do", "profession", "role", "developer",
+	                  "engineer", "programmer", "employ"},
+	"relationships": {"family", "pet", "cat", "dog", "wife", "husband", "partner",
+	                  "married", "children", "kids", "relative", "friend", "sookie"},
+	"interests":     {"hobby", "hobbies", "into", "enjoy", "music", "listen",
+	                  "watch", "research", "interest", "passionate"},
+	"dislikes":      {"hate", "dislike", "disliked", "avoid", "djent", "don", "music", "not"},
+	"likes":         {"like", "love", "enjoy", "favourite", "favorite", "prefer"},
+	"context":       {"background", "context", "know", "remember", "about", "info"},
+}
+
+
+def _fact_relevance(query_words: set[str], key: str, value: str) -> int:
+	"""Score one memory fact against query words. Higher = more relevant."""
+	score = 0
+	key_words  = set(re.findall(r"\w+", key.lower()))
+	value_words = set(re.findall(r"\w+", value.lower()))
+	# Direct overlap with field name or value content
+	score += len(query_words & key_words)  * 3
+	score += len(query_words & value_words) * 2
+	# Synonym / concept overlap with the field category
+	synonyms = _FIELD_SYNONYMS.get(key, set())
+	score += len(query_words & synonyms) * 4
+	return score
+
+
 async def search_relevant_memories(
 	query: str, user_id: str = "default", limit: int = 5
 ) -> list[str]:
-	"""Recall profile content using the MongoDB vector index."""
-	items = await _store().asearch(("memories", user_id), query=query, limit=limit)
-	results: list[str] = []
-	for item in items:
-		for key, value in _profile_lines(_profile_from_value(item.value)):
-			results.append(f"{key}: {value}")
-	return results[: max(0, limit)]
+	"""Return the most query-relevant profile facts using local keyword scoring.
+
+	LangMem stores the entire profile as one document, so vector search always
+	returns the same document and _profile_lines() would produce facts in a
+	fixed field order (name, birth_date, …) regardless of what was asked.
+	Local keyword + synonym scoring is faster, deterministic, and actually
+	returns the facts most relevant to the query.
+	"""
+	item = await _profile_item(user_id)
+	if item is None:
+		return []
+	all_facts = _profile_lines(_profile_from_value(item.value))
+	if not all_facts:
+		return []
+
+	query_words = set(re.findall(r"\w+", query.lower()))
+	scored = sorted(
+		((_fact_relevance(query_words, k, v), f"{k}: {v}") for k, v in all_facts),
+		key=lambda x: -x[0],
+	)
+	# Always include at least the top-scored fact; drop zero-score ties last.
+	return [fact for _, fact in scored[:max(1, limit)]]
 
 
 async def get_fact_value(key: str, user_id: str = "default") -> str | None:

@@ -147,8 +147,8 @@ _last_research_report_path: str | None = None
 
 # Durable memories are deliberately treated as occasional supporting context,
 # not as a second personality layer. These can be tuned without code changes.
-_MEMORY_MAX_ITEMS = max(1, int(os.getenv("MEMORY_MAX_ITEMS", "2")))
-_MEMORY_MAX_CHARS = max(100, int(os.getenv("MEMORY_MAX_CHARS", "500")))
+_MEMORY_MAX_ITEMS = max(1, int(os.getenv("MEMORY_MAX_ITEMS", "4")))
+_MEMORY_MAX_CHARS = max(100, int(os.getenv("MEMORY_MAX_CHARS", "800")))
 _MEMORY_COOLDOWN_TURNS = max(0, int(os.getenv("MEMORY_COOLDOWN_TURNS", "4")))
 _memory_turn = 0
 _recent_memory_turns: dict[str, int] = {}
