@@ -53,10 +53,17 @@ Do NOT record:
 - Greetings, questions, jokes, or temporary plans
 - One-time events or session-specific context
 - Sensitive inferences (health conditions, politics, religion, sexuality)
+- Any fact that is unknown, unspecified, or not mentioned — never create a
+  memory whose value is "not specified", "unknown", "not mentioned", or any
+  equivalent placeholder. If the User did not state a value, create nothing.
+- A fact that is already captured by an existing memory with the same meaning.
+  Before inserting, check whether an equivalent fact already exists and skip
+  the insert if it does. Duplicates waste space and degrade retrieval quality.
 
-Prefer the User's own wording. When the User corrects a fact, remove the old
-memory. Do not create a memory if the User has not explicitly shared durable
-personal information.
+Prefer the User's own wording. When the User explicitly corrects a fact,
+remove the old memory and insert the corrected one.
+Do not create a memory if the User has not explicitly shared durable personal
+information in this conversation turn.
 """
 
 
