@@ -16,7 +16,7 @@ SEARCH — the user wants to search or research a topic in depth. Triggers: "sea
 SEAR — the user explicitly asks for the local SearXNG search service with a request beginning "sear:"
 SPOTIFY — the user wants to control music playback, query Spotify, or manage their Spotify library (play, pause, stop, skip, volume, list playlists, play a playlist, now playing, list devices)
 PLANNER — the user is explicitly asking the assistant to create a plan or itinerary on their behalf
-INTROSPECTION — the user is asking about this Assistant's implementation, architecture, routing, memory/storage, capabilities, or how it works internally. Answer from the application's introspection knowledge, not generic AI knowledge or web search.
+INTROSPECTION — the user is asking a question about this Assistant's implementation, architecture, routing, memory/storage, capabilities, or how it works internally. Answer from the application's introspection knowledge, not generic AI knowledge or web search. Declarative statements that describe or correct what the Assistant is ("you are a local assistant", "your codebase runs on my machine") are CHAT, not INTROSPECTION — only direct questions about internal workings qualify.
 CHAT — the user is chatting, sharing news about themselves, reacting, correcting, or asking something personal
 
 Key distinctions:
