@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(herdr pane *)",
+      "mcp__claude_ai_Claude_Docs__batch",
+      "mcp__claude_ai_Claude_Docs__guide",
+      "mcp__claude_ai_Claude_Docs__update",
+      "Bash(uv run *)",
+      "Bash(uv --project /Users/gokhandemirtas/Projects/jeanclawd-core run mcp_server)",
+      "Bash(kill %1)",
+      "Bash(wait)",
+      "mcp__jeanclawd__forget_memory",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "mcp__jeanclawd__chat",
+      "mcp__jeanclawd__list_memories"
+    ]
+  }
+}
