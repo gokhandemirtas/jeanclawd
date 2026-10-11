@@ -66,7 +66,13 @@ async def resume_session(session_id: str | UUID, *, user_id: str = "default") ->
 		)
 	else:
 		_last_conversation_gap_seconds = None
-	await _activate(parsed, summary=session.summary, interactions=interactions)
+	await _activate(
+		parsed,
+		summary=session.summary,
+		interactions=interactions,
+		current_topic=session.current_topic,
+		last_research_report=session.last_research_report,
+	)
 	session.status = "active"
 	session.last_active_at = datetime.now()
 	await session.save()
@@ -96,6 +102,22 @@ async def close_session(session_id: str | UUID | None = None) -> None:
 	if session:
 		session.status = "closed"
 		session.last_active_at = datetime.now()
+		await session.save()
+
+
+async def update_session_topic(
+	topic: str | None = None, *, report_path: str | None = None
+) -> None:
+	if _active_session_id is None:
+		return
+	from db.schemas import Session
+
+	session = await Session.find_one(Session.session_id == _active_session_id)
+	if session:
+		if topic is not None:
+			session.current_topic = topic
+		if report_path is not None:
+			session.last_research_report = report_path
 		await session.save()
 
 
@@ -160,9 +182,21 @@ async def maybe_generate_session_title(user_message: str, assistant_message: str
 		return
 
 
-async def _activate(session_id: UUID, *, summary: str | None, interactions: list) -> None:
+async def _activate(
+	session_id: UUID,
+	*,
+	summary: str | None,
+	interactions: list,
+	current_topic: str | None = None,
+	last_research_report: str | None = None,
+) -> None:
 	global _active_session_id
 	_active_session_id = session_id
 	from skills.conversation.skill import restore_session_context
 
-	restore_session_context(summary, interactions)
+	restore_session_context(
+		summary,
+		interactions,
+		current_topic=current_topic,
+		last_research_report=last_research_report,
+	)

@@ -72,6 +72,8 @@ class Session(Document):
 	user_id: str = "default"
 	title: str | None = None
 	summary: str | None = None
+	current_topic: str | None = None
+	last_research_report: str | None = None
 	created_at: datetime
 	last_active_at: datetime
 	status: Literal["active", "closed"] = "active"
