@@ -33,6 +33,15 @@ class ConversationContextTests(unittest.TestCase):
             ("Earlier session summary", "Deep research completed on thrash metal."),
         )
 
+    def test_recent_history_returns_newest_exchanges(self) -> None:
+        for index in range(4):
+            skill.append_to_history(f"question {index}", f"answer {index}")
+
+        self.assertEqual(
+            skill.get_recent_history(n=2),
+            [("question 2", "answer 2"), ("question 3", "answer 3")],
+        )
+
     def test_context_stays_within_budget(self) -> None:
         skill._rolling_summary = "older " * 500
         for index in range(10):

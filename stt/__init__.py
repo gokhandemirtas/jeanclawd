@@ -7,6 +7,7 @@ _provider: STTProvider | None = None
 _BACKEND_LABELS: dict[str, str] = {
     "whisper": "OpenAI Whisper",
     "mlx": "MLX Whisper",
+    "remote": "Remote Whisper",
 }
 
 
@@ -25,8 +26,11 @@ def get_stt_provider() -> STTProvider:
         elif backend == "mlx":
             from stt.mlx_provider import MLXWhisperProvider
             _provider = MLXWhisperProvider()
+        elif backend == "remote":
+            from stt.remote_provider import RemoteSTTProvider
+            _provider = RemoteSTTProvider()
         else:
             raise ValueError(
-                f"Unknown STT_PROVIDER: {backend!r}. Choose 'whisper' or 'mlx'."
+                f"Unknown STT_PROVIDER: {backend!r}. Choose 'whisper', 'mlx', or 'remote'."
             )
     return _provider

@@ -135,6 +135,8 @@ async def _safe_extract_topic(query: str, answer: str) -> None:
 		)
 		_current_topic = result.topic or None
 		logger.debug(f"[chat] topic='{_current_topic}'")
+		from utils.session_service import update_session_topic
+		asyncio.ensure_future(update_session_topic(_current_topic))
 	except Exception as e:
 		logger.warning(f"[chat] topic extraction failed ({e}), keeping previous topic")
 
@@ -145,8 +147,8 @@ _last_research_report_path: str | None = None
 
 # Durable memories are deliberately treated as occasional supporting context,
 # not as a second personality layer. These can be tuned without code changes.
-_MEMORY_MAX_ITEMS = max(1, int(os.getenv("MEMORY_MAX_ITEMS", "2")))
-_MEMORY_MAX_CHARS = max(100, int(os.getenv("MEMORY_MAX_CHARS", "500")))
+_MEMORY_MAX_ITEMS = max(1, int(os.getenv("MEMORY_MAX_ITEMS", "4")))
+_MEMORY_MAX_CHARS = max(100, int(os.getenv("MEMORY_MAX_CHARS", "800")))
 _MEMORY_COOLDOWN_TURNS = max(0, int(os.getenv("MEMORY_COOLDOWN_TURNS", "4")))
 _memory_turn = 0
 _recent_memory_turns: dict[str, int] = {}
@@ -156,7 +158,14 @@ _EXPLICIT_MEMORY_QUERY = re.compile(
 	r"what(?:'s| is| are)\s+my\s+(?:profile|information|name|location|occupation|"
 	r"interests?|likes?|dislikes?|preferences?|relationships?|"
 	r"birth(?:day|date)|date\s+of\s+birth|age)|"
-	r"remember\s+(?:me|about\s+me)|my\s+profile)\b",
+	r"remember\s+(?:me|about\s+me)|my\s+profile|"
+	# Location / origin questions — always need the full profile so the
+	# semantic search's top-2 cap cannot silently omit the location field.
+	r"where\s+(?:am|are)\s+i\s+(?:from|based|living|located)|"
+	r"where\s+do\s+i\s+(?:live|come\s+from)|"
+	r"where\s+i(?:'m| am)\s+from|"
+	# "do you know" + any personal detail is an explicit profile probe.
+	r"do\s+you\s+know\s+(?:my|where|who|what|when|how\s+old))\b",
 	re.IGNORECASE,
 )
 _PERSONAL_CONTEXT_QUERY = re.compile(
@@ -520,14 +529,25 @@ async def _compress_oldest() -> None:
 		]
 	)
 	_rolling_summary = _bounded_summary(_strip_think(response.content))
+	# Preserve any messages appended to _history during the LLM await. Use
+	# object identity so newly added messages survive even if they share content
+	# with compressed ones.
+	compressed_ids = {id(m) for m in to_compress}
+	surviving = [m for m in _history if id(m) not in compressed_ids]
 	_history.clear()
-	_history.extend(messages[half:])
+	_history.extend(surviving)
 	from utils.session_service import update_session_summary
 
 	await update_session_summary(_rolling_summary)
 
 
-def restore_session_context(summary: str | None, interactions: list) -> None:
+def restore_session_context(
+	summary: str | None,
+	interactions: list,
+	*,
+	current_topic: str | None = None,
+	last_research_report: str | None = None,
+) -> None:
 	"""Restore durable session context into the in-process conversation state."""
 	global \
 		_rolling_summary, \
@@ -537,8 +557,8 @@ def restore_session_context(summary: str | None, interactions: list) -> None:
 		_pending_intent_expires_at, \
 		_memory_turn
 	_rolling_summary = _bounded_summary(summary)
-	_current_topic = None
-	_last_research_report_path = None
+	_current_topic = current_topic
+	_last_research_report_path = last_research_report
 	_pending_intent = None
 	_pending_intent_expires_at = None
 	_memory_turn = 0
@@ -581,9 +601,10 @@ async def compact_after_deep_research(topic: str, report_path: str) -> None:
 	_history.clear()
 	_current_topic = topic
 	_last_research_report_path = report_path
-	from utils.session_service import update_session_summary
+	from utils.session_service import update_session_summary, update_session_topic
 
 	await update_session_summary(_rolling_summary)
+	await update_session_topic(topic, report_path=report_path)
 
 
 def get_recent_history(
@@ -591,13 +612,17 @@ def get_recent_history(
 ) -> list[tuple[str, str]]:
 	"""Return recent exchanges, optionally prefixed with the session summary."""
 	messages = list(_history)
+	# _history is oldest-to-newest. Use the newest exchanges so recent skill
+	# data remains available to the router; older turns are summarized on
+	# compaction and must not hide the latest fetched result.
+	message_pairs = [
+		(messages[i].content, messages[i + 1].content)
+		for i in range(0, len(messages) - 1, 2)
+	]
 	pairs = []
 	if include_summary and _rolling_summary:
 		pairs.append(("Earlier session summary", _bounded_summary(_rolling_summary)))
-	i = 0
-	while i + 1 < len(messages) and len(pairs) < n:
-		pairs.append((messages[i].content, messages[i + 1].content))
-		i += 2
+	pairs.extend(message_pairs[-n:])
 	return pairs
 
 
@@ -889,9 +914,16 @@ async def handle_chat(
 	_VOICE_CONSTRAINT = "\n\nYou are responding to a voice message. Reply in a single short paragraph — natural when spoken aloud, no lists or markdown."
 	memory_context = await _memory_context_for_query(query)
 	research_context = _research_followup_context(query)
-	archive_context = await _research_archive_context(query)
-	if archive_context:
-		research_context = f"{research_context}\n\n{archive_context}".strip()
+	# Only run archive RAG when the latest-report context is not already loaded.
+	# If the latest report is loaded, its final answer is already in research_context
+	# and a RAG search would likely return overlapping chunks from the same report,
+	# wasting token budget and potentially crowding out distinct archive evidence.
+	if research_context:
+		archive_context = ""
+	else:
+		archive_context = await _research_archive_context(query)
+		if archive_context:
+			research_context = archive_context
 
 	# Streaming path — used by CLI and voice WebSocket
 	if on_token is not None:
@@ -1010,6 +1042,8 @@ async def handle_chat(
 		if result.topic:
 			_current_topic = result.topic
 			logger.debug(f"[chat] topic='{_current_topic}'")
+			from utils.session_service import update_session_topic
+			asyncio.ensure_future(update_session_topic(_current_topic))
 	except Exception as exc:
 		# A local model can occasionally emit an empty or malformed JSON
 		# completion. Chat should remain usable even when topic extraction fails;
@@ -1022,6 +1056,9 @@ async def handle_chat(
 		final = _attribute_research_answer(
 			_strip_think(response.content), bool(archive_context)
 		)
+		# Structured output failed so result.topic was never set. Extract the
+		# topic asynchronously so follow-up queries can still resolve correctly.
+		asyncio.ensure_future(_safe_extract_topic(query, final))
 
 	append_to_history(query, final)
 	return final
@@ -1036,10 +1073,10 @@ async def generate_greeting() -> str:
 	Falls back to a generic greeting on any failure.
 	"""
 	try:
-		from utils.langmem_service import get_fact_value
+		from utils.langmem_service import get_user_name
 		from utils.session_service import get_last_conversation_gap_seconds
 
-		user_name = await get_fact_value("name")
+		user_name = await get_user_name()
 		gap_seconds = get_last_conversation_gap_seconds()
 
 		name_instruction = (

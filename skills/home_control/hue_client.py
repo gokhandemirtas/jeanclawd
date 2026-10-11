@@ -64,7 +64,7 @@ class HueBridgeClient:
     config = HueConfiguration(
       lights=lights_list,
       groups=groups_list,
-      lastUpdated=datetime.now().date(),
+      last_updated=datetime.now().date(),
     )
     await config.insert()
     logger.debug(f"Synced {len(lights_list)} lights and {len(groups_list)} groups")
@@ -83,7 +83,7 @@ class HueBridgeClient:
 
       config_doc = await HueConfiguration.find_one()
       if config_doc:
-        age = datetime.now().date() - config_doc.lastUpdated
+        age = datetime.now().date() - config_doc.last_updated
         if age < timedelta(weeks=1):
           logger.debug(f"Using cached Hue configuration ({age.days} days old)")
           return config_doc
@@ -133,8 +133,8 @@ class HueBridgeClient:
       return f"{group.name} lights are {'on' if group.is_on else 'off'}"
     else:
       lights = await asyncio.to_thread(self._instance.get_lights)
-      on_lights = [l.name for l in lights if l.is_on]
-      off_lights = [l.name for l in lights if not l.is_on]
+      on_lights = [light.name for light in lights if light.is_on]
+      off_lights = [light.name for light in lights if not light.is_on]
       parts = []
       if on_lights:
         parts.append(f"On: {', '.join(on_lights)}")

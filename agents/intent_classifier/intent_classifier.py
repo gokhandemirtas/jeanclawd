@@ -1,6 +1,4 @@
-import re
 import time
-from difflib import SequenceMatcher
 from typing import Literal
 
 from pydantic import BaseModel
@@ -50,207 +48,34 @@ _SEARCH_PREFIXES = (
 	"where to buy",
 )
 
-# Fuzzy matching is intentionally limited to explicit command-like prefixes.
-# It catches high-confidence typos such as "deep resarch" without attempting
-# to spell-correct arbitrary conversational content.
-_APPROXIMATE_PREFIX_INTENTS: dict[str, IntentLiteral] = {
-	"deep research": "SEARCH",
-	"deep dive": "SEARCH",
-	"research": "SEARCH",
-	"search": "SEARCH",
-	"look up": "SEARCH",
-	"weather": "WEATHER",
-	"stock price": "FINANCE_STOCKS",
-	"share price": "FINANCE_STOCKS",
-	"set reminder": "REMINDER",
-	"list reminders": "REMINDER",
-	"list notes": "NOTES",
-	"create a note": "NOTES",
-	"latest news": "NEWSFEED",
-	"today's news": "NEWSFEED",
-	"recipe": "NUTRITION",
-}
-
 _SEAR_PREFIX = "sear:"
 
-_FINANCE_PHRASES = (
-	"stock",
-	"share price",
-	"share prices",
-	"market cap",
-	"market capitalization",
-	"valuation",
-	"ticker",
-	"stock price",
-	"stock quote",
-	"share price",
-	"trading at",
-	"p/e",
-	"pe ratio",
-	"dividend",
-)
+def _explicit_command_classify(text: str) -> IntentLiteral | None:
+	"""Classify only commands whose syntax unambiguously selects a skill.
 
-_NOTE_PHRASES = (
-	"create a note",
-	"save a note",
-	"make a note",
-	"write a note",
-	"list my notes",
-	"show my notes",
-	"read my notes",
-	"delete my note",
-)
-
-# Explicit daily-news requests should always execute the NEWSFEED skill.  If
-# these are left to the conversational router, it may answer from model
-# knowledge and incorrectly present that answer as today's news.
-_NEWSFEED_PHRASES = (
-	"news today",
-	"today's news",
-	"todays news",
-	"latest news",
-	"current news",
-	"news headlines",
-	"today's headlines",
-	"todays headlines",
-	"headlines today",
-	"world news",
-	"global news",
-	"what's happening in the world",
-	"whats happening in the world",
-	"what is happening in the world",
-	"what's happening around the world",
-	"whats happening around the world",
-	"what is happening around the world",
-	"global developments",
-)
-
-# These are session/conversation-management requests, not web searches. Keep
-# them deterministic because a small routing model may interpret "where were
-# we" literally as a grammar/search query.
-_CONVERSATIONAL_PATTERNS = (
-	"where were we",
-	"where did we leave off",
-	"what were we discussing",
-	"what did we discuss",
-	"what were we talking about",
-	"do you remember what we",
-	"i was just testing",
-	"just testing your ability",
-)
-
-# References to something the Assistant just said are ordinary conversation,
-# including when the referenced answer came from a live-data skill. Keep these
-# deterministic so the intent model cannot mistake them for implementation
-# questions merely because they mention a claim, source, or answer.
-_PREVIOUS_ANSWER_PATTERNS = (
-	"you previously mentioned",
-	"you previously said",
-	"you mentioned earlier",
-	"you said earlier",
-	"you just mentioned",
-	"you just said",
-	"as you mentioned",
-	"as you said",
-	"what you mentioned",
-	"what you said",
-)
-
-_RESEARCH_HISTORY_QUERY = re.compile(
-	r"\b(?:research|researched|researching)\b.*\b(?:earlier|before|previous|"
-	r"already|did\s+(?:i|you)|have\s+i)\b|"
-	r"\b(?:previous|earlier|past|our|the)\s+research\b|"
-	r"\b(?:we|you|i)\s+(?:did|conducted|completed|have\s+done|['’]ve\s+done)\s+"
-	r"research\b",
-	re.IGNORECASE,
-)
-
-_DATETIME_QUERIES = frozenset(
-	{
-		"todays date",
-		"what is todays date",
-		"whats todays date",
-		"what is the date",
-		"whats the date",
-		"what is the date today",
-		"whats the date today",
-		"current date",
-		"date today",
-		"what time is it",
-		"whats the time",
-		"what is the time",
-		"what is the time now",
-		"current time",
-		"time now",
-		"what day is it",
-		"whats today",
-		"what is today",
-		"current day",
-		"what day is today",
-		"what day",
-		"what day of the week",
-		"what day of the week is it",
-		"what is the day today",
-		"whats the day today",
-	}
-)
-
-def _keyword_classify(text: str) -> IntentLiteral | None:
-	"""Fast pre-check for high-confidence intents that small models routinely miss."""
+	Natural-language mentions are deliberately left to the context-aware router.
+	For example, ``tell me about the research we did`` is not a search command;
+	``research heavy metal`` is because the command prefix is anchored at the
+	start of the utterance.
+	"""
 	t = text.lower().strip().replace("\u2018", "'").replace("\u2019", "'")
 	# Explicit SearXNG requests take priority over conversational shortcuts.
 	if t.startswith(_SEAR_PREFIX) and t[len(_SEAR_PREFIX):].strip():
 		return "SEAR"
-	if any(pattern in t for pattern in _PREVIOUS_ANSWER_PATTERNS):
-		return "CHAT"
-	# References to completed research are archive/history questions, not new
-	# research commands. This must run before the broad SEARCH prefix check.
-	if _RESEARCH_HISTORY_QUERY.search(t):
-		return "CHAT"
-	if any(pattern in t for pattern in _CONVERSATIONAL_PATTERNS):
-		return "CHAT"
-	if any(phrase in t for phrase in _NEWSFEED_PHRASES):
-		return "NEWSFEED"
-	# Only inspect the same number of leading words as the known command. A
-	# ratio of .90 allows small typos while keeping near-miss conversations out.
-	leading_words = t.replace(":", " ").split()
-	for phrase, intent in _APPROXIMATE_PREFIX_INTENTS.items():
-		phrase_words = phrase.split()
-		if len(leading_words) < len(phrase_words):
-			continue
-		candidate = " ".join(leading_words[: len(phrase_words)])
-		if SequenceMatcher(None, candidate, phrase).ratio() >= 0.90 and candidate != phrase:
-			logger.debug(f"[intent] {intent} (approximate command prefix: '{candidate}')")
-			return intent
-	if any(phrase in t for phrase in _NOTE_PHRASES):
-		return "NOTES"
-	# Stock and valuation requests need fresh provider data. Keep this ahead of
-	# the model so a short query such as "Microsoft stock" cannot become CHAT.
-	if any(phrase in t for phrase in _FINANCE_PHRASES) and not any(
-		phrase in t for phrase in ("stock photo", "stock image", "stock footage")
-	):
-		return "FINANCE_STOCKS"
-	# Reminder listing is unambiguous and must not fall through to NOTES just
-	# because it contains the generic word "list".
-	if "reminder" in t and any(
-		word in t for word in ("list", "show", "view", "see", "upcoming", "schedule")
-	):
-		return "REMINDER"
-	if "reminder" in t and any(
-		phrase in t for phrase in ("what reminders", "my reminders", "reminders do i have")
-	):
-		return "REMINDER"
-	if any(t.startswith(p) or p in t for p in _SEARCH_PREFIXES):
-		return "SEARCH"
-	# Shopping requests must never be answered from the chat model's memory.
-	if any(vendor in t for vendor in ("amazon", "ebay", "ali express", "aliexpress")) and any(
-		word in t for word in ("link", "buy", "price", "product", "seller", "find", "search")
+	if any(
+		t == prefix.rstrip()
+		or t.startswith(prefix)
+		or t.startswith(prefix.rstrip() + ":")
+		or t.startswith(prefix.rstrip() + " ")
+		for prefix in _SEARCH_PREFIXES
 	):
 		return "SEARCH"
-	t_norm = t.replace("'", "").replace("\u2019", "")
-	if t_norm in _DATETIME_QUERIES:
-		return "INFORMATION_QUERY"
 	return None
+
+
+# Compatibility name for callers outside the main routing path. New routing
+# code should use the explicit-command name to make the boundary obvious.
+_keyword_classify = _explicit_command_classify
 
 
 def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral:
@@ -264,7 +89,7 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 	"""
 	from providers import get_provider
 
-	shortcut = _keyword_classify(user_input)
+	shortcut = _explicit_command_classify(user_input)
 	if shortcut:
 		logger.debug(f"[intent] {shortcut} (keyword match)")
 		return shortcut
@@ -276,8 +101,6 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 		{"role": "system", "content": INTENT_PROMPT},
 		{"role": "user", "content": content},
 	]
-	import time
-
 	try:
 		t = time.time()
 		response = get_intent_provider().complete(messages, IntentResponse)
@@ -291,7 +114,7 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 		return response.intent
 
 
-def test():
+if __name__ == "__main__":
 	logger.info("Start")
 	start = time.time()
 	user_input = input("Ask me anything: ")

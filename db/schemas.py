@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 from beanie import Document
@@ -30,7 +30,7 @@ class Weather(Document):
 
 
 class Credentials(Document):
-	hueUsername: str
+	hue_username: str
 
 
 class ServiceCredentials(Document):
@@ -43,7 +43,7 @@ class ServiceCredentials(Document):
 class HueConfiguration(Document):
 	groups: list[HueLightGroup]
 	lights: list[HueLight]
-	lastUpdated: date
+	last_updated: date
 
 
 class Newsfeed(Document):
@@ -70,8 +70,10 @@ class Session(Document):
 
 	session_id: UUID
 	user_id: str = "default"
-	title: Optional[str] = None
-	summary: Optional[str] = None
+	title: str | None = None
+	summary: str | None = None
+	current_topic: str | None = None
+	last_research_report: str | None = None
 	created_at: datetime
 	last_active_at: datetime
 	status: Literal["active", "closed"] = "active"
@@ -88,7 +90,7 @@ class Interaction(Document):
 	created_at: datetime = Field(default_factory=datetime.now)
 	user_message: str
 	assistant_message: str
-	intent: Optional[str] = None
+	intent: str | None = None
 
 	class Settings:
 		name = "Interactions"
@@ -98,7 +100,7 @@ class Note(Document):
 	created_at: datetime
 	title: str  # plain text
 	content: str  # markdown
-	category: Optional[NoteCategory] = None
+	category: NoteCategory | None = None
 
 	class Settings:
 		name = "Notes"
@@ -110,7 +112,7 @@ class UserSettings(Document):
 	user_id: str = "default"
 	agent_persona: str = "jean"
 	agent_voice_id: str = "thomas"
-	fav_spotify_device: Optional[str] = None
+	fav_spotify_device: str | None = None
 	news_length: Literal["short", "medium", "long"] = "medium"
 
 	class Settings:

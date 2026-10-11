@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import re
 from collections.abc import Callable
@@ -24,10 +25,10 @@ def _lock_offered_intent(intent: IntentLiteral, response: str) -> None:
 	if intent != "CHAT" or not _OFFER_MARKERS.search(response):
 		return
 
-	from agents.intent_classifier.intent_classifier import _keyword_classify
+	from agents.intent_classifier.intent_classifier import _explicit_command_classify
 	from skills.conversation.skill import set_pending_intent
 
-	offered_intent = _keyword_classify(response)
+	offered_intent = _explicit_command_classify(response)
 	if offered_intent in {"NEWSFEED", "WEATHER", "FINANCE_STOCKS", "SEARCH"}:
 		set_pending_intent(offered_intent)
 
@@ -56,12 +57,10 @@ async def route(
 	if "voice_mode" in sig.parameters:
 		kwargs["voice_mode"] = voice_mode
 	with span("skill_execution", skill=intent):
-		try:
-			result = skill.handle(user_input, **kwargs)
-		except TypeError:
-			result = skill.handle(user_input)
-	if inspect.isawaitable(result):
-		result = await result
+		if inspect.iscoroutinefunction(skill.handle):
+			result = await skill.handle(user_input, **kwargs)
+		else:
+			result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
 	# Deep research already produces a user-facing document path. Wrapping it in
 	# another LLM call can alter or omit that path, so preserve it verbatim.
 	document_response = isinstance(result, str) and result.startswith(

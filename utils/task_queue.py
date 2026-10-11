@@ -44,7 +44,7 @@ async def worker() -> None:
             with span("queue_task", task=name, depth=q.qsize()):
                 await coro
         except asyncio.CancelledError:
-            pass
+            raise
         except Exception:
             logger.exception(f"[queue] Task '{name}' failed")
         finally:

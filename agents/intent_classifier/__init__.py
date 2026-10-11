@@ -1,6 +1,9 @@
 from collections.abc import Callable
 
-from agents.intent_classifier.intent_classifier import _keyword_classify, classify as classify
+from agents.intent_classifier.intent_classifier import (
+	_explicit_command_classify,
+	classify as classify,
+)
 from agents.intent_router.intent_router import route
 from utils.log import logger
 
@@ -17,7 +20,7 @@ async def run_intent_classifier(
 	async with foreground_inference():
 		from skills.conversation.skill import consume_pending_intent, get_recent_history, resolve_query
 		user_input = await resolve_query(user_input)
-		shortcut = _keyword_classify(user_input)
+		shortcut = _explicit_command_classify(user_input)
 		pending = consume_pending_intent()
 		if shortcut:
 			if pending:

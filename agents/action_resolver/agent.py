@@ -14,6 +14,7 @@ so the happy path (plain queries) costs nothing.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 
 from pydantic import BaseModel, Field
@@ -45,8 +46,6 @@ async def resolve_action_query(user_input: str) -> str:
 
     Returns user_input unchanged if no resolution is needed or possible.
     """
-    import os
-
     from utils.langmem_service import search_relevant_memories
     from utils.llm_structured_output import generate_structured_output
 

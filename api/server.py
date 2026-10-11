@@ -46,8 +46,6 @@ _voice_jobs: dict[str, dict] = {}  # job_id → {status, result}
 
 def _decode_image(value: str) -> bytes:
 	"""Decode a base64 image or a data URL supplied by an API client."""
-	import base64
-
 	if "," in value and value.startswith("data:"):
 		value = value.split(",", 1)[1]
 	return base64.b64decode(value, validate=True)

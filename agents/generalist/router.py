@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from pydantic import BaseModel
 
@@ -24,22 +25,27 @@ SEAR — explicitly prefixed SearXNG search requests beginning with "sear:"; use
 SPOTIFY — music playback control: play, pause, stop, resume, skip, next, previous, volume, now playing, queue, device management. Bare imperative words like "pause", "stop", "skip", "next", "resume" with no other context refer to media playback → SPOTIFY.
 PLANNER — build a multi-step plan or itinerary
 NUTRITION — any mention of recipe, calories, nutrition, ingredients, how to cook/make a dish, what to make with certain ingredients. Use this even if the model could answer from knowledge — the skill fetches structured recipe/nutrition data.
-INTROSPECTION — questions about this Assistant's implementation, architecture, routing, skills, memory/storage, persistence, capabilities, or how it works internally. Use the application's persisted introspection evidence; do not use web search or generic AI knowledge.
+INTROSPECTION — direct questions asking how this Assistant's implementation, architecture, routing, skills, memory/storage, persistence, or capabilities work internally. Use persisted introspection evidence; do not use web search or generic AI knowledge. Declarative statements that describe or correct what the Assistant is ("you are a local assistant", "your codebase runs on my machine", "you were built by me") are CHAT, not INTROSPECTION.
 CHAT — everything else: general knowledge, history, explanations, science, comparisons, opinions, follow-ups on anything already in the conversation
 
 Critical rules — apply in order, stop at first match:
 1. Short agreements, continuations, or confirmations ("yes", "no", "ok", "sure", "yes all", "sounds good", "go ahead", "tell me more", "please", "exactly") → always CHAT.
 2. If the answer can be derived from ACTUAL SKILL DATA in the conversation history (e.g. a previous weather response, stock price, song title) → CHAT. Never re-fetch. CHAT RESPONSES DO NOT COUNT as skill data — they are conversational only and CANNOT represent executed actions. If the previous turn was CHAT, the new query is a fresh request, not a follow-up to executed data.
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
+   Questions asking for an opinion, explanation, or reaction to a headline or story
+   already present in the history are also CHAT. For example, after a NEWSFEED turn,
+   "what do you think about the Anthropic researchers' findings?" discusses that
+   fetched story; it is not a request to fetch news again. The words "researcher"
+   or "researchers" in a headline do not constitute a research command.
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
 6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
-6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
+6b. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
 7. Reactions, opinions, follow-ups on something just said → CHAT. EXCEPTION: a follow-up that contains an explicit imperative action command (verb + object, e.g. "turn them off", "skip it", "stop that") is NOT a reaction — it's a new action and must be routed to the relevant domain intent.
 7a. Declarative feedback, agreement, explanation, or meta-commentary about the assistant's previous answer → CHAT. This includes statements about reliability, sources, limitations, accuracy, or what the assistant can/cannot do. Do not route such commentary to INFORMATION_QUERY or SEARCH merely because it mentions online sources, facts, or retrieval.
 7b. Questions about the user's own identity, name, remembered profile, or relationship with the Assistant (for example, "remember me?", "what's my name?", or "what do you know about me?") → CHAT. These are conversational memory questions, not NOTES, INFORMATION_QUERY, or SEARCH, unless the user explicitly asks to save or retrieve a note.
 7c. Use the meaning of the whole utterance and its conversational context to resolve perspective. Personal-memory and rapport questions about the relationship (for example, "what did I tell you yesterday?", "do you remember me?", or "how do you know my name?") → CHAT. Questions about the source or confidence of a personal fact previously stated are also CHAT. Pronouns such as "you", "your", "me", "us", and "our" are relationship cues, not keyword triggers.
-7d. Questions about this application's internals — how requests are routed, how skills work, where conversations are stored, how sessions or memory are persisted, or what the codebase can do — → INTROSPECTION. This is for implementation questions about the Assistant, not generic questions about AI agents. Use INTROSPECTION even when the question is phrased conversationally (for example, "how do you decide whether to search?" or "where do our conversations live?"). Ordinary questions about what the user previously said remain CHAT.
+7d. Questions about this application's internals — how requests are routed, how skills work, where conversations are stored, how sessions or memory are persisted, or what the codebase can do — → INTROSPECTION. This is for implementation questions about the Assistant, not generic questions about AI agents. Use INTROSPECTION even when the question is phrased conversationally (for example, "how do you decide whether to search?" or "where do our conversations live?"). Ordinary questions about what the user previously said remain CHAT. Declarative corrections or descriptions of the assistant ("you are X", "your codebase does Y", "you were built by me") are CHAT even if they mention implementation keywords — INTROSPECTION requires an interrogative asking for information.
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
 9. A temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" means the answer may have changed since training. Route it to the appropriate live-data intent, usually INFORMATION_QUERY or SEARCH. Never route such a question to CHAT merely because the underlying subject is general knowledge.
 	For broad current-events requests ("what's happening in the world", "today's news", "latest headlines"), the appropriate intent is NEWSFEED.
@@ -115,9 +121,17 @@ def _route_sync(
 	query: str, history: list[tuple[str, str]]
 ) -> tuple[IntentLiteral, float]:
 	lines = []
-	for user_msg, assistant_msg in history[-3:]:
+	# The caller may provide one bounded session-summary entry followed by the
+	# newest exchanges. Preserve that summary while limiting transcript detail.
+	bounded_history = (
+		history[:1] + history[1:][-3:]
+		if history and history[0][0] == "Earlier session summary"
+		else history[-3:]
+	)
+	for user_msg, assistant_msg in bounded_history:
 		lines.append(f"User: {user_msg}")
-		lines.append(f"Assistant: {assistant_msg[:200]}")
+		# Keep enough of a fetched headline for the model to resolve a follow-up.
+		lines.append(f"Assistant: {assistant_msg[:600]}")
 	context = "\n".join(lines)
 	content = f"{context}\n\nUser: {query}" if context else query
 
@@ -141,10 +155,9 @@ async def generalist_route(
 	correctly handle conversational shifts, negations, and follow-ups.
 	Falls back to CHAT on any routing failure so the conversation never hard-crashes.
 	"""
-	import time
-	from agents.intent_classifier.intent_classifier import _keyword_classify
+	from agents.intent_classifier.intent_classifier import _explicit_command_classify
 
-	shortcut = _keyword_classify(query)
+	shortcut = _explicit_command_classify(query)
 	if shortcut:
 		logger.debug(f"[router] {shortcut} (keyword match)")
 		return shortcut, 1.0
