@@ -101,8 +101,6 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 		{"role": "system", "content": INTENT_PROMPT},
 		{"role": "user", "content": content},
 	]
-	import time
-
 	try:
 		t = time.time()
 		response = get_intent_provider().complete(messages, IntentResponse)
@@ -116,7 +114,7 @@ def classify(user_input: str, current_topic: str | None = None) -> IntentLiteral
 		return response.intent
 
 
-def test():
+if __name__ == "__main__":
 	logger.info("Start")
 	start = time.time()
 	user_input = input("Ask me anything: ")

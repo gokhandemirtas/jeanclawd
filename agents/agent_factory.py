@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from typing import Optional
 
 import lmstudio as lms
 import requests
@@ -55,7 +54,7 @@ class _LMStudioLLM:
 			},
 		)
 
-	def bind(self, max_tokens: Optional[int] = None) -> "_LMStudioLLM":
+	def bind(self, max_tokens: int | None = None) -> "_LMStudioLLM":
 		return _LMStudioLLM(
 			model_name=self._model_name,
 			temperature=self._temperature,
@@ -114,7 +113,13 @@ class _LMStudioAgent:
 
 def _to_openai_messages(messages: list) -> list[dict]:
 	role_map = {HumanMessage: "user", AIMessage: "assistant", SystemMessage: "system"}
-	return [{"role": role_map.get(type(m), "user"), "content": m.content} for m in messages]
+	result = []
+	for m in messages:
+		role = role_map.get(type(m))
+		if role is None:
+			raise TypeError(f"Unknown message type: {type(m).__name__}")
+		result.append({"role": role, "content": m.content})
+	return result
 
 
 class _OpenAICompatibleLLM:
@@ -136,7 +141,7 @@ class _OpenAICompatibleLLM:
 			"Content-Type": "application/json",
 		}
 
-	def bind(self, max_tokens: Optional[int] = None) -> "_OpenAICompatibleLLM":
+	def bind(self, max_tokens: int | None = None) -> "_OpenAICompatibleLLM":
 		return _OpenAICompatibleLLM(
 			model_name=self._model_name,
 			temperature=self._temperature,
@@ -201,7 +206,7 @@ class _OpenAICompatibleLLM:
 						content = json.loads(line)["choices"][0]["delta"].get("content")
 						if content:
 							loop.call_soon_threadsafe(queue.put_nowait, content)
-					except Exception:
+					except (json.JSONDecodeError, KeyError, IndexError):
 						pass
 				loop.call_soon_threadsafe(queue.put_nowait, None)
 
@@ -236,7 +241,7 @@ class _OpenAILLM:
 		from openai import AsyncOpenAI
 		return AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-	def bind(self, max_tokens: Optional[int] = None) -> "_OpenAILLM":
+	def bind(self, max_tokens: int | None = None) -> "_OpenAILLM":
 		return _OpenAILLM(
 			model_name=self._model_name,
 			temperature=self._temperature,
@@ -272,7 +277,7 @@ class _OpenAILLM:
 
 
 def create_llm(
-	model_name: Optional[str] = None,
+	model_name: str | None = None,
 	temperature: float = 0.7,
 	max_tokens: int = 1024,
 	top_p: float = 0.9,
@@ -308,6 +313,6 @@ def create_llm(
 	)
 
 
-def create_llm_agent(model_name: Optional[str] = None) -> _LMStudioAgent:
+def create_llm_agent(model_name: str | None = None) -> _LMStudioAgent:
 	name = model_name or os.environ.get("MODEL_GENERALIST", "")
 	return _LMStudioAgent(name)

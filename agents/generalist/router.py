@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from pydantic import BaseModel
 
@@ -39,7 +40,7 @@ Critical rules — apply in order, stop at first match:
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
 6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
-6. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
+6b. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
 7. Reactions, opinions, follow-ups on something just said → CHAT. EXCEPTION: a follow-up that contains an explicit imperative action command (verb + object, e.g. "turn them off", "skip it", "stop that") is NOT a reaction — it's a new action and must be routed to the relevant domain intent.
 7a. Declarative feedback, agreement, explanation, or meta-commentary about the assistant's previous answer → CHAT. This includes statements about reliability, sources, limitations, accuracy, or what the assistant can/cannot do. Do not route such commentary to INFORMATION_QUERY or SEARCH merely because it mentions online sources, facts, or retrieval.
 7b. Questions about the user's own identity, name, remembered profile, or relationship with the Assistant (for example, "remember me?", "what's my name?", or "what do you know about me?") → CHAT. These are conversational memory questions, not NOTES, INFORMATION_QUERY, or SEARCH, unless the user explicitly asks to save or retrieve a note.
@@ -154,7 +155,6 @@ async def generalist_route(
 	correctly handle conversational shifts, negations, and follow-ups.
 	Falls back to CHAT on any routing failure so the conversation never hard-crashes.
 	"""
-	import time
 	from agents.intent_classifier.intent_classifier import _explicit_command_classify
 
 	shortcut = _explicit_command_classify(query)

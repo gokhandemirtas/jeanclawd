@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import re
 from collections.abc import Callable
@@ -56,12 +57,10 @@ async def route(
 	if "voice_mode" in sig.parameters:
 		kwargs["voice_mode"] = voice_mode
 	with span("skill_execution", skill=intent):
-		try:
-			result = skill.handle(user_input, **kwargs)
-		except TypeError:
-			result = skill.handle(user_input)
-	if inspect.isawaitable(result):
-		result = await result
+		if inspect.iscoroutinefunction(skill.handle):
+			result = await skill.handle(user_input, **kwargs)
+		else:
+			result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
 	# Deep research already produces a user-facing document path. Wrapping it in
 	# another LLM call can alter or omit that path, so preserve it verbatim.
 	document_response = isinstance(result, str) and result.startswith(
