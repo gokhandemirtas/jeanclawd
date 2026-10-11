@@ -48,6 +48,10 @@ dependencies = [
     "langmem>=0.0.30",
     "supertonic>=1.3.1",
     "mcp>=1.26.0",
+    "deepeval>=2.5.5",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "langchain>=1.3.14",
 ]
 
 [project.scripts]
@@ -55,6 +59,14 @@ mcp_server = "mcp_server:main"
 
 [project.optional-dependencies]
 llamacpp = ["llama-cpp-python>=0.3.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests", "agents", "skills", "utils"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+markers = ["eval: integration eval tests (require live inference + DB)"]
 
 [tool.ruff]
 indent-width = 2
