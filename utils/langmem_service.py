@@ -27,6 +27,12 @@ _EMBEDDINGS = None
 _EXTRACTION_TASKS: set[asyncio.Task] = set()
 
 
+class Memory(BaseModel):
+	"""One durable fact about the user — stored as a separate document per fact."""
+
+	content: str = Field(description="A single explicit, durable fact about the user")
+
+
 class UserName(BaseModel):
 	"""Single structured document for instant name access — stored separately."""
 
@@ -154,6 +160,7 @@ def _manager():
 
 		_MANAGER = create_memory_store_manager(
 			_model(),
+			schemas=[Memory],
 			instructions=_INSTRUCTIONS,
 			enable_inserts=True,
 			enable_deletes=True,
@@ -212,10 +219,8 @@ async def _extract_turn(
 				{"role": "assistant", "content": answer},
 			]
 			cfg = _config(user_id)
-			await asyncio.gather(
-				_manager().ainvoke({"messages": messages}, config=cfg),
-				_name_manager().ainvoke({"messages": messages}, config=cfg),
-			)
+			await _manager().ainvoke({"messages": messages}, config=cfg)
+			await _name_manager().ainvoke({"messages": messages}, config=cfg)
 		logger.debug(f"[langmem] processed interaction {interaction_id}")
 	except asyncio.CancelledError:
 		raise
