@@ -158,7 +158,14 @@ _EXPLICIT_MEMORY_QUERY = re.compile(
 	r"what(?:'s| is| are)\s+my\s+(?:profile|information|name|location|occupation|"
 	r"interests?|likes?|dislikes?|preferences?|relationships?|"
 	r"birth(?:day|date)|date\s+of\s+birth|age)|"
-	r"remember\s+(?:me|about\s+me)|my\s+profile)\b",
+	r"remember\s+(?:me|about\s+me)|my\s+profile|"
+	# Location / origin questions — always need the full profile so the
+	# semantic search's top-2 cap cannot silently omit the location field.
+	r"where\s+(?:am|are)\s+i\s+(?:from|based|living|located)|"
+	r"where\s+do\s+i\s+(?:live|come\s+from)|"
+	r"where\s+i(?:'m| am)\s+from|"
+	# "do you know" + any personal detail is an explicit profile probe.
+	r"do\s+you\s+know\s+(?:my|where|who|what|when|how\s+old))\b",
 	re.IGNORECASE,
 )
 _PERSONAL_CONTEXT_QUERY = re.compile(
