@@ -193,13 +193,22 @@ def _config(user_id: str) -> dict[str, dict[str, str]]:
 
 
 def _item_content(value: Any) -> str:
-	"""Extract the text string from a LangGraph store item value."""
+	"""Extract the text string from a LangGraph store item value.
+
+	LangMem wraps Pydantic model dumps under a "content" key, so
+	Memory(content="fact") arrives as {"content": {"content": "fact"}}.
+	"""
 	if isinstance(value, dict):
 		c = value.get("content")
 		if isinstance(c, str):
 			return c.strip()
 		if isinstance(c, dict):
-			return ""  # old structured profile document — skip
+			# LangMem wrapping: {"content": {"content": "fact"}}
+			nested = c.get("content")
+			if isinstance(nested, str):
+				return nested.strip()
+			# Old UserMemory structured profile — no usable text
+			return ""
 		if isinstance(value.get("text"), str):
 			return value["text"].strip()
 	if isinstance(value, str):
@@ -213,6 +222,7 @@ async def _extract_turn(
 	try:
 		async with background_inference() as acquired:
 			if not acquired:
+				logger.debug(f"[langmem] skipped extraction (foreground busy) for {interaction_id}")
 				return
 			messages = [
 				{"role": "user", "content": question},
