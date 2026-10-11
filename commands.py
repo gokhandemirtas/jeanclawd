@@ -102,42 +102,48 @@ async def cmd_ctx() -> None:
 
 
 async def cmd_memories(args: str) -> None:
-	"""List or search canonical user memories.
+	"""List or search stored user memories.
 
 	Usage:
 	  /memories           — list all stored memories
-	  /memories <query>   — search stored LangMem profile fields
+	  /memories <query>   — filter memories by keyword
 	"""
 	try:
-		from utils.langmem_service import list_memories
+		from utils.langmem_service import get_user_name, list_memories
 
 		query = args.strip()
+		name = await get_user_name()
 		results = await list_memories(query)
-		if not results:
+		if not name and not results:
 			logger.info(f"No memories found{f' for {query!r}' if query else ''}.")
 			return
-		lines = "\n".join(
-			f"  {item.key:14}  {item.value} [{'/'.join(item.namespace)}]"
-			for item in results
+		lines = []
+		if name and not query:
+			lines.append(f"  [name]  {name}")
+		lines.extend(
+			f"  [{i + 1:2}]  {item.value}  (key: {item.key[:8]})"
+			for i, item in enumerate(results)
 		)
-		logger.info(f"{len(results)} stored memory field(s):\n{lines}")
+		label = "memory" if len(results) + bool(name and not query) == 1 else "memories"
+		count = len(results) + (1 if name and not query else 0)
+		logger.info(f"{count} stored {label}:\n" + "\n".join(lines))
 	except Exception as e:
 		logger.error(f"memories failed: {e}")
 
 
 async def cmd_forget(args: str) -> None:
-	"""Clear one LangMem profile field."""
+	"""Delete memories matching a keyword or exact store key."""
 	try:
 		from utils.langmem_service import forget_memory
 
-		field = args.strip()
-		if not field:
-			logger.info("Usage: /forget-memory <name|location|likes|dislikes|interests|relationships|context>")
+		query = args.strip()
+		if not query:
+			logger.info("Usage: /forget-memory <keyword or store key>")
 			return
-		if await forget_memory(field):
-			logger.info(f"Cleared memory field: {field}")
+		if await forget_memory(query):
+			logger.info(f"Deleted memory/memories matching: {query!r}")
 		else:
-			logger.info(f"Unknown or empty memory field: {field}")
+			logger.info(f"No memories found matching: {query!r}")
 	except Exception as e:
 		logger.error(f"forget failed: {e}")
 

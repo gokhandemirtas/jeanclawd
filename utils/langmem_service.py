@@ -1,16 +1,16 @@
-"""LangMem integration for durable user profile memory.
+"""LangMem integration for durable user memory.
 
 Conversation turns remain in MongoDB as interaction history. LangMem maintains
-one compact structured profile per user in a separate ``LangMem`` collection.
-The MongoDB store uses the configured local embedding model for semantic
-retrieval.
+per-turn free-form memory records in a ``LangMem`` collection, with vector
+search for semantic retrieval. The user's name is stored separately in a
+``profile`` namespace as a single structured document so it can be fetched
+instantly without a search.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,23 +22,15 @@ from utils.log import logger
 _STORE_CONTEXT = None
 _STORE = None
 _MANAGER = None
+_NAME_MANAGER = None
 _EMBEDDINGS = None
 _EXTRACTION_TASKS: set[asyncio.Task] = set()
 
 
-class UserMemory(BaseModel):
-	"""The single compact memory record LangMem maintains for each user."""
+class UserName(BaseModel):
+	"""Single structured document for instant name access — stored separately."""
 
 	name: str | None = Field(default=None, description="User's explicitly stated name")
-	birth_date: str | None = Field(default=None, description="User's explicitly stated birth date")
-	gender: str | None = Field(default=None, description="User's explicitly stated gender")
-	location: str | None = Field(default=None, description="Where the user explicitly says they live")
-	occupation: str | None = Field(default=None, description="User's explicitly stated occupation")
-	likes: list[str] = Field(default_factory=list, description="Stable things the user explicitly likes")
-	dislikes: list[str] = Field(default_factory=list, description="Stable things the user explicitly dislikes")
-	interests: list[str] = Field(default_factory=list, description="Recurring interests explicitly stated by the user")
-	relationships: list[str] = Field(default_factory=list, description="Explicitly stated family or relationship context")
-	context: list[str] = Field(default_factory=list, description="Other durable user context explicitly stated by the user")
 
 
 @dataclass(frozen=True)
@@ -48,21 +40,32 @@ class MemoryRecord:
 	namespace: tuple[str, ...]
 
 
-_INSTRUCTIONS = """Maintain one compact structured profile of the human User.
+_INSTRUCTIONS = """Record individual durable facts about the human User as separate memory entries.
 
-Only record information explicitly stated by the User message. The Assistant
-message is context, never evidence. Keep the User and Assistant perspectives
-separate: 'you', 'your', and claims about the Assistant are not facts about the
-User. Ignore greetings, questions, jokes, temporary plans, incidental nouns,
-and facts about the outside world. Do not infer personality, health, politics,
-religion, or other sensitive traits. Prefer leaving a field unchanged over
-guessing. Preserve meaningful phrases rather than splitting them into single
-words. Merge duplicate list entries and remove entries that are not durable.
-When the User explicitly corrects an existing fact, replace the old value.
-When changing a list field, replace the entire list at its field path; do not
-patch individual list indexes. An empty list has no indexes to replace. If the
-User did not explicitly provide durable information, leave the profile
-unchanged. Never create a memory from Assistant-only wording.
+Each memory must capture exactly ONE piece of explicitly stated information.
+Keep each memory concise — a short phrase or sentence.
+
+Record: location, occupation, relationships (family members, pets), interests,
+likes, dislikes, birth date, gender, and any other stable personal context
+the User explicitly provides.
+
+Do NOT record:
+- The user's name (stored separately)
+- Information about the Assistant or AI system
+- Greetings, questions, jokes, or temporary plans
+- One-time events or session-specific context
+- Sensitive inferences (health conditions, politics, religion, sexuality)
+
+Prefer the User's own wording. When the User corrects a fact, remove the old
+memory. Do not create a memory if the User has not explicitly shared durable
+personal information.
+"""
+
+_NAME_INSTRUCTIONS = """Maintain the user's name only.
+
+Record the name only when the User explicitly introduces themselves by name.
+Do not record nicknames, usernames, or names of other people.
+Do not infer the name from context. Never create a name from Assistant wording.
 """
 
 
@@ -123,7 +126,7 @@ def _embeddings():
 				# Granite's tokenizer rejects emoji variation selectors. Removing
 				# the selectors preserves the readable emoji/text and avoids making
 				# an otherwise valid conversation turn fail memory retrieval.
-				return text.replace("\ufe0e", "").replace("\ufe0f", "")
+				return text.replace("︎", "").replace("️", "")
 
 			def embed_documents(self, texts: list[str], **kwargs: Any) -> list[list[float]]:
 				return super().embed_documents([self._clean(text) for text in texts], **kwargs)
@@ -151,10 +154,8 @@ def _manager():
 
 		_MANAGER = create_memory_store_manager(
 			_model(),
-			schemas=[UserMemory],
 			instructions=_INSTRUCTIONS,
-			default_factory=lambda _config: UserMemory(),
-			enable_inserts=False,
+			enable_inserts=True,
 			enable_deletes=True,
 			namespace=("memories", "{langgraph_user_id}"),
 			store=_store(),
@@ -162,8 +163,41 @@ def _manager():
 	return _MANAGER
 
 
+def _name_manager():
+	global _NAME_MANAGER
+	if _NAME_MANAGER is None:
+		from langmem import create_memory_store_manager
+
+		_NAME_MANAGER = create_memory_store_manager(
+			_model(),
+			schemas=[UserName],
+			instructions=_NAME_INSTRUCTIONS,
+			default_factory=lambda _config: UserName(),
+			enable_inserts=False,
+			enable_deletes=False,
+			namespace=("profile", "{langgraph_user_id}"),
+			store=_store(),
+		)
+	return _NAME_MANAGER
+
+
 def _config(user_id: str) -> dict[str, dict[str, str]]:
 	return {"configurable": {"langgraph_user_id": user_id}}
+
+
+def _item_content(value: Any) -> str:
+	"""Extract the text string from a LangGraph store item value."""
+	if isinstance(value, dict):
+		c = value.get("content")
+		if isinstance(c, str):
+			return c.strip()
+		if isinstance(c, dict):
+			return ""  # old structured profile document — skip
+		if isinstance(value.get("text"), str):
+			return value["text"].strip()
+	if isinstance(value, str):
+		return value.strip()
+	return ""
 
 
 async def _extract_turn(
@@ -173,14 +207,14 @@ async def _extract_turn(
 		async with background_inference() as acquired:
 			if not acquired:
 				return
-			await _manager().ainvoke(
-				{
-					"messages": [
-						{"role": "user", "content": question},
-						{"role": "assistant", "content": answer},
-					]
-				},
-				config=_config(user_id),
+			messages = [
+				{"role": "user", "content": question},
+				{"role": "assistant", "content": answer},
+			]
+			cfg = _config(user_id)
+			await asyncio.gather(
+				_manager().ainvoke({"messages": messages}, config=cfg),
+				_name_manager().ainvoke({"messages": messages}, config=cfg),
 			)
 		logger.debug(f"[langmem] processed interaction {interaction_id}")
 	except asyncio.CancelledError:
@@ -201,7 +235,7 @@ def _track_task(task: asyncio.Task) -> None:
 
 async def close_memory_store() -> None:
 	"""Cancel background extraction and close the MongoDB store cleanly."""
-	global _STORE_CONTEXT, _STORE, _MANAGER, _EMBEDDINGS
+	global _STORE_CONTEXT, _STORE, _MANAGER, _NAME_MANAGER, _EMBEDDINGS
 
 	tasks = list(_EXTRACTION_TASKS)
 	for task in tasks:
@@ -220,6 +254,7 @@ async def close_memory_store() -> None:
 			_STORE_CONTEXT = None
 			_STORE = None
 			_MANAGER = None
+			_NAME_MANAGER = None
 			_EMBEDDINGS = None
 
 
@@ -261,151 +296,90 @@ async def record_interaction(
 	task.add_done_callback(_track_task)
 
 
-async def _profile_item(user_id: str):
-	items = await _store().asearch(("memories", user_id), limit=20)
-	return items[0] if items else None
-
-
-def _profile_from_value(value: dict[str, Any] | None) -> UserMemory:
-	if not value:
-		return UserMemory()
-	content = value.get("content") if isinstance(value, dict) else None
+async def get_user_name(user_id: str = "default") -> str | None:
+	"""Return the user's name directly from the profile namespace — no search needed."""
+	items = await _store().asearch(("profile", user_id), limit=1)
+	if not items:
+		return None
+	v = items[0].value
+	content = v.get("content") if isinstance(v, dict) else v
 	if isinstance(content, dict):
-		value = content
-	try:
-		return UserMemory.model_validate(value)
-	except Exception:
-		return UserMemory()
-
-
-def _profile_lines(profile: UserMemory) -> list[tuple[str, str]]:
-	lines: list[tuple[str, str]] = []
-	for key in ("name", "birth_date", "gender", "location", "occupation"):
-		value = getattr(profile, key)
-		if value:
-			lines.append((key, value))
-	for key in ("likes", "dislikes", "interests", "relationships", "context"):
-		for value in getattr(profile, key):
-			if isinstance(value, str) and value.strip():
-				lines.append((key, value.strip()))
-	return lines
+		return content.get("name")
+	if isinstance(v, dict):
+		return v.get("name")
+	return None
 
 
 async def list_memories(
 	query: str = "", *, user_id: str = "default", limit: int = 100
 ) -> list[MemoryRecord]:
-	item = await _profile_item(user_id)
-	if item is None:
-		return []
+	items = await _store().asearch(("memories", user_id), limit=limit)
 	needle = query.casefold().strip()
-	records = [
-		MemoryRecord(key=key, value=value, namespace=tuple(item.namespace))
-		for key, value in _profile_lines(_profile_from_value(item.value))
-	]
-	if needle:
-		records = [record for record in records if needle in f"{record.key}: {record.value}".casefold()]
+	records = []
+	for item in items:
+		content = _item_content(item.value)
+		if not content:
+			continue
+		if needle and needle not in content.casefold():
+			continue
+		records.append(MemoryRecord(key=item.key, value=content, namespace=tuple(item.namespace)))
 	return records[: max(0, limit)]
-
-
-_FIELD_SYNONYMS: dict[str, set[str]] = {
-	"location":      {"where", "from", "live", "based", "country", "city", "town",
-	                  "place", "origin", "live", "reside", "home"},
-	"name":          {"name", "call", "called", "who"},
-	"birth_date":    {"age", "born", "birthday", "birth", "old", "year", "dob"},
-	"gender":        {"gender", "sex", "pronoun", "pronouns", "male", "female"},
-	"occupation":    {"job", "work", "career", "do", "profession", "role", "developer",
-	                  "engineer", "programmer", "employ"},
-	"relationships": {"family", "pet", "cat", "dog", "wife", "husband", "partner",
-	                  "married", "children", "kids", "relative", "friend", "sookie"},
-	"interests":     {"hobby", "hobbies", "into", "enjoy", "music", "listen",
-	                  "watch", "research", "interest", "passionate"},
-	"dislikes":      {"hate", "dislike", "disliked", "avoid", "djent", "don", "music", "not"},
-	"likes":         {"like", "love", "enjoy", "favourite", "favorite", "prefer"},
-	"context":       {"background", "context", "know", "remember", "about", "info"},
-}
-
-
-def _fact_relevance(query_words: set[str], key: str, value: str) -> int:
-	"""Score one memory fact against query words. Higher = more relevant."""
-	score = 0
-	key_words  = set(re.findall(r"\w+", key.lower()))
-	value_words = set(re.findall(r"\w+", value.lower()))
-	# Direct overlap with field name or value content
-	score += len(query_words & key_words)  * 3
-	score += len(query_words & value_words) * 2
-	# Synonym / concept overlap with the field category
-	synonyms = _FIELD_SYNONYMS.get(key, set())
-	score += len(query_words & synonyms) * 4
-	return score
 
 
 async def search_relevant_memories(
 	query: str, user_id: str = "default", limit: int = 5
 ) -> list[str]:
-	"""Return the most query-relevant profile facts using local keyword scoring.
-
-	LangMem stores the entire profile as one document, so vector search always
-	returns the same document and _profile_lines() would produce facts in a
-	fixed field order (name, birth_date, …) regardless of what was asked.
-	Local keyword + synonym scoring is faster, deterministic, and actually
-	returns the facts most relevant to the query.
-	"""
-	item = await _profile_item(user_id)
-	if item is None:
-		return []
-	all_facts = _profile_lines(_profile_from_value(item.value))
-	if not all_facts:
-		return []
-
-	query_words = set(re.findall(r"\w+", query.lower()))
-	scored = sorted(
-		((_fact_relevance(query_words, k, v), f"{k}: {v}") for k, v in all_facts),
-		key=lambda x: -x[0],
-	)
-	# Always include at least the top-scored fact; drop zero-score ties last.
-	return [fact for _, fact in scored[:max(1, limit)]]
+	"""Return the most semantically relevant memory records for the query."""
+	items = await _store().asearch(("memories", user_id), query=query, limit=limit)
+	return [c for item in items if (c := _item_content(item.value))]
 
 
 async def get_fact_value(key: str, user_id: str = "default") -> str | None:
-	for record in await list_memories(user_id=user_id, limit=100):
-		if record.key == key:
-			return record.value
-	return None
+	"""Retrieve a single fact by field concept. 'name' is fetched directly; others via search."""
+	if key == "name":
+		return await get_user_name(user_id)
+	results = await search_relevant_memories(key, user_id=user_id, limit=1)
+	return results[0] if results else None
 
 
 async def get_profile_context(user_id: str = "default", limit: int = 50) -> str:
+	name = await get_user_name(user_id)
 	records = await list_memories(user_id=user_id, limit=limit)
-	if not records:
+	if not name and not records:
 		return ""
 	lines = [
 		"## USER PROFILE — facts about the human user only:",
 		"Perspective rule: every fact below belongs to the User, never to the Assistant.",
 		"Use these facts only when relevant. Do not volunteer them unprompted.",
 	]
-	lines.extend(f"- User's {record.key.replace('_', ' ')}: {record.value}" for record in records)
+	if name:
+		lines.append(f"- User's name: {name}")
+	lines.extend(f"- {record.value}" for record in records)
 	return "\n".join(lines)
 
 
-async def forget_memory(field: str, *, user_id: str = "default") -> bool:
-	item = await _profile_item(user_id)
-	if item is None or field not in UserMemory.model_fields:
-		return False
-	profile = _profile_from_value(item.value)
-	if isinstance(getattr(profile, field), list):
-		setattr(profile, field, [])
-	else:
-		setattr(profile, field, None)
-	payload = dict(item.value)
-	if isinstance(payload.get("content"), dict):
-		payload["content"] = profile.model_dump()
-	else:
-		payload = profile.model_dump()
-	await _store().aput(tuple(item.namespace), item.key, payload)
-	return True
+async def forget_memory(query_or_key: str, *, user_id: str = "default") -> bool:
+	"""Delete memories by exact store key or by keyword match against content."""
+	items = await _store().asearch(("memories", user_id), limit=1000)
+	q = query_or_key.strip()
+	for item in items:
+		if item.key == q:
+			await _store().adelete(tuple(item.namespace), item.key)
+			return True
+	q_lower = q.casefold()
+	deleted = 0
+	for item in items:
+		if q_lower in _item_content(item.value).casefold():
+			await _store().adelete(tuple(item.namespace), item.key)
+			deleted += 1
+	return deleted > 0
 
 
 async def clear_memories(*, user_id: str = "default") -> int:
-	items = await _store().asearch(("memories", user_id), limit=1000)
-	for item in items:
+	mem_items = await _store().asearch(("memories", user_id), limit=1000)
+	prof_items = await _store().asearch(("profile", user_id), limit=10)
+	for item in mem_items:
 		await _store().adelete(tuple(item.namespace), item.key)
-	return len(items)
+	for item in prof_items:
+		await _store().adelete(tuple(item.namespace), item.key)
+	return len(mem_items) + len(prof_items)

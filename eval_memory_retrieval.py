@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-import re
 import sys
 
 # ---------------------------------------------------------------------------
@@ -231,12 +229,40 @@ async def run_context_layer(
 # Main
 # ---------------------------------------------------------------------------
 async def _load_facts() -> dict[str, list[str]]:
-    """Return all stored memory facts grouped by field name."""
-    from utils.langmem_service import list_memories
-    records = await list_memories()
+    """Return stored memories grouped by inferred field for eval coverage checks.
+
+    With free-form memories each record is a plain string, so we classify
+    by keyword matching. This is intentionally loose — the goal is only to
+    decide which _FIELD_QUERIES entries are worth running against live data.
+    """
+    from utils.langmem_service import get_user_name, list_memories
+
     grouped: dict[str, list[str]] = {}
+
+    name = await get_user_name()
+    if name:
+        grouped["name"] = [name]
+
+    records = await list_memories()
     for r in records:
-        grouped.setdefault(r.key, []).append(r.value)
+        v = r.value.lower()
+        if any(w in v for w in ["born", "birthday", "1978", "april", "birth date", "age"]):
+            grouped.setdefault("birth_date", []).append(r.value)
+        elif any(w in v for w in ["british", "turkey", "uk", "united kingdom", "live", "from", "origin", "location", "citizen"]):
+            grouped.setdefault("location", []).append(r.value)
+        elif any(w in v for w in ["software", "developer", "engineer", "programmer", "work", "job", "occupation", "career"]):
+            grouped.setdefault("occupation", []).append(r.value)
+        elif any(w in v for w in ["djent", "dislike", "hate", "avoid", "don't like"]):
+            grouped.setdefault("dislikes", []).append(r.value)
+        elif any(w in v for w in ["metal", "music", "research", "interest", "hobby", "hobbies", "into"]):
+            grouped.setdefault("interests", []).append(r.value)
+        elif any(w in v for w in ["sookie", "cat", "pet", "chicken", "family", "wife", "husband", "married", "dog"]):
+            grouped.setdefault("relationships", []).append(r.value)
+        elif any(w in v for w in ["male", "female", "gender", "pronoun"]):
+            grouped.setdefault("gender", []).append(r.value)
+        else:
+            grouped.setdefault("context", []).append(r.value)
+
     return grouped
 
 

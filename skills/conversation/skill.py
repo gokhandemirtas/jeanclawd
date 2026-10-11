@@ -1073,10 +1073,10 @@ async def generate_greeting() -> str:
 	Falls back to a generic greeting on any failure.
 	"""
 	try:
-		from utils.langmem_service import get_fact_value
+		from utils.langmem_service import get_user_name
 		from utils.session_service import get_last_conversation_gap_seconds
 
-		user_name = await get_fact_value("name")
+		user_name = await get_user_name()
 		gap_seconds = get_last_conversation_gap_seconds()
 
 		name_instruction = (
