@@ -226,7 +226,7 @@ async def main(
 		sys.exit(1)
 
 	if telegram:
-		from skills.telegram import start_telegram_bot
+		from skills.telegram_skill import start_telegram_bot
 
 		telegram_status = await start_telegram_bot()
 		connections["Telegram"] = (
@@ -392,8 +392,8 @@ async def main(
 								else:
 									# A single task deliberately goes through the existing router;
 									# decomposition does not replace intent classification.
-									from agents.intent_classifier.intent_classifier import _keyword_classify
-									shortcut = _keyword_classify(effective_query)
+									from agents.intent_classifier.intent_classifier import _explicit_command_classify
+									shortcut = _explicit_command_classify(effective_query)
 									pending = consume_pending_intent()
 									if shortcut:
 										if pending:

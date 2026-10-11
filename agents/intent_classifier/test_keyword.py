@@ -1,33 +1,35 @@
 import unittest
 
-from agents.intent_classifier.intent_classifier import _keyword_classify
+from agents.intent_classifier.intent_classifier import _explicit_command_classify
 
 
-class ApproximateCommandTests(unittest.TestCase):
-    def test_deep_research_typo(self) -> None:
-        self.assertEqual(
-            _keyword_classify("deep resarch: Gokhan Demirtas"), "SEARCH"
+class ExplicitCommandTests(unittest.TestCase):
+    def test_command_typo_is_left_to_context_router(self) -> None:
+        self.assertIsNone(
+            _explicit_command_classify("deep resarch: Gokhan Demirtas")
         )
 
-    def test_weather_typo(self) -> None:
-        self.assertEqual(_keyword_classify("wether in London"), "WEATHER")
+    def test_non_command_is_left_to_context_router(self) -> None:
+        self.assertIsNone(_explicit_command_classify("wether in London"))
 
-    def test_ordinary_research_conversation_is_not_rewritten(self) -> None:
-        self.assertIsNone(_keyword_classify("ordinary conversation about research"))
+    def test_research_mention_is_left_to_context_router(self) -> None:
+        self.assertIsNone(_explicit_command_classify("ordinary conversation about research"))
 
-    def test_research_history_question_is_chat(self) -> None:
-        self.assertEqual(
-            _keyword_classify("which metal genres did you research earlier?"), "CHAT"
+    def test_research_history_question_is_left_to_context_router(self) -> None:
+        self.assertIsNone(
+            _explicit_command_classify("which metal genres did you research earlier?")
         )
 
-    def test_research_we_did_in_topic_is_chat(self) -> None:
-        self.assertEqual(
-            _keyword_classify("tell me about the research we did in this topic"),
-            "CHAT",
+    def test_research_we_did_in_topic_is_left_to_context_router(self) -> None:
+        self.assertIsNone(
+            _explicit_command_classify("tell me about the research we did in this topic")
         )
 
     def test_standalone_research_command_remains_search(self) -> None:
-        self.assertEqual(_keyword_classify("research heavy metal"), "SEARCH")
+        self.assertEqual(_explicit_command_classify("research heavy metal"), "SEARCH")
+
+    def test_anchored_search_command_remains_search(self) -> None:
+        self.assertEqual(_explicit_command_classify("search for black metal"), "SEARCH")
 
 
 if __name__ == "__main__":

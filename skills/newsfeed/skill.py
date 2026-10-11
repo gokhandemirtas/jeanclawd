@@ -28,6 +28,8 @@ _NEWS_LENGTH_PROMPTS: dict[str, str] = {
     "short": """\
 You are a news presenter. Summarise the following headlines as a quick briefing for someone with limited time.
 
+Begin your response exactly with: Today is {news_date}, and the news is:
+
 News Content:
 {news_content}
 
@@ -40,6 +42,8 @@ Rules:
     "medium": """\
 You are a news presenter. Present the following headlines to the user, keeping each story's detail intact.
 
+Begin your response exactly with: Today is {news_date}, and the news is:
+
 News Content:
 {news_content}
 
@@ -51,6 +55,8 @@ Rules:
 """,
     "long": """\
 You are a news presenter. Present the following headlines with full, thorough detail.
+
+Begin your response exactly with: Today is {news_date}, and the news is:
 
 News Content:
 {news_content}
@@ -108,7 +114,11 @@ async def handle_newsfeed(query: str) -> str:
     max_tokens=max_tokens,
   )
 
-  system_prompt = _NEWS_LENGTH_PROMPTS[length].format(news_content=news_content)
+  news_date = date.today().strftime("%B %d, %Y").replace(" 0", " ")
+  system_prompt = _NEWS_LENGTH_PROMPTS[length].format(
+    news_date=news_date,
+    news_content=news_content,
+  )
 
   with Live(Spinner("dots", text=Text("reading the news...", style="dim")), console=_console, transient=True):
     response = await llm.ainvoke([

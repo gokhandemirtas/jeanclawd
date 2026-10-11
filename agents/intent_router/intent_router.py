@@ -24,10 +24,10 @@ def _lock_offered_intent(intent: IntentLiteral, response: str) -> None:
 	if intent != "CHAT" or not _OFFER_MARKERS.search(response):
 		return
 
-	from agents.intent_classifier.intent_classifier import _keyword_classify
+	from agents.intent_classifier.intent_classifier import _explicit_command_classify
 	from skills.conversation.skill import set_pending_intent
 
-	offered_intent = _keyword_classify(response)
+	offered_intent = _explicit_command_classify(response)
 	if offered_intent in {"NEWSFEED", "WEATHER", "FINANCE_STOCKS", "SEARCH"}:
 		set_pending_intent(offered_intent)
 

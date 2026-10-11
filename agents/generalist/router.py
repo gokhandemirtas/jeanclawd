@@ -31,6 +31,11 @@ Critical rules — apply in order, stop at first match:
 1. Short agreements, continuations, or confirmations ("yes", "no", "ok", "sure", "yes all", "sounds good", "go ahead", "tell me more", "please", "exactly") → always CHAT.
 2. If the answer can be derived from ACTUAL SKILL DATA in the conversation history (e.g. a previous weather response, stock price, song title) → CHAT. Never re-fetch. CHAT RESPONSES DO NOT COUNT as skill data — they are conversational only and CANNOT represent executed actions. If the previous turn was CHAT, the new query is a fresh request, not a follow-up to executed data.
 3. Comparisons or "which one" questions where both subjects are already in the history → CHAT.
+   Questions asking for an opinion, explanation, or reaction to a headline or story
+   already present in the history are also CHAT. For example, after a NEWSFEED turn,
+   "what do you think about the Anthropic researchers' findings?" discusses that
+   fetched story; it is not a request to fetch news again. The words "researcher"
+   or "researchers" in a headline do not constitute a research command.
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
 6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
@@ -115,9 +120,17 @@ def _route_sync(
 	query: str, history: list[tuple[str, str]]
 ) -> tuple[IntentLiteral, float]:
 	lines = []
-	for user_msg, assistant_msg in history[-3:]:
+	# The caller may provide one bounded session-summary entry followed by the
+	# newest exchanges. Preserve that summary while limiting transcript detail.
+	bounded_history = (
+		history[:1] + history[1:][-3:]
+		if history and history[0][0] == "Earlier session summary"
+		else history[-3:]
+	)
+	for user_msg, assistant_msg in bounded_history:
 		lines.append(f"User: {user_msg}")
-		lines.append(f"Assistant: {assistant_msg[:200]}")
+		# Keep enough of a fetched headline for the model to resolve a follow-up.
+		lines.append(f"Assistant: {assistant_msg[:600]}")
 	context = "\n".join(lines)
 	content = f"{context}\n\nUser: {query}" if context else query
 
@@ -142,9 +155,9 @@ async def generalist_route(
 	Falls back to CHAT on any routing failure so the conversation never hard-crashes.
 	"""
 	import time
-	from agents.intent_classifier.intent_classifier import _keyword_classify
+	from agents.intent_classifier.intent_classifier import _explicit_command_classify
 
-	shortcut = _keyword_classify(query)
+	shortcut = _explicit_command_classify(query)
 	if shortcut:
 		logger.debug(f"[router] {shortcut} (keyword match)")
 		return shortcut, 1.0

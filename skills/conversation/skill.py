@@ -591,13 +591,17 @@ def get_recent_history(
 ) -> list[tuple[str, str]]:
 	"""Return recent exchanges, optionally prefixed with the session summary."""
 	messages = list(_history)
+	# _history is oldest-to-newest. Use the newest exchanges so recent skill
+	# data remains available to the router; older turns are summarized on
+	# compaction and must not hide the latest fetched result.
+	message_pairs = [
+		(messages[i].content, messages[i + 1].content)
+		for i in range(0, len(messages) - 1, 2)
+	]
 	pairs = []
 	if include_summary and _rolling_summary:
 		pairs.append(("Earlier session summary", _bounded_summary(_rolling_summary)))
-	i = 0
-	while i + 1 < len(messages) and len(pairs) < n:
-		pairs.append((messages[i].content, messages[i + 1].content))
-		i += 2
+	pairs.extend(message_pairs[-n:])
 	return pairs
 
 
