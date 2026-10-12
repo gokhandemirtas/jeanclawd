@@ -47,6 +47,10 @@ Keep each memory concise — a short phrase or sentence.
 Record: name, location, occupation, relationships (family members, pets),
 interests, likes, dislikes, birth date, gender, and any other stable personal
 context the User explicitly provides.
+For facts about someone other than the User, always include that person's name
+and relationship to the User in the memory. For example, write "Wife name:
+Selin" or "Wife Selin occupation: cardiologist", never bare "Name: Selin" or
+"Occupation: cardiologist".
 
 Do NOT record:
 - Information about the Assistant or AI system
@@ -336,9 +340,10 @@ async def get_profile_context(user_id: str = "default", limit: int = 50) -> str:
 	if not records:
 		return ""
 	lines = [
-		"## USER PROFILE — facts about the human user only:",
-		"Perspective rule: every fact below belongs to the User, never to the Assistant.",
-		"Use these facts only when relevant. Do not volunteer them unprompted.",
+		"## USER PROFILE — facts you already know about the human user:",
+		"When the user asks about something covered here, answer from these facts directly.",
+		"Do not say you lack information if the answer is present below.",
+		"Do not volunteer these facts as unsolicited filler when they are not relevant.",
 	]
 	lines.extend(f"- {record.value}" for record in records)
 	return "\n".join(lines)
