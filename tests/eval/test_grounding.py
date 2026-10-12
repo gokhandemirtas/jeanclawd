@@ -47,7 +47,7 @@ class TestWeatherGrounding:
             "Current weather in Istanbul: 9°C, overcast. "
             "Low 6°C, high 11°C. Wind 20 km/h from the north."
         )
-        with patch("skills.weather.skill.handle_weather", return_value=controlled):
+        with patch("skills.weather.weather_skill.handle", return_value=controlled):
             from agents.intent_classifier import run_intent_classifier
             response = await run_intent_classifier("what's the weather in Istanbul?")
 
@@ -70,7 +70,7 @@ class TestWeatherGrounding:
             "Current weather in London: 13°C, heavy rain. "
             "Low 10°C, high 15°C. Humidity 92%."
         )
-        with patch("skills.weather.skill.handle_weather", return_value=controlled):
+        with patch("skills.weather.weather_skill.handle", return_value=controlled):
             from agents.intent_classifier import run_intent_classifier
             response = await run_intent_classifier("how's the weather in London?")
 
@@ -100,7 +100,7 @@ class TestFinanceGrounding:
             "Apple Inc (AAPL) — Current price: $213.45 USD. "
             "Change: +1.23 (+0.58%). Market cap: 3.26T."
         )
-        with patch("skills.finance.skill.handle_finance_stocks", return_value=controlled):
+        with patch("skills.finance.finance_skill.handle", return_value=controlled):
             from agents.intent_classifier import run_intent_classifier
             response = await run_intent_classifier("what's Apple's stock price?")
 
@@ -122,7 +122,7 @@ class TestFinanceGrounding:
             "Tesla Inc (TSLA) — Current price: $172.10 USD. "
             "Change: -8.45 (-4.68%). Market cap: 551B."
         )
-        with patch("skills.finance.skill.handle_finance_stocks", return_value=controlled):
+        with patch("skills.finance.finance_skill.handle", return_value=controlled):
             from agents.intent_classifier import run_intent_classifier
             response = await run_intent_classifier("how is Tesla stock doing?")
 
@@ -153,7 +153,7 @@ class TestNewsfeedGrounding:
             "2. EU passes landmark AI liability directive\n"
             "3. Record-breaking heatwave sweeps across southern Europe\n"
         )
-        with patch("skills.newsfeed.skill.handle_newsfeed", return_value=controlled):
+        with patch("skills.newsfeed.newsfeed_skill.handle", return_value=controlled):
             from agents.intent_classifier import run_intent_classifier
             response = await run_intent_classifier("what's in the news today?")
 

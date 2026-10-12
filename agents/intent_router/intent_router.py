@@ -13,6 +13,16 @@ _OFFER_MARKERS = re.compile(
 	re.IGNORECASE,
 )
 
+_SKILL_ERROR_MESSAGES: dict[str, str] = {
+	"WEATHER": "I wasn't able to retrieve weather data right now. Please try again in a moment.",
+	"FINANCE_STOCKS": "I wasn't able to retrieve stock price data right now. Please try again in a moment.",
+	"NEWSFEED": "I wasn't able to fetch the latest news right now. Please try again in a moment.",
+	"SEARCH": "I wasn't able to complete that research request right now. Please try again in a moment.",
+	"INFORMATION_QUERY": "I wasn't able to look that up right now. Please try again in a moment.",
+	"NUTRITION": "I wasn't able to fetch nutrition data right now. Please try again in a moment.",
+	"TRANSPORTATION": "I wasn't able to get directions right now. Please try again in a moment.",
+}
+
 
 def _lock_offered_intent(intent: IntentLiteral, response: str) -> None:
 	"""Lock a clearly offered follow-up action for a short confirmation.
@@ -65,7 +75,10 @@ async def route(
 				result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
 		except Exception as exc:
 			logger.exception(f"[router] skill {intent} raised unexpectedly: {exc}")
-			result = "I ran into a problem completing that request. Please try again in a moment."
+			result = _SKILL_ERROR_MESSAGES.get(
+				intent,
+				"I ran into a problem completing that request. Please try again in a moment.",
+			)
 	# Deep research already produces a user-facing document path. Wrapping it in
 	# another LLM call can alter or omit that path, so preserve it verbatim.
 	document_response = isinstance(result, str) and result.startswith(

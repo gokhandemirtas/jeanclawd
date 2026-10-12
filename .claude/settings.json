@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run ruff check *)",
+      "Bash(herdr pane read *)",
+      "Bash(herdr agent list *)",
+      "mcp__jeanclawd__list_memories"
+    ]
+  }
+}
