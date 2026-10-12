@@ -42,13 +42,18 @@ _SETUP_TURNS: list[str] = [
 @dataclass
 class _RecallCase:
 	question: str
-	expected_fact: str
+	expected_fact: str | list[str]  # any one match is a pass
 	note: str = ""
+
+	def matches(self, response: str) -> bool:
+		r = response.lower()
+		facts = [self.expected_fact] if isinstance(self.expected_fact, str) else self.expected_fact
+		return any(f.lower() in r for f in facts)
 
 
 _RECALL_CASES: list[_RecallCase] = [
 	_RecallCase("what's my name?", "Gokhan", note="name"),
-	_RecallCase("what do I do for work?", "software engineer", note="occupation"),
+	_RecallCase("what do I do for work?", ["software engineer", "backend developer"], note="occupation"),
 	_RecallCase("where do I live?", "Istanbul", note="location"),
 	_RecallCase("how many years of experience do I have?", "12", note="experience"),
 	_RecallCase("what's my wife's name?", "Selin", note="spouse"),
@@ -82,8 +87,8 @@ class TestMemoryRetention:
 		"""Agent's response to a recall question must mention the expected fact."""
 		from agents.intent_classifier import run_intent_classifier
 		response = await run_intent_classifier(case.question)
-		assert case.expected_fact.lower() in response.lower(), (
-			f"[{case.note}] Expected '{case.expected_fact}' in response.\n"
+		assert case.matches(response), (
+			f"[{case.note}] Expected {case.expected_fact!r} in response.\n"
 			f"Question: {case.question}\nResponse: {response}"
 		)
 
@@ -94,10 +99,10 @@ class TestMemoryRetention:
 		failures = []
 		for case in _RECALL_CASES:
 			response = await run_intent_classifier(case.question)
-			if case.expected_fact.lower() in response.lower():
+			if case.matches(response):
 				passed += 1
 			else:
-				failures.append(f"  [{case.note}] missing '{case.expected_fact}': {response[:120]}")
+				failures.append(f"  [{case.note}] missing {case.expected_fact!r}: {response[:120]}")
 
 		rate = passed / len(_RECALL_CASES)
 		assert rate >= 0.80, (

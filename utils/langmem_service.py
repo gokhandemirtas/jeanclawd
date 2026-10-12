@@ -63,6 +63,10 @@ Do NOT record:
 - A fact that is already captured by an existing memory with the same meaning.
   Before inserting, check whether an equivalent fact already exists and skip
   the insert if it does. Duplicates waste space and degrade retrieval quality.
+  For fields like occupation, location, and name there should be at most ONE
+  memory entry. If a new value refines an existing one (e.g. "backend developer"
+  when "software engineer" is already stored), update the existing entry rather
+  than adding a second one.
 
 Prefer the User's own wording. When the User explicitly corrects a fact,
 remove the old memory and insert the corrected one.

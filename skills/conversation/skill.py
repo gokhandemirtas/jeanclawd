@@ -155,7 +155,7 @@ _recent_memory_turns: dict[str, int] = {}
 
 _EXPLICIT_MEMORY_QUERY = re.compile(
 	r"\b(?:what\s+do\s+you\s+know|what\s+do\s+you\s+remember|"
-	r"what(?:'s| is| are)\s+my\s+(?:profile|information|name|location|occupation|"
+	r"(?:what(?:'s|\s+is|\s+are)|when(?:'s|\s+is))\s+my\s+(?:profile|information|name|location|occupation|"
 	r"interests?|likes?|dislikes?|preferences?|relationships?|"
 	r"birth(?:day|date)|date\s+of\s+birth|age)|"
 	r"remember\s+(?:me|about\s+me)|my\s+profile|"
