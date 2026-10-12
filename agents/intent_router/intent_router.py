@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from agents.intent_classifier.intent_classifier import IntentLiteral
 from skills import get_skill
+from utils.log import logger
 
 
 _OFFER_MARKERS = re.compile(
@@ -57,10 +58,14 @@ async def route(
 	if "voice_mode" in sig.parameters:
 		kwargs["voice_mode"] = voice_mode
 	with span("skill_execution", skill=intent):
-		if inspect.iscoroutinefunction(skill.handle):
-			result = await skill.handle(user_input, **kwargs)
-		else:
-			result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
+		try:
+			if inspect.iscoroutinefunction(skill.handle):
+				result = await skill.handle(user_input, **kwargs)
+			else:
+				result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
+		except Exception as exc:
+			logger.exception(f"[router] skill {intent} raised unexpectedly: {exc}")
+			result = "I ran into a problem completing that request. Please try again in a moment."
 	# Deep research already produces a user-facing document path. Wrapping it in
 	# another LLM call can alter or omit that path, so preserve it verbatim.
 	document_response = isinstance(result, str) and result.startswith(
