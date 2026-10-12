@@ -35,7 +35,6 @@ async def _converse(turns: list[str]) -> list[str]:
 	for turn in turns:
 		response = await run_intent_classifier(turn)
 		responses.append(response)
-		await asyncio.sleep(0.3)
 	return responses
 
 

@@ -70,10 +70,10 @@ class TestMemoryRetention:
 	async def _setup(self, clean_memories, pipeline):
 		"""Run setup turns then wait for background extraction to complete."""
 		from agents.intent_classifier import run_intent_classifier
+		from utils.langmem_service import _EXTRACTION_TASKS
 		for turn in _SETUP_TURNS:
 			await run_intent_classifier(turn)
-			await asyncio.sleep(0.3)
-		await asyncio.sleep(4)  # let background extraction tasks finish
+		await asyncio.gather(*list(_EXTRACTION_TASKS), return_exceptions=True)
 
 	@pytest.mark.parametrize(
 		"case", _RECALL_CASES, ids=[c.note for c in _RECALL_CASES]
@@ -98,7 +98,6 @@ class TestMemoryRetention:
 				passed += 1
 			else:
 				failures.append(f"  [{case.note}] missing '{case.expected_fact}': {response[:120]}")
-			await asyncio.sleep(0.2)
 
 		rate = passed / len(_RECALL_CASES)
 		assert rate >= 0.80, (
@@ -113,10 +112,10 @@ class TestMemoryQuality:
 	@pytest_asyncio.fixture(autouse=True)
 	async def _setup(self, clean_memories, pipeline):
 		from agents.intent_classifier import run_intent_classifier
+		from utils.langmem_service import _EXTRACTION_TASKS
 		for turn in _SETUP_TURNS:
 			await run_intent_classifier(turn)
-			await asyncio.sleep(0.3)
-		await asyncio.sleep(4)
+		await asyncio.gather(*list(_EXTRACTION_TASKS), return_exceptions=True)
 
 	async def test_no_placeholder_records(self):
 		"""No memory record should contain placeholder/unknown text."""
