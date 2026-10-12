@@ -52,6 +52,7 @@ dependencies = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "langchain>=1.3.14",
+    "pytest-json-report>=1.5.0",
 ]
 
 [project.scripts]
@@ -67,6 +68,7 @@ testpaths = ["tests", "agents", "skills", "utils"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 markers = ["eval: integration eval tests (require live inference + DB)"]
+addopts = "--json-report --json-report-file=tests/eval/results/latest.json --json-report-indent=2"
 
 [tool.ruff]
 indent-width = 2
