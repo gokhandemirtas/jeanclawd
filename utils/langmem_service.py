@@ -194,10 +194,7 @@ async def _extract_turn(
 	question: str, answer: str, *, user_id: str, interaction_id: str
 ) -> None:
 	try:
-		async with background_inference() as acquired:
-			if not acquired:
-				logger.debug(f"[langmem] skipped extraction (foreground busy) for {interaction_id}")
-				return
+		async with background_inference():
 			messages = [
 				{"role": "user", "content": question},
 				{"role": "assistant", "content": answer},

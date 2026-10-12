@@ -639,17 +639,6 @@ _RESEARCH_ARCHIVE_MARKERS = re.compile(
 	re.IGNORECASE,
 )
 
-_RESEARCH_SKIP_QUERIES = re.compile(
-	r"^(?:hi|hello|hey|thanks?|thank you|good morning|good evening|"
-	r"who are you|how are you|what can you do|okay|ok|yes|no)[!.?\s]*$",
-	re.IGNORECASE,
-)
-_KNOWLEDGE_QUERY_START = re.compile(
-	r"^(?:what|who|where|when|why|how|which|can you explain|tell me|"
-	r"describe|compare|give me|is there|are there)\b",
-	re.IGNORECASE,
-)
-
 
 def _is_research_followup(query: str) -> bool:
 	return bool(_RESEARCH_FOLLOWUP_MARKERS.search(query))
@@ -673,16 +662,7 @@ def _research_followup_context(query: str) -> str:
 
 async def _research_archive_context(query: str) -> str:
 	"""Retrieve durable research passages for archive and cross-report questions."""
-	words = query.strip().split()
-	should_check = bool(
-		_RESEARCH_ARCHIVE_MARKERS.search(query)
-		or (
-			len(words) >= 3
-			and not _RESEARCH_SKIP_QUERIES.fullmatch(query.strip())
-			and ("?" in query or _KNOWLEDGE_QUERY_START.search(query.strip()))
-		)
-	)
-	if not should_check:
+	if not _RESEARCH_ARCHIVE_MARKERS.search(query):
 		return ""
 	try:
 		from utils.research_rag import research_context
@@ -694,8 +674,7 @@ async def _research_archive_context(query: str) -> str:
 				"Use these passages as the source of truth when they address the user's question. "
 				"They may come from multiple reports; preserve distinctions between reports. "
 				"Cite supported claims with the passage's source markers when present, and say "
-				"when the archived research does not establish an answer. Begin the answer with "
-				"'Based on my previous research,' and do not repeat that phrase elsewhere.\n\n"
+				"when the archived research does not establish an answer.\n\n"
 				+ context
 			)
 	except Exception:
@@ -703,14 +682,6 @@ async def _research_archive_context(query: str) -> str:
 	return ""
 
 
-_RESEARCH_ATTRIBUTION = "Based on my previous research, "
-
-
-def _attribute_research_answer(answer: str, used_archive: bool) -> str:
-	"""Make archived-research provenance explicit when it was retrieved."""
-	if not used_archive or answer.casefold().startswith(_RESEARCH_ATTRIBUTION.casefold()):
-		return answer
-	return _RESEARCH_ATTRIBUTION + answer[:1].lower() + answer[1:]
 
 
 def _fit_context_to_budget(
@@ -960,8 +931,6 @@ async def handle_chat(
 		llm = _get_llm(temperature=0.3, max_tokens=512 if voice_mode else 1024)
 		messages = [SystemMessage(content=system), HumanMessage(content=user_prompt)]
 		full_text = ""
-		if archive_context:
-			on_token(_RESEARCH_ATTRIBUTION)
 		_filter = _ChannelFilter(on_token)
 		async for chunk in llm.astream(messages):
 			token = chunk.content
@@ -969,7 +938,7 @@ async def handle_chat(
 				full_text += token
 				_filter.push(token)
 		_filter.flush()
-		final = _attribute_research_answer(_strip_think(full_text), bool(archive_context))
+		final = _strip_think(full_text)
 		append_to_history(query, final)
 		await _safe_extract_topic(query, final)
 		return final
@@ -988,7 +957,6 @@ async def handle_chat(
 		conversation_context = "\n".join(context_lines)
 
 		final = await reason_and_act(query, conversation_context, persona=memory_context)
-		final = _attribute_research_answer(final, bool(archive_context))
 
 		await _safe_extract_topic(query, final)
 
@@ -1036,9 +1004,7 @@ async def handle_chat(
 			pydantic_model=_ChatResponse,
 			max_tokens=512 if voice_mode else 1024,
 		)
-		final = _attribute_research_answer(
-			_strip_think(result.answer), bool(archive_context)
-		)
+		final = _strip_think(result.answer)
 		if result.topic:
 			_current_topic = result.topic
 			logger.debug(f"[chat] topic='{_current_topic}'")
@@ -1053,9 +1019,7 @@ async def handle_chat(
 			temperature=0.7,
 			max_tokens=512 if voice_mode else 1024,
 		).ainvoke([SystemMessage(content=system), HumanMessage(content=query)])
-		final = _attribute_research_answer(
-			_strip_think(response.content), bool(archive_context)
-		)
+		final = _strip_think(response.content)
 		# Structured output failed so result.topic was never set. Extract the
 		# topic asynchronously so follow-up queries can still resolve correctly.
 		asyncio.ensure_future(_safe_extract_topic(query, final))
