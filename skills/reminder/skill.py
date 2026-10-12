@@ -66,6 +66,12 @@ async def handle_reminder(query: str) -> str:
         if datetime_str and description:
           logger.debug(f"Creating reminder: {datetime_str} - {description}")
           return await handle_create_reminder(datetime_str, description)
+        if not datetime_str and not description:
+          return "What would you like to be reminded about, and when?"
+        if not description:
+          return "What would you like to be reminded about?"
+        if not datetime_str:
+          return f"When would you like to be reminded to {description}?"
         else:
           logger.error("Date or description missing from CREATE REMINDER request")
           return "Date or description missing"

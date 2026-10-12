@@ -7,4 +7,8 @@ reminder_skill = Skill(
     description="Timers, reminders, alarms, and viewing upcoming schedule",
     system_prompt=reminderIntentPrompt,
     handle=handle_reminder,
+    # The handler returns user-facing confirmations and clarification questions.
+    # Rewriting them through CHAT can falsely imply that an incomplete reminder
+    # was created.
+    needs_wrapping=False,
 )

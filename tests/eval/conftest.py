@@ -15,6 +15,7 @@ A compatibility shim is required in the venv after a fresh `uv sync`:
 from __future__ import annotations
 
 import os
+import asyncio
 
 import pytest
 import pytest_asyncio
@@ -87,11 +88,24 @@ async def pipeline():
 
 @pytest_asyncio.fixture
 async def clean_memories(pipeline):
-	"""Wipe all memories before a test and restore nothing after."""
-	from utils.langmem_service import clear_memories
+	"""Isolate memories and their MongoDB connection for each eval test."""
+	from utils.langmem_service import _EXTRACTION_TASKS, clear_memories, close_memory_store
+
+	# An extraction launched by an earlier test can otherwise write after its
+	# database cleanup, contaminating this test's supposedly empty store.
+	tasks = list(_EXTRACTION_TASKS)
+	if tasks:
+		await asyncio.gather(*tasks, return_exceptions=True)
+	await close_memory_store()
 	await clear_memories()
 	yield
+	tasks = list(_EXTRACTION_TASKS)
+	if tasks:
+		await asyncio.gather(*tasks, return_exceptions=True)
 	await clear_memories()
+	# Reopen on the next test so a long eval run never reuses a stale MongoDB
+	# connection pool.
+	await close_memory_store()
 
 
 def pytest_configure(config):
