@@ -110,7 +110,7 @@ def _model():
 	from langchain_openai import ChatOpenAI
 
 	kwargs: dict[str, Any] = {
-		"model": os.environ["MODEL_GENERALIST"],
+		"model": os.environ.get("MODEL_EXTRACTION") or os.environ["MODEL_GENERALIST"],
 		"api_key": os.environ.get("OPENAI_API_KEY", "lm-studio"),
 		"temperature": 0,
 	}

@@ -65,3 +65,4 @@ memory/*
 
 deep-research/*
 introspections/*
+.deepeval_telemetry.txt

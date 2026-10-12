@@ -13,7 +13,15 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "mcp__jeanclawd__chat",
-      "mcp__jeanclawd__list_memories"
+      "mcp__jeanclawd__list_memories",
+      "Bash(python3 -c ' *)",
+      "Bash(npx hmail *)",
+      "Bash(node ~/.local/share/herdr/hmail.js inbox)",
+      "Bash(herdr agent *)",
+      "Bash(python3 -c \"import json,sys; [print\\(a['agent'], a['pane_id'], a['agent_status']\\) for a in json.load\\(sys.stdin\\)['result']['agents']]\")",
+      "Bash(python3 *)",
+      "Bash(xargs ls -t)",
+      "WebSearch"
     ]
   }
 }
