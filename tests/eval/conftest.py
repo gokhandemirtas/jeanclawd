@@ -14,7 +14,6 @@ A compatibility shim is required in the venv after a fresh `uv sync`:
 
 from __future__ import annotations
 
-import asyncio
 import os
 
 import pytest
@@ -54,20 +53,6 @@ class _LocalJudge(DeepEvalBaseLLM):
 		result = await self._llm.ainvoke(prompt)
 		return result.content
 
-
-# ---------------------------------------------------------------------------
-# Single event loop for the entire session.
-# PyMongo's AsyncMongoClient and asyncio primitives bind to the loop they're
-# first created on.  If each test gets a fresh loop (pytest-asyncio default),
-# those objects become stale after the first test.  Sharing one loop across
-# all tests in the suite avoids that.
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="session")
-def event_loop():
-	loop = asyncio.new_event_loop()
-	yield loop
-	loop.close()
 
 
 @pytest.fixture(scope="session")
