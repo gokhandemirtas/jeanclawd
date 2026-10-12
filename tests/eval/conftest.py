@@ -56,18 +56,28 @@ class _LocalJudge(DeepEvalBaseLLM):
 
 @pytest.fixture(scope="session")
 def local_judge() -> _LocalJudge:
+	from dotenv import load_dotenv
+	load_dotenv()
 	return _LocalJudge()
 
 
 # ---------------------------------------------------------------------------
-# DB + session initialisation (session-scoped so we pay the cost once).
+# DB + pipeline init — function-scoped to ensure every test runs in its own
+# event loop, avoiding "Lock bound to a different event loop" errors that
+# arise from asyncio module-level singletons (inference_gate._lock, etc.)
+# when a session-scoped fixture's loop differs from the test's loop.
 # ---------------------------------------------------------------------------
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def pipeline():
-	"""Initialise the full JeanClawd pipeline and tear it down after the suite."""
+	"""Initialise the full JeanClawd pipeline for one test, then tear down."""
 	from dotenv import load_dotenv
 	load_dotenv()
+
+	# Reset asyncio singletons so they rebind to this test's event loop.
+	import utils.inference_gate as _gate
+	_gate._lock = None
+	_gate._foreground_count = 0
 
 	from db.init import db_init
 	from utils.session_service import initialize_session
