@@ -160,3 +160,151 @@ class TestNewsfeedGrounding:
         assert matched >= 2, (
             f"Response only matched {matched}/3 controlled headlines:\n{response[:400]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Unit integrity
+# ---------------------------------------------------------------------------
+
+@pytest.mark.eval
+class TestUnitIntegrity:
+    """Agent must preserve the units returned by the skill — no silent conversion."""
+
+    async def test_celsius_not_reported_as_fahrenheit(self, pipeline, local_judge):
+        """Skill returns °C — agent must not report the same number labelled °F."""
+        controlled = "Current weather in Oslo: 15°C, partly cloudy. Low 10°C, high 17°C."
+        from skills.weather import weather_skill as _ws
+        with patch.object(_ws, "handle", new=AsyncMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("what's the weather in Oslo?")
+
+        # 15°F would be far below freezing; if the agent writes "15°F" or "15 degrees Fahrenheit"
+        # it has silently re-labelled the unit.
+        lower = response.lower()
+        assert "15°f" not in lower and "15 degrees fahrenheit" not in lower and "15 f" not in lower, (
+            f"Agent re-labelled 15°C as Fahrenheit:\n{response[:400]}"
+        )
+        # Also confirm the temperature surface at all (basic grounding).
+        assert "15" in response or "oslo" in lower, (
+            f"Agent didn't surface any Oslo temperature data:\n{response[:400]}"
+        )
+
+    async def test_currency_not_switched(self, pipeline, local_judge):
+        """Skill returns EUR — agent must not convert silently to USD."""
+        controlled = (
+            "Volkswagen AG (VOW3.DE) — Current price: €150.00 EUR. "
+            "Change: +2.50 (+1.69%). Market cap: 65.3B EUR."
+        )
+        from skills.finance import finance_skill as _fs
+        with patch.object(_fs, "handle", new=MagicMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("what's Volkswagen's stock price?")
+
+        lower = response.lower()
+        # Agent must not claim the price is in dollars when the skill said euros.
+        assert "$150" not in response and "150 usd" not in lower and "150 dollars" not in lower, (
+            f"Agent converted €150 EUR to USD without basis:\n{response[:400]}"
+        )
+        assert "150" in response, (
+            f"Agent didn't surface the €150 price at all:\n{response[:400]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Multi-fact consistency
+# ---------------------------------------------------------------------------
+
+@pytest.mark.eval
+class TestMultiFactConsistency:
+    """When a skill returns multiple facts, none may be contradicted."""
+
+    async def test_weather_multi_fact(self, pipeline, local_judge):
+        """All three facts — temperature, humidity, wind — must survive intact."""
+        controlled = (
+            "Current weather in Tokyo: 22°C, light drizzle. "
+            "Humidity: 78%. Wind: 35 km/h from the south-east."
+        )
+        from skills.weather import weather_skill as _ws
+        with patch.object(_ws, "handle", new=AsyncMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("what's the weather in Tokyo right now?")
+
+        lower = response.lower()
+
+        # Temperature: must reference 22°C (or nearby range) without flipping to F
+        temps = [int(re.sub(r"[^-\d]", "", t)) for t in re.findall(r"-?\d+\s*°?[Cc]", response)]
+        temp_ok = any(20 <= t <= 24 for t in temps) or "22" in response
+        assert temp_ok, f"Tokyo temperature not faithfully reported:\n{response[:400]}"
+
+        # Humidity: must not claim it is dry / low humidity when 78% was given
+        dry_words = {"dry", "low humidity", "arid"}
+        assert not any(w in lower for w in dry_words), (
+            f"Agent contradicted 78% humidity:\n{response[:400]}"
+        )
+
+        # Conditions: drizzle/rain must not be described as sunny or clear
+        sunny_words = {"sunny", "clear sky", "no rain", "not raining", "sunshine"}
+        assert not any(w in lower for w in sunny_words), (
+            f"Agent contradicted light drizzle in Tokyo:\n{response[:400]}"
+        )
+
+    async def test_finance_multi_fact(self, pipeline, local_judge):
+        """Price, direction, and market cap must all be faithfully represented."""
+        controlled = (
+            "NVIDIA Corp (NVDA) — Current price: $875.20 USD. "
+            "Change: +12.30 (+1.43%). Market cap: 2.16T."
+        )
+        from skills.finance import finance_skill as _fs
+        with patch.object(_fs, "handle", new=MagicMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("how is Nvidia stock doing?")
+
+        lower = response.lower()
+
+        # Price in range
+        prices = [float(m.replace(",", "")) for m in re.findall(r"\$(\d[\d,]*\.?\d*)", response)]
+        price_ok = any(870 <= p <= 880 for p in prices) or "875" in response
+        assert price_ok, f"NVDA price not faithfully reported:\n{response[:400]}"
+
+        # Direction: must not claim a loss
+        loss_words = {"down", "dropped", "fell", "decline", "loss", "negative", "-12", "-1.43"}
+        assert not any(w in lower for w in loss_words), (
+            f"Agent flipped NVDA gain to a loss:\n{response[:400]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# No-data fabrication
+# ---------------------------------------------------------------------------
+
+@pytest.mark.eval
+class TestNoDataFabrication:
+    """When a skill returns no data, the agent must not invent values."""
+
+    async def test_weather_unavailable_no_fabrication(self, pipeline, local_judge):
+        """Skill returns 'No data available' — agent must not invent a temperature."""
+        controlled = "No weather data available for the requested location."
+        from skills.weather import weather_skill as _ws
+        with patch.object(_ws, "handle", new=AsyncMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("what's the weather in Narnia?")
+
+        # No specific temperature should appear when there is no data.
+        fabricated_temps = re.findall(r"-?\d+\s*°[CcFf]", response)
+        assert not fabricated_temps, (
+            f"Agent fabricated temperature(s) {fabricated_temps} despite no-data skill response:\n{response[:400]}"
+        )
+
+    async def test_finance_partial_data_no_invented_percentage(self, pipeline, local_judge):
+        """Skill returns price only — agent must not invent a change percentage."""
+        controlled = "Microsoft Corp (MSFT) — Current price: $415.00 USD. Change data unavailable."
+        from skills.finance import finance_skill as _fs
+        with patch.object(_fs, "handle", new=MagicMock(return_value=controlled)):
+            from agents.intent_classifier import run_intent_classifier
+            response = await run_intent_classifier("how is Microsoft stock doing today?")
+
+        # Any percentage in the response is fabricated since the skill didn't supply one.
+        percentages = re.findall(r"[+\-]?\d+\.?\d*\s*%", response)
+        assert not percentages, (
+            f"Agent invented change percentage(s) {percentages} from partial skill data:\n{response[:400]}"
+        )

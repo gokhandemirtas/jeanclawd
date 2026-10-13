@@ -299,7 +299,10 @@ async def get_user_name(user_id: str = "default") -> str | None:
 	"""Return the user's name, cached after first search so greetings are instant."""
 	if user_id in _NAME_CACHE:
 		return _NAME_CACHE[user_id]
-	results = await search_relevant_memories("user name called", user_id=user_id, limit=3)
+	try:
+		results = await search_relevant_memories("user name called", user_id=user_id, limit=3)
+	except Exception:
+		return None
 	for fact in results:
 		m = _NAME_RE.search(fact)
 		if m:

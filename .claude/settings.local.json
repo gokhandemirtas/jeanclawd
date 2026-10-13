@@ -21,7 +21,8 @@
       "Bash(python3 -c \"import json,sys; [print\\(a['agent'], a['pane_id'], a['agent_status']\\) for a in json.load\\(sys.stdin\\)['result']['agents']]\")",
       "Bash(python3 *)",
       "Bash(xargs ls -t)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(.venv/bin/python *)"
     ]
   }
 }

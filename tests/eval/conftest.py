@@ -24,6 +24,99 @@ from langchain_openai import ChatOpenAI
 
 
 # ---------------------------------------------------------------------------
+# Pre-flight health checks — run before any test is collected so a missing
+# backend produces one clear error instead of a cascade of 400 / connection-
+# refused failures mid-suite.
+# ---------------------------------------------------------------------------
+
+def _check_mongo() -> None:
+	"""Verify MongoDB is reachable and auth succeeds."""
+	import pymongo
+	from dotenv import load_dotenv
+	load_dotenv()
+
+	uri = (
+		f"mongodb://{os.environ['MONGODB_USER']}:{os.environ['MONGODB_PASSWORD']}@"
+		f"{os.environ.get('MONGODB_HOST', 'localhost')}:{os.environ.get('MONGODB_PORT', '27017')}"
+		"/?authSource=admin&directConnection=true"
+		"&serverSelectionTimeoutMS=4000&connectTimeoutMS=4000"
+	)
+	try:
+		client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=4000)
+		client.admin.command("ping")
+		client.close()
+	except Exception as exc:
+		pytest.exit(
+			f"\n[preflight] MongoDB is not reachable at "
+			f"{os.environ.get('MONGODB_HOST', 'localhost')}:"
+			f"{os.environ.get('MONGODB_PORT', '27017')} — {exc}\n"
+			"Start MongoDB before running the eval suite.",
+			returncode=3,
+		)
+
+
+def _check_inference() -> None:
+	"""Verify the inference backend is up and all required models are loaded."""
+	import json
+	import urllib.error
+	import urllib.request
+	from dotenv import load_dotenv
+	load_dotenv()
+
+	provider = os.getenv("INFERENCE_PROVIDER", "lmstudio").lower()
+	if provider == "openai":
+		return  # OpenAI is always assumed reachable; real API errors surface naturally
+
+	base_url = os.environ.get("MODEL_HOST", "http://localhost:1234/v1").rstrip("/")
+	models_url = f"{base_url}/models"
+
+	try:
+		req = urllib.request.Request(models_url, headers={"Authorization": "Bearer lm-studio"})
+		with urllib.request.urlopen(req, timeout=5) as resp:
+			data = json.loads(resp.read())
+	except urllib.error.URLError as exc:
+		pytest.exit(
+			f"\n[preflight] LM Studio is not reachable at {base_url} — {exc}\n"
+			"Start LM Studio and load at least the generalist model before running the eval suite.",
+			returncode=3,
+		)
+	except Exception as exc:
+		pytest.exit(f"\n[preflight] Inference backend check failed: {exc}", returncode=3)
+
+	loaded = [m["id"] for m in data.get("data", [])]
+	if not loaded:
+		pytest.exit(
+			f"\n[preflight] LM Studio is running but no models are loaded ({base_url}).\n"
+			"Load at least the generalist model before running the eval suite.",
+			returncode=3,
+		)
+
+	generalist = os.environ.get("MODEL_GENERALIST", "")
+	embedding = os.environ.get("MODEL_EMBEDDING", "")
+	missing: list[str] = []
+	if generalist and not any(generalist.lower() in m.lower() for m in loaded):
+		missing.append(f"generalist  →  {generalist}")
+	if embedding and not any(embedding.lower() in m.lower() for m in loaded):
+		missing.append(f"embedding   →  {embedding}")
+
+	if missing:
+		loaded_str = "\n    ".join(loaded)
+		pytest.exit(
+			f"\n[preflight] Required model(s) not loaded in LM Studio:\n"
+			+ "".join(f"  • {m}\n" for m in missing)
+			+ f"Loaded models:\n    {loaded_str}\n"
+			"Load the missing model(s) in LM Studio before running the eval suite.",
+			returncode=3,
+		)
+
+
+def pytest_sessionstart(session) -> None:
+	"""Run all pre-flight checks before test collection begins."""
+	_check_mongo()
+	_check_inference()
+
+
+# ---------------------------------------------------------------------------
 # DeepEval judge — uses the same local generalist model so no OpenAI key
 # is needed for LLM-as-judge scoring.
 # ---------------------------------------------------------------------------
@@ -120,5 +213,5 @@ async def clean_memories(pipeline):
 	await close_memory_store()
 
 
-def pytest_configure(config):
+def pytest_configure(config) -> None:
 	config.addinivalue_line("markers", "eval: integration eval tests (require live inference + DB)")
