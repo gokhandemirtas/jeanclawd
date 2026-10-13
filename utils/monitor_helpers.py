@@ -82,8 +82,13 @@ def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_colo
     return lines
 
 
-def resource_markup() -> str:
+def resource_markup(*, compact: bool = False) -> str:
     lines: list[str] = ["[bold #22d3ee]RESOURCES[/bold #22d3ee]  [dim]POLL: 1s[/dim]", "[dim]─────────────────────[/dim]", ""]
+
+    def usage(used: float, total: float) -> str:
+        if compact:
+            return f"{used / 1024:.1f}/{total / 1024:.1f}G"
+        return f"{fmt_mb(used)} / {fmt_mb(total)}"
 
     # CPU
     pct = psutil.cpu_percent(interval=None)
@@ -95,7 +100,7 @@ def resource_markup() -> str:
     used_mb  = vm.used  / 1024 ** 2
     total_mb = vm.total / 1024 ** 2
     filled = int(16 * vm.percent / 100)
-    lines += _meter("RAM", f"{fmt_mb(used_mb)} / {fmt_mb(total_mb)}", filled, 16, "#7c3aed", f"{vm.percent:.0f}%")
+    lines += _meter("RAM", usage(used_mb, total_mb), filled, 16, "#7c3aed", f"{vm.percent:.0f}%")
 
     # Swap
     try:
@@ -105,7 +110,7 @@ def resource_markup() -> str:
             sw_total = sw.total / 1024 ** 2
             sw_pct   = sw.percent
             filled   = int(16 * sw_pct / 100)
-            lines += _meter("Swap", f"{fmt_mb(sw_used)} / {fmt_mb(sw_total)}", filled, 16, "#22d3ee", f"{sw_pct:.0f}%")
+            lines += _meter("Swap", usage(sw_used, sw_total), filled, 16, "#22d3ee", f"{sw_pct:.0f}%")
     except OSError:
         pass
 
@@ -134,7 +139,7 @@ def resource_markup() -> str:
         vram_total = info.total / 1024 ** 2
         vram_pct   = vram_used / vram_total * 100 if vram_total else 0
         filled     = int(16 * vram_pct / 100)
-        lines += _meter("VRAM", f"{fmt_mb(vram_used)} / {fmt_mb(vram_total)}", filled, 16, "#facc15", f"{vram_pct:.0f}%")
+        lines += _meter("VRAM", usage(vram_used, vram_total), filled, 16, "#facc15", f"{vram_pct:.0f}%")
     except Exception:
         pass
 
@@ -155,6 +160,7 @@ def resource_markup() -> str:
     else:
         pct_ctx = used_ctx / max_ctx * 100
         filled  = int(16 * pct_ctx / 100)
-        lines += _meter("CTX", f"{used_ctx:,} / {max_ctx:,}", filled, 16, "#4ade80", f"{pct_ctx:.0f}%")
+        ctx_value = f"{used_ctx / 1000:.0f}k/{max_ctx / 1000:.0f}" if compact else f"{used_ctx:,} / {max_ctx:,}"
+        lines += _meter("CTX", ctx_value, filled, 16, "#4ade80", f"{pct_ctx:.0f}%")
 
     return "\n".join(lines)

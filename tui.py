@@ -70,8 +70,8 @@ PIPELINE_NODES: list[tuple[str, str]] = [
 ]
 
 
-def _models_markup() -> str:
-    """One-shot markup for the models panel (env-based, static)."""
+def _models_markup(value_width: int = 18) -> str:
+    """Markup for the models panel sized to its available terminal column."""
     rows = [
         ("Generalist", os.getenv("MODEL_GENERALIST", "—")),
         ("Intent",     os.getenv("MODEL_INTENT", "—")),
@@ -80,13 +80,16 @@ def _models_markup() -> str:
         ("Embedding",  os.getenv("MODEL_EMBEDDING", "—")),
         ("Host",       os.getenv("MODEL_HOST", "—")),
     ]
+    value_width = max(6, value_width)
     lines: list[str] = [
         "[bold #22d3ee]MODELS[/bold #22d3ee]  [dim]ACTIVE CLUSTER[/dim]",
         "[dim]─────────────────────[/dim]",
     ]
     for label, val in rows:
-        val_display = val if len(val) <= 18 else val[:15] + "…"
-        lines.append(f"[dim]{label:<11}[/dim][#22d3ee]{val_display}[/#22d3ee]")
+        val_display = val if len(val) <= value_width else val[:value_width - 1] + "…"
+        lines.append(
+            f"[dim]{label:<11}[/dim][#22d3ee]{val_display:>{value_width}}[/#22d3ee]"
+        )
     return "\n".join(lines)
 
 
@@ -334,10 +337,11 @@ class TuiApp(App):
         color: #cbd5e1;
     }
     #chat-input-bar {
-        height: 5;
+        height: 6;
         background: #12141f;
         border-top: tall #24283b;
         padding: 1 1;
+        align: left middle;
     }
     #chat-input-bar:focus-within { border-top: tall #7c3aed; }
     #chat-prompt {
@@ -583,6 +587,7 @@ class TuiApp(App):
         self.set_interval(0.2, self._refresh_subway)
 
         self._refresh_resources()
+        self._refresh_models_panel()
         # Focus input immediately so the cursor blinks before startup completes
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
         self.run_worker(self._startup(), exclusive=False, name="startup")
@@ -653,9 +658,22 @@ class TuiApp(App):
 
     def _refresh_resources(self) -> None:
         try:
-            self.query_one("#resource-panel", Static).update(_resource_markup())
+            self.query_one("#resource-panel", Static).update(_resource_markup(compact=True))
         except Exception:
             pass
+
+    def _refresh_models_panel(self) -> None:
+        """Use the right rail's full width without allowing model rows to wrap."""
+        try:
+            panel_width = self.query_one("#right-panel").size.width
+            # Right-panel padding consumes four cells; model labels consume eleven.
+            value_width = max(6, panel_width - 15)
+            self.query_one("#models-panel", Static).update(_models_markup(value_width))
+        except Exception:
+            pass
+
+    def on_resize(self) -> None:
+        self._refresh_models_panel()
 
     # ── subway refresh ────────────────────────────────────────────────────────
 
