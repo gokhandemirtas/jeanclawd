@@ -89,7 +89,13 @@ async def pipeline():
 @pytest_asyncio.fixture
 async def clean_memories(pipeline):
 	"""Isolate memories and their MongoDB connection for each eval test."""
-	from utils.langmem_service import _EXTRACTION_TASKS, clear_memories, close_memory_store
+	from db.schemas import Interaction, Session
+	from utils.langmem_service import (
+		_EXTRACTION_TASKS,
+		_NAME_CACHE,
+		clear_memories,
+		close_memory_store,
+	)
 
 	# An extraction launched by an earlier test can otherwise write after its
 	# database cleanup, contaminating this test's supposedly empty store.
@@ -98,11 +104,17 @@ async def clean_memories(pipeline):
 		await asyncio.gather(*tasks, return_exceptions=True)
 	await close_memory_store()
 	await clear_memories()
+	await Interaction.find(Interaction.user_id == "default").delete()
+	await Session.find(Session.user_id == "default").delete()
+	_NAME_CACHE.clear()
 	yield
 	tasks = list(_EXTRACTION_TASKS)
 	if tasks:
 		await asyncio.gather(*tasks, return_exceptions=True)
 	await clear_memories()
+	await Interaction.find(Interaction.user_id == "default").delete()
+	await Session.find(Session.user_id == "default").delete()
+	_NAME_CACHE.clear()
 	# Reopen on the next test so a long eval run never reuses a stale MongoDB
 	# connection pool.
 	await close_memory_store()
