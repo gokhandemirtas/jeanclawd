@@ -138,11 +138,12 @@ def _subway_markup(
         pad = max(1, node_width - len(node_text))
 
         if node_id in node_times:
-            time_part = f"[dim]{' ' * pad}{_fmt_dur(node_times[node_id])}[/dim]"
+            elapsed = _fmt_dur(node_times[node_id])
+            time_part = f"[dim]{' ' * max(1, pad - len(elapsed))}{elapsed}[/dim]"
         elif node_id == current and current != "idle":
-            time_part = f"[dim]{' ' * pad}…[/dim]"
+            time_part = f"[dim]{' ' * max(1, pad - 1)}…[/dim]"
         else:
-            time_part = f"[dim]{' ' * pad}—[/dim]" if node_id not in completed else ""
+            time_part = f"[dim]{' ' * max(1, pad - 1)}—[/dim]" if node_id not in completed else ""
 
         lines.append(f"[{style}]{node_text}[/{style}]{time_part}")
         if i < len(PIPELINE_NODES) - 1:
