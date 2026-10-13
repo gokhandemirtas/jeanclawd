@@ -347,6 +347,7 @@ class TuiApp(App):
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+l", "clear_chat", "Clear chat"),
         Binding("a", "toggle_autoscroll", "Auto-scroll", show=False),
+        Binding("y", "copy_log", "Copy log", show=False),
     ]
 
     def __init__(
@@ -422,6 +423,7 @@ class TuiApp(App):
                                     yield Button(lvl, id=f"btn-{lvl}")
                                 yield Button("LLM PERF", id="btn-LLM_PERF")
                                 yield Button("CLEAR", id="btn-clear", variant="warning")
+                                yield Button("COPY", id="btn-copy", variant="default")
                             yield Label("", id="monitor-stats")
                             yield RichLog(
                                 id="monitor-log-view",
@@ -879,10 +881,48 @@ class TuiApp(App):
         except Exception:
             pass
 
+    # ── monitor copy ──────────────────────────────────────────────────────────
+
+    def _entry_text(self, entry: dict, event_view: bool = False) -> str:
+        if not event_view:
+            return f"{entry.get('ts', '')} {entry.get('level', 'INFO'):<5} {entry.get('msg', '')}"
+        fields = {k: v for k, v in entry.items() if k not in {"ts", "level", "msg", "event"}}
+        return (
+            f"{entry.get('ts', '')} {entry.get('level', 'INFO'):<5} "
+            f"{entry.get('event', entry.get('msg', 'event'))} "
+            f"{json.dumps(fields, ensure_ascii=False, default=str)}"
+        ).rstrip()
+
+    def action_copy_log(self) -> None:
+        selected = self.screen.get_selected_text()
+        if selected:
+            self.copy_to_clipboard(selected)
+            self.notify("Copied selection to clipboard")
+            return
+        try:
+            tabs = self.query_one("#monitor-log-tabs", TabbedContent)
+            is_events = tabs.active == "tab-events"
+        except Exception:
+            is_events = False
+        entries = self._event_entries if is_events else self._log_entries
+        text = "\n".join(
+            self._entry_text(e, event_view=is_events)
+            for e in entries
+            if self._entry_matches_filter(e)
+        )
+        if not text:
+            self.notify("No matching log entries to copy", severity="warning")
+            return
+        self.copy_to_clipboard(text)
+        self.notify(f"Copied {len(text.splitlines())} filtered result(s) to clipboard")
+
     # ── monitor filter buttons ────────────────────────────────────────────────
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
+        if btn_id == "btn-copy":
+            self.action_copy_log()
+            return
         if btn_id == "btn-clear":
             try:
                 self.query_one("#monitor-log-view", RichLog).clear()
