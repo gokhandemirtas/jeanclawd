@@ -2,6 +2,8 @@ import json
 import os
 import threading
 import traceback
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 
 from rich.console import Console
@@ -15,6 +17,20 @@ _log_file = None
 _log_path = None
 _file_lock = threading.Lock()
 _MAX_LOG_BYTES = 500 * 1024
+_message_capture: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+	"message_capture", default=None
+)
+
+
+@contextmanager
+def capture_messages():
+	"""Capture log output for an interactive surface without printing to stdout."""
+	messages: list[tuple[str, str]] = []
+	token = _message_capture.set(messages)
+	try:
+		yield messages
+	finally:
+		_message_capture.reset(token)
 
 
 def init_file_logging(path: str) -> None:
@@ -31,6 +47,9 @@ def init_file_logging(path: str) -> None:
 
 def _write(level: str, msg: str, fields: dict | None = None) -> None:
 	global _log_file
+	capture = _message_capture.get()
+	if capture is not None:
+		capture.append((level, msg))
 	if _log_file:
 		with _file_lock:
 			entry_data = {"ts": datetime.now().isoformat(timespec="milliseconds"), "level": level, "msg": msg}
@@ -58,6 +77,8 @@ def set_debug(enabled: bool) -> None:
 
 def debug(msg: str, agent: str | None = None) -> None:
 	_write("DEBUG", f"[{agent}] {msg}" if agent else msg)
+	if _message_capture.get() is not None:
+		return
 	if not _debug_enabled:
 		return
 	# Extract leading [tag] from message if no explicit agent given
@@ -76,17 +97,23 @@ def debug(msg: str, agent: str | None = None) -> None:
 
 def info(msg: str) -> None:
 	_write("INFO", msg)
+	if _message_capture.get() is not None:
+		return
 	_console.print(f"[bold cyan]>[/bold cyan] {msg}")
 
 
 def warning(msg: str) -> None:
 	_write("WARN", msg)
+	if _message_capture.get() is not None:
+		return
 	if _debug_enabled:
 		_console.print(f"[bold yellow][WARN][/bold yellow] {msg}")
 
 
 def error(msg: str) -> None:
 	_write("ERROR", msg)
+	if _message_capture.get() is not None:
+		return
 	if _debug_enabled:
 		_console.print(f"[bold red][ERROR][/bold red] {escape(msg)}")
 

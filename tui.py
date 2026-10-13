@@ -363,11 +363,13 @@ class TuiApp(App):
     }
 
     #main-tabs > Tabs {
-        height: 2;
-        padding-left: 2;
+        height: 3;
+        padding: 0 2;
     }
     #main-tabs ContentTab {
-        min-width: 12;
+        min-width: 18;
+        height: 3;
+        padding: 1 5;
     }
 
     /* ── dashboard ── */
@@ -868,7 +870,24 @@ class TuiApp(App):
         chat_log = self.query_one("#chat-log", RichLog)
         try:
             from commands import handle_command
-            await handle_command(cmd)
+            from utils import logger
+
+            # Commands report their results through the shared logger in the
+            # CLI. Capture that output here so it reaches the chat instead of
+            # printing below the Textual application.
+            with logger.capture_messages() as messages:
+                await handle_command(cmd)
+            if messages:
+                for level, message in messages:
+                    style = LEVEL_STYLE.get(level, "dim")
+                    chat_log.write(
+                        f"[dim]{self._ts()}[/dim]  "
+                        f"[bold #4ade80]Jean:[/bold #4ade80] "
+                        f"[{style}]{escape(message)}[/{style}]"
+                    )
+                chat_log.scroll_end(animate=False)
+            else:
+                self._write_jean("[dim]Command completed.[/dim]")
         except Exception as exc:
             chat_log.write(f"[bold red]Command error:[/bold red] {exc}")
 
