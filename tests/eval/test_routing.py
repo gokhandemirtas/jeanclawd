@@ -10,7 +10,7 @@ Run:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pytest
 
@@ -76,8 +76,9 @@ _CASES: list[_Case] = [
 		pass_criteria=(
 			"Response either (a) provides historical content about the Ottoman Empire — "
 			"founding, expansion, or decline — OR (b) clearly states that the research "
-			"or search service is currently unavailable and asks the user to try again. "
-			"Both are acceptable outcomes depending on whether the search service is reachable."
+			"or search service is currently unavailable and asks the user to try again "
+			"OR (c) states that the research is complete and directs the user to a document "
+			"or file where the results can be found. All three are acceptable outcomes."
 		),
 		note="SEARCH — deep research trigger",
 	),

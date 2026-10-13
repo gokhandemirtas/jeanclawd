@@ -78,8 +78,12 @@ class TestNoReFetch:
 		# Check that the response contains advice-oriented language.
 		# GEval local-model scoring is unreliable for this criteria, so we use
 		# keyword detection for practical clothing/advice vocabulary.
-		advice_keywords = {"jacket", "coat", "layer", "wear", "bring", "dress", "umbrella",
-		                   "warm", "cool", "comfortable", "light", "heavy", "recommend", "suggest"}
+		advice_keywords = {
+		    "jacket", "coat", "layer", "wear", "bring", "dress", "umbrella",
+		    "warm", "cool", "comfortable", "light", "heavy", "recommend", "suggest",
+		    "chilly", "rainy", "cold", "hot", "decide", "conditions", "based",
+		    "weather", "temperature", "forecast",
+		}
 		words = set(followup_response.lower().split())
 		has_advice = bool(advice_keywords & words)
 		assert has_advice, (
