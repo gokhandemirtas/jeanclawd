@@ -14,17 +14,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import colorsys
 from datetime import datetime
 import json
+import math
 import os
 import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
 
 import psutil
 from dotenv import load_dotenv
+from rich.color import Color
 from rich.markup import escape
+from rich.style import Style
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -140,6 +146,106 @@ def _subway_markup(
 # ── log helpers (from monitor.py) ─────────────────────────────────────────────
 
 
+# ── splash screen ─────────────────────────────────────────────────────────────
+
+_SPLASH_ART = r"""
+
+                                          _ ___   _   _  _      ___ _    _   _ _ _ ___
+                                         | | __| /_\ | \| |    / __| |  /_\ | | | |   \
+                                       _ | | _| / _ \| .` |   | (__| |_/ _ \| |_| | |) |
+                                       \__/|___/_/ \_|_|\_|    \___|____/_/ \_|\___/|___/
+
+                                    #++***                                                 %*#***
+                                =-:=@@@@@                                                 @%@@@@%-:=+
+                              =:.=@@@@                                                         @@@%:.:=
+                            +=::-*@@     %*#%                                           @##%     @%*:..=#
+                           *=-::=#@ *===*@@@                                             @@%=-=*  %*-:.==*
+                          +=::==#%*=:.:-*%                                                @@#-..:=#%*=-.-=+
+                        **+=:::-. =.::-**                                                   *-::..-.:=::-+**
+                        *#*=---.   :-=*                                                      *=--:.  .===****
+                       *#**+=-....::-+                  %=%#           @*%%                   *=:::...:=**##*
+                       *%#**+:::::-=#                  %@@@*%         *@@@%                    **=-::::-#*#%*%
+                       *#%%*==--==**               %#*++#@@#%%+==+++*%*%@@++*%#                  *+=---=-%%%*%
+                       ##%%#*=+*###           *+*****==%@%**%@@%#*%%@%%=#@@*+****#*#              %#*+=+*%%%%*
+                       #%%#*#=:-=%@#+      *++=%%%%@@@@%***+***++**+%===+**#%@@@%@@***#         *%%*=-:#@%#%%%
+                        %@%%*===*%*-+****   %@@@%%%#*+=--++*%*=*%%%**%*=-==++*#%%%@@@@#    ***++=*#%=--=+#%%%
+                         %%%*+#%*+=::==+**#%%%%%%%%#*+=:::=*+  :**=  =*+:::=+**#%%%%%%@ %#**===::+*=*%#**%%%
+                            %%#*=::::..:=**%%@@#**#%#+==-=:*=. :*%*..-*====+*#%%##%%@@%%#*+=:...::::-*%%%
+                             @%%**=-::::.:=#+*@@@%%#*****-:*+:-:*%=-=+==--*****#%@@@@#*#*=::.:::-==**%%
+                                %%**+==--*:::+***%@##%*====*+-:-*%+--*+*==+***#%@%*#++:..:*:-==++*#%%
+                                    #%#****=#*=.:.:.*:::*@%%#-=%%%%*-*%%%%-.:*-....:-+%*=%****%%
+                                         %%%*+*==----.::+:**++..:::.:*=%=+=.::=:---=*=*%%%%
+                                           @%%%%###+=*#*::+...::::-:::.--:*%*==****#%%@@
+                                             @#%%%@%@%*#%*:......:.....:=##**%#%%%%%%
+                                              @@%%%@#=:::*=-:::-::-::---+=:::=%@%%%%
+                                      *#%%%%%%%%@@@%%**==*::::::-=:::::-=*==*%%%@@@%@%%%%%%*#
+                                 #*%%%#***++==+===*:=-:****===-=+*======#+@::=::*+=+=-+****##%%***
+                         #*##**#%***=:..:=====:=:-*-:*:-*#%====*#%#*-===%%=-=+-=*:-::=++==:..:=***%*******
+                 ***#**#***=+*+=*#=+*******+==::=:=#*%-+@*%*+******+***#*%@==%##=-=::==+*****++==#*++**=***#*#*##*#
+      *%%####**#*+**+++=--+**%##*=*%*****+--==+#%#%##%%%%%%@%##%%%%###%@%%%@%##%%#%*+=--=+****%#*=**##*+=---====*#*+%%#*******
+   %%*##=+=====+%*=*+***%%%%%%#**%%*%%%%%%%%%%@@                   @@%%%%%%%@%#%@%+*#%%%%%%###***==%*+====**+%**%%
+%%#%@@@%@##%%%%%%%%%%%%%@@        @@@%%@                                  %@@%@%@       @@@@%%%%%#@@%%%%%%*#@%@@@%%%%
+@@@@@@@@@@@@@@@@    @@@                                                                        @@@   @@@@@@@@@@@ @@@@@@
+
+"""
+
+_SPLASH_DURATION = 2.5
+_SPLASH_FPS = 20
+
+
+def _hue_rgb(hue: float) -> tuple[int, int, int]:
+    r, g, b = colorsys.hsv_to_rgb(hue % 1.0, 1.0, 1.0)
+    return int(r * 255), int(g * 255), int(b * 255)
+
+
+def _gradient_art(art: str, start_rgb: tuple[int, int, int], end_rgb: tuple[int, int, int]) -> Text:
+    lines = [line.rstrip() for line in textwrap.dedent(art).split("\n")]
+    max_width = max((len(line) for line in lines), default=1)
+    rich_text = Text(no_wrap=True)
+    for line in lines:
+        for i, char in enumerate(line):
+            t = i / max_width
+            r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * t)
+            g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * t)
+            b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * t)
+            rich_text.append(char, style=Style(color=Color.from_rgb(r, g, b)))
+        rich_text.append("\n")
+    return rich_text
+
+
+class SplashPanel(Static):
+    """Animated ASCII splash rendered as a full-screen overlay.
+
+    Uses ``overlay: screen`` so it sits above all other widgets without
+    affecting the layout underneath.  After _SPLASH_DURATION seconds (or on
+    any key press) it removes itself and refocuses the chat input.
+    """
+
+    def on_mount(self) -> None:
+        self._start = time.monotonic()
+        self.set_interval(1 / _SPLASH_FPS, self._tick)
+
+    def _tick(self) -> None:
+        elapsed = time.monotonic() - self._start
+        if elapsed >= _SPLASH_DURATION:
+            self._dismiss()
+            return
+        t = elapsed / _SPLASH_DURATION
+        start_hue = 0.13 + 0.5 * math.sin(t * math.pi * 2)
+        self.update(_gradient_art(_SPLASH_ART, _hue_rgb(start_hue), _hue_rgb(start_hue + 0.15)))
+
+    def on_key(self) -> None:
+        if time.monotonic() - self._start > 0.3:  # avoid accidental skip
+            self._dismiss()
+
+    def _dismiss(self) -> None:
+        self.remove()
+        try:
+            self.app.query_one("#chat-input", Input).focus()
+        except Exception:
+            pass
+
+
 # ── TUI app ────────────────────────────────────────────────────────────────────
 
 
@@ -148,6 +254,15 @@ class TuiApp(App):
     SUB_TITLE = "personal AI"
 
     CSS = """
+    /* ── splash ── */
+    SplashPanel {
+        overlay: screen;
+        background: $background;
+        align: center middle;
+        content-align: center middle;
+        padding: 2 4;
+    }
+
     /* ── shared ── */
     Header { height: 1; }
 
@@ -355,6 +470,7 @@ class TuiApp(App):
                                 markup=False,
                                 wrap=False,
                             )
+        yield SplashPanel(id="splash")
         yield Footer()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────

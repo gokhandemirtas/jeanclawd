@@ -22,7 +22,6 @@ from skills.conversation.skill import generate_greeting, resolve_query
 from commands import handle_command, _COMMANDS
 from db.init import db_init
 from utils import logger
-from utils.boot_info import boot, check_inference
 from utils.task_queue import drain, enqueue, pending_count, worker
 from utils.pending_plan import (
 	clear_pending,
@@ -200,38 +199,15 @@ async def main(
 		api_url = f"http://{_api_host}:{_api_port}"
 		logger.debug("API server started")
 
-	from providers import backend_label as _backend_label
-	inf_ok, inf_detail = await check_inference()
-	inf_detail = f"{_backend_label()} — {inf_detail}"
-
-	db_ok, db_detail = False, ""
 	try:
-		mongo_host = os.getenv("MONGODB_HOST", "localhost")
-		mongo_port = os.getenv("MONGODB_PORT", "27017")
-		db_detail = f"mongodb://{mongo_host}:{mongo_port}"
 		await db_init()
-		db_ok = True
 	except Exception as exc:
-		db_detail = str(exc)
-
-	connections: dict[str, tuple[bool, str]] = {
-		"Inference": (inf_ok, inf_detail),
-		"Database": (db_ok, db_detail),
-	}
-	if api_url:
-		connections["API"] = (True, api_url)
-
-	if not db_ok:
-		console.print("[red]Database unavailable — cannot start.[/red]")
+		console.print(f"[red]Database unavailable — cannot start: {exc}[/red]")
 		sys.exit(1)
 
 	if telegram:
 		from skills.telegram_skill import start_telegram_bot
-
-		telegram_status = await start_telegram_bot()
-		connections["Telegram"] = (
-			bool(telegram_status), telegram_status or "TELEGRAM_BOT_TOKEN not set"
-		)
+		await start_telegram_bot()
 
 	from db.preferences import apply_preferences
 	await apply_preferences()
@@ -244,22 +220,6 @@ async def main(
 	except ValueError:
 		console.print(f"[red]Could not resume session: {session_id}[/red]")
 		return
-	from agents.persona import get_active_persona_id, get_active_voice_id
-	boot(
-		connections=connections,
-		flags={
-			"emote": emote,
-			"speak": speak,
-			"listen": listen,
-			"track_camera": track_camera,
-			"server": server,
-			"telegram": telegram,
-		},
-		persona={
-			"Persona": get_active_persona_id(),
-			"Voice": get_active_voice_id() or "—",
-		},
-	)
 
 	greeting = await generate_greeting()
 	console.print(greeting)
