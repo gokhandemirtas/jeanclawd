@@ -80,11 +80,13 @@ def _models_markup() -> str:
         ("Embedding",  os.getenv("MODEL_EMBEDDING", "—")),
         ("Host",       os.getenv("MODEL_HOST", "—")),
     ]
-    lines: list[str] = ["[bold cyan]Models[/bold cyan]", "[dim]─────────────────────[/dim]"]
+    lines: list[str] = [
+        "[bold #22d3ee]MODELS[/bold #22d3ee]  [dim]ACTIVE CLUSTER[/dim]",
+        "[dim]─────────────────────[/dim]",
+    ]
     for label, val in rows:
-        # Truncate long model names for the narrow panel
-        val_display = val if len(val) <= 22 else val[:19] + "…"
-        lines.append(f"[dim]{label:<11}[/dim] [cyan]{val_display}[/cyan]")
+        val_display = val if len(val) <= 18 else val[:15] + "…"
+        lines.append(f"[dim]{label:<11}[/dim][#22d3ee]{val_display}[/#22d3ee]")
     return "\n".join(lines)
 
 
@@ -105,21 +107,26 @@ def _subway_markup(
     node_times = node_times or {}
     NODE_W = 18  # chars reserved for "icon label suffix"
 
+    exec_indicator = f"  [bold #facc15]● EXEC[/bold #facc15]" if current != "idle" else ""
     lines: list[str] = [
-        "[bold cyan]Pipeline[/bold cyan]",
+        f"[bold #22d3ee]PIPELINE[/bold #22d3ee]{exec_indicator}",
         "[dim]──────────────────────────[/dim]",
     ]
     for i, (node_id, default_label) in enumerate(PIPELINE_NODES):
         display = label.upper() if node_id == "skill" and label else default_label
 
         if node_id == current and error:
-            icon, style, suffix = "◎", "bold red", " ✗"
+            icon, style, conn = "◎", "bold #f87171", "#f87171"
+            suffix = " ✗"
         elif node_id == current and current != "idle":
-            icon, style, suffix = "◎", "bold yellow", " ◄"
+            icon, style, conn = "◎", "bold #facc15", "#facc15"
+            suffix = " ◄"
         elif node_id in completed:
-            icon, style, suffix = "●", "dim green", ""
+            icon, style, conn = "●", "#4ade80", "#4ade80"
+            suffix = ""
         else:
-            icon, style, suffix = "○", "dim", ""
+            icon, style, conn = "○", "dim", "dim"
+            suffix = ""
 
         node_text = f"{icon} {display}{suffix}"
         pad = max(1, NODE_W - len(node_text))
@@ -129,16 +136,15 @@ def _subway_markup(
         elif node_id == current and current != "idle":
             time_part = f"[dim]{' ' * pad}…[/dim]"
         else:
-            time_part = ""
+            time_part = f"[dim]{' ' * pad}—[/dim]" if node_id not in completed else ""
 
         lines.append(f"[{style}]{node_text}[/{style}]{time_part}")
         if i < len(PIPELINE_NODES) - 1:
-            connector_style = "dim green" if node_id in completed else "dim"
-            lines.append(f"[{connector_style}]│[/{connector_style}]")
+            lines.append(f"[{conn}]│[/{conn}]")
 
     if total_time > 0:
         lines.append("[dim]──────────────────────────[/dim]")
-        lines.append(f"[dim]Total{' ' * (NODE_W - 5)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
+        lines.append(f"[dim]PREV TOTAL{' ' * (NODE_W - 10)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
 
     return "\n".join(lines)
 
@@ -308,7 +314,7 @@ class TuiApp(App):
     }
     #chat-input {
         height: 3;
-        border-top: tall $primary;
+        border-top: tall #7c3aed;
         border-bottom: none;
         border-left: none;
         border-right: none;
@@ -316,7 +322,7 @@ class TuiApp(App):
         padding: 0 2;
     }
     #chat-input:focus {
-        border-top: tall $accent;
+        border-top: tall #7c3aed;
     }
 
     /* right info panel */
@@ -369,7 +375,7 @@ class TuiApp(App):
         color: $text;
     }
     #monitor-filter-bar Button.-active {
-        background: $accent;
+        background: #7c3aed;
         color: $text;
         text-style: bold;
     }
@@ -608,11 +614,11 @@ class TuiApp(App):
         if not self._first_message:
             chat_log.write("")
         self._first_message = False
-        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold cyan]You[/bold cyan]  {escape(text)}")
+        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold #22d3ee]You:[/bold #22d3ee]  {escape(text)}")
 
     def _write_jean(self, text: str) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold green]Jean[/bold green]  {text}")
+        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold #4ade80]Jean:[/bold #4ade80]  {text}")
         chat_log.scroll_end(animate=False)
 
     # ── streaming ─────────────────────────────────────────────────────────────
@@ -623,7 +629,7 @@ class TuiApp(App):
         text = "".join(self._stream_tokens)
         label = self.query_one("#streaming-label", Label)
         label.update(
-            f"[dim]{self._ts()}[/dim]  [bold green]Jean[/bold green]  {text}[dim]▌[/dim]"
+            f"[dim]{self._ts()}[/dim]  [bold #4ade80]Jean:[/bold #4ade80]  {text}[dim]▌[/dim]"
         )
 
     def _on_token(self, token: str) -> None:
@@ -916,12 +922,14 @@ class TuiApp(App):
 
     def _update_monitor_stats(self) -> None:
         try:
-            parts = [
+            total = sum(self._log_counts.values())
+            parts = [f"[bold]TOTAL: {total}[/bold]"]
+            parts += [
                 f"[{LEVEL_STYLE[lvl]}]{lvl}: {self._log_counts[lvl]}[/{LEVEL_STYLE[lvl]}]"
                 for lvl in ALL_LEVELS
             ]
             scroll_indicator = (
-                "  [bold green]↓ auto[/bold green]"
+                "  [bold #4ade80]↓ auto[/bold #4ade80]"
                 if self._log_autoscroll
                 else "  [dim]scroll: off[/dim]"
             )

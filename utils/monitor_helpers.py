@@ -67,25 +67,35 @@ def performance_text(entry: dict) -> str:
 # ── system resource markup ────────────────────────────────────────────────────
 
 
+def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_color: str, subtitle: str = "") -> list[str]:
+    """Render a 3-line resource meter card."""
+    filled = min(bar_filled, bar_total)
+    empty = bar_total - filled
+    bar_line = f"[{bar_color}]{'█' * filled}[/{bar_color}][dim]{'░' * empty}[/dim]"
+    lines = [
+        f"[bold {bar_color}]{label}[/bold {bar_color}]  [bold]{value_str}[/bold]",
+        bar_line,
+    ]
+    if subtitle:
+        lines.append(f"[dim]{subtitle}[/dim]")
+    lines.append("")
+    return lines
+
+
 def resource_markup() -> str:
-    lines: list[str] = []
+    lines: list[str] = ["[bold #22d3ee]RESOURCES[/bold #22d3ee]  [dim]POLL: 1s[/dim]", "[dim]─────────────────────[/dim]", ""]
 
     # CPU
     pct = psutil.cpu_percent(interval=None)
-    bar = rbar(pct, 100)
-    lines.append("[bold cyan]CPU[/bold cyan]")
-    lines.append(f"[dim]{bar}[/dim] [bold]{pct:.1f}%[/bold]")
-    lines.append("")
+    filled = int(16 * pct / 100)
+    lines += _meter("CPU", f"{pct:.1f}%", filled, 16, "#22d3ee")
 
     # RAM
     vm = psutil.virtual_memory()
     used_mb  = vm.used  / 1024 ** 2
     total_mb = vm.total / 1024 ** 2
-    bar = rbar(used_mb, total_mb)
-    lines.append("[bold cyan]RAM[/bold cyan]")
-    lines.append(f"[dim]{bar}[/dim]")
-    lines.append(f"[bold]{fmt_mb(used_mb)}[/bold] / {fmt_mb(total_mb)}")
-    lines.append("")
+    filled = int(16 * vm.percent / 100)
+    lines += _meter("RAM", f"{fmt_mb(used_mb)} / {fmt_mb(total_mb)}", filled, 16, "#7c3aed", f"{vm.percent:.0f}%")
 
     # Swap
     try:
@@ -93,24 +103,19 @@ def resource_markup() -> str:
         if sw.total > 0:
             sw_used  = sw.used  / 1024 ** 2
             sw_total = sw.total / 1024 ** 2
-            bar = rbar(sw_used, sw_total)
-            lines.append("[bold cyan]Swap[/bold cyan]")
-            lines.append(f"[dim]{bar}[/dim]")
-            lines.append(f"[bold]{fmt_mb(sw_used)}[/bold] / {fmt_mb(sw_total)}")
-            lines.append("")
+            sw_pct   = sw.percent
+            filled   = int(16 * sw_pct / 100)
+            lines += _meter("Swap", f"{fmt_mb(sw_used)} / {fmt_mb(sw_total)}", filled, 16, "#22d3ee", f"{sw_pct:.0f}%")
     except OSError:
         pass
 
     # Disk
     try:
         du = psutil.disk_usage("/")
-        bar = rbar(du.used, du.total)
         free_gb  = du.free  / 1024 ** 3
         total_gb = du.total / 1024 ** 3
-        lines.append("[bold cyan]Disk[/bold cyan]")
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{free_gb:.1f} GB[/bold] free / {total_gb:.0f} GB")
-        lines.append("")
+        filled   = int(16 * du.percent / 100)
+        lines += _meter("Disk", f"{free_gb:.0f} GB free", filled, 16, "#22d3ee", f"{total_gb:.0f} GB total  {du.percent:.0f}%")
     except Exception:
         pass
 
@@ -125,14 +130,11 @@ def resource_markup() -> str:
         nvmlInit()
         h    = nvmlDeviceGetHandleByIndex(0)
         info = nvmlDeviceGetMemoryInfo(h)
-        name = nvmlDeviceGetName(h)
         vram_used  = info.used  / 1024 ** 2
         vram_total = info.total / 1024 ** 2
-        bar = rbar(vram_used, vram_total)
-        lines.append(f"[bold cyan]VRAM[/bold cyan] [dim]{name}[/dim]")
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{fmt_mb(vram_used)}[/bold] / {fmt_mb(vram_total)}")
-        lines.append("")
+        vram_pct   = vram_used / vram_total * 100 if vram_total else 0
+        filled     = int(16 * vram_pct / 100)
+        lines += _meter("VRAM", f"{fmt_mb(vram_used)} / {fmt_mb(vram_total)}", filled, 16, "#facc15", f"{vram_pct:.0f}%")
     except Exception:
         pass
 
@@ -148,14 +150,11 @@ def resource_markup() -> str:
     except Exception:
         pass
 
-    lines.append("[bold cyan]Context[/bold cyan] [dim]window[/dim]")
     if not has_ctx or max_ctx <= 0:
-        lines.append(f"[dim]{rbar(0, 1)}[/dim]")
-        lines.append("[dim]— waiting for first request[/dim]")
+        lines += _meter("CTX", "— waiting", 0, 16, "#4ade80")
     else:
-        bar     = rbar(used_ctx, max_ctx)
         pct_ctx = used_ctx / max_ctx * 100
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{used_ctx:,}[/bold] / {max_ctx:,} ({pct_ctx:.0f}%)")
+        filled  = int(16 * pct_ctx / 100)
+        lines += _meter("CTX", f"{used_ctx:,} / {max_ctx:,}", filled, 16, "#4ade80", f"{pct_ctx:.0f}%")
 
     return "\n".join(lines)
