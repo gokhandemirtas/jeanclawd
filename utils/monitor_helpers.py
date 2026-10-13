@@ -82,8 +82,14 @@ def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_colo
     return lines
 
 
-def resource_markup(*, compact: bool = False) -> str:
-    lines: list[str] = ["[bold #22d3ee]RESOURCES[/bold #22d3ee]  [dim]POLL: 1s[/dim]", "[dim]─────────────────────[/dim]", ""]
+def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
+    """Render resource meters, optionally sized to a dashboard side rail."""
+    bar_width = max(8, bar_width)
+    lines: list[str] = [
+        "[bold #22d3ee]RESOURCES[/bold #22d3ee]  [dim]POLL: 1s[/dim]",
+        f"[dim]{'─' * bar_width}[/dim]",
+        "",
+    ]
 
     def usage(used: float, total: float) -> str:
         if compact:
@@ -92,15 +98,15 @@ def resource_markup(*, compact: bool = False) -> str:
 
     # CPU
     pct = psutil.cpu_percent(interval=None)
-    filled = int(16 * pct / 100)
-    lines += _meter("CPU", f"{pct:.1f}%", filled, 16, "#22d3ee")
+    filled = int(bar_width * pct / 100)
+    lines += _meter("CPU", f"{pct:.1f}%", filled, bar_width, "#22d3ee")
 
     # RAM
     vm = psutil.virtual_memory()
     used_mb  = vm.used  / 1024 ** 2
     total_mb = vm.total / 1024 ** 2
-    filled = int(16 * vm.percent / 100)
-    lines += _meter("RAM", usage(used_mb, total_mb), filled, 16, "#7c3aed", f"{vm.percent:.0f}%")
+    filled = int(bar_width * vm.percent / 100)
+    lines += _meter("RAM", usage(used_mb, total_mb), filled, bar_width, "#7c3aed", f"{vm.percent:.0f}%")
 
     # Swap
     try:
@@ -109,8 +115,8 @@ def resource_markup(*, compact: bool = False) -> str:
             sw_used  = sw.used  / 1024 ** 2
             sw_total = sw.total / 1024 ** 2
             sw_pct   = sw.percent
-            filled   = int(16 * sw_pct / 100)
-            lines += _meter("Swap", usage(sw_used, sw_total), filled, 16, "#22d3ee", f"{sw_pct:.0f}%")
+            filled   = int(bar_width * sw_pct / 100)
+            lines += _meter("Swap", usage(sw_used, sw_total), filled, bar_width, "#22d3ee", f"{sw_pct:.0f}%")
     except OSError:
         pass
 
@@ -119,8 +125,8 @@ def resource_markup(*, compact: bool = False) -> str:
         du = psutil.disk_usage("/")
         free_gb  = du.free  / 1024 ** 3
         total_gb = du.total / 1024 ** 3
-        filled   = int(16 * du.percent / 100)
-        lines += _meter("Disk", f"{free_gb:.0f} GB free", filled, 16, "#22d3ee", f"{total_gb:.0f} GB total  {du.percent:.0f}%")
+        filled   = int(bar_width * du.percent / 100)
+        lines += _meter("Disk", f"{free_gb:.0f} GB free", filled, bar_width, "#22d3ee", f"{total_gb:.0f} GB total  {du.percent:.0f}%")
     except Exception:
         pass
 
@@ -138,8 +144,8 @@ def resource_markup(*, compact: bool = False) -> str:
         vram_used  = info.used  / 1024 ** 2
         vram_total = info.total / 1024 ** 2
         vram_pct   = vram_used / vram_total * 100 if vram_total else 0
-        filled     = int(16 * vram_pct / 100)
-        lines += _meter("VRAM", usage(vram_used, vram_total), filled, 16, "#facc15", f"{vram_pct:.0f}%")
+        filled     = int(bar_width * vram_pct / 100)
+        lines += _meter("VRAM", usage(vram_used, vram_total), filled, bar_width, "#facc15", f"{vram_pct:.0f}%")
     except Exception:
         pass
 
@@ -156,11 +162,11 @@ def resource_markup(*, compact: bool = False) -> str:
         pass
 
     if not has_ctx or max_ctx <= 0:
-        lines += _meter("CTX", "— waiting", 0, 16, "#4ade80")
+        lines += _meter("CTX", "— waiting", 0, bar_width, "#4ade80")
     else:
         pct_ctx = used_ctx / max_ctx * 100
-        filled  = int(16 * pct_ctx / 100)
+        filled  = int(bar_width * pct_ctx / 100)
         ctx_value = f"{used_ctx / 1000:.0f}k/{max_ctx / 1000:.0f}" if compact else f"{used_ctx:,} / {max_ctx:,}"
-        lines += _meter("CTX", ctx_value, filled, 16, "#4ade80", f"{pct_ctx:.0f}%")
+        lines += _meter("CTX", ctx_value, filled, bar_width, "#4ade80", f"{pct_ctx:.0f}%")
 
     return "\n".join(lines)

@@ -106,14 +106,15 @@ def _subway_markup(
     error: bool,
     node_times: dict[str, float] | None = None,
     total_time: float = 0.0,
+    width: int = 26,
 ) -> str:
     node_times = node_times or {}
-    NODE_W = 18  # chars reserved for "icon label suffix"
+    node_width = max(12, width)
 
     exec_indicator = f"  [bold #facc15]● EXEC[/bold #facc15]" if current != "idle" else ""
     lines: list[str] = [
         f"[bold #22d3ee]PIPELINE[/bold #22d3ee]{exec_indicator}",
-        "[dim]──────────────────────────[/dim]",
+        f"[dim]{'─' * node_width}[/dim]",
     ]
     for i, (node_id, default_label) in enumerate(PIPELINE_NODES):
         display = label.upper() if node_id == "skill" and label else default_label
@@ -132,7 +133,7 @@ def _subway_markup(
             suffix = ""
 
         node_text = f"{icon} {display}{suffix}"
-        pad = max(1, NODE_W - len(node_text))
+        pad = max(1, node_width - len(node_text))
 
         if node_id in node_times:
             time_part = f"[dim]{' ' * pad}{_fmt_dur(node_times[node_id])}[/dim]"
@@ -146,8 +147,8 @@ def _subway_markup(
             lines.append(f"[{conn}]│[/{conn}]")
 
     if total_time > 0:
-        lines.append("[dim]──────────────────────────[/dim]")
-        lines.append(f"[dim]PREV TOTAL{' ' * (NODE_W - 10)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
+        lines.append(f"[dim]{'─' * node_width}[/dim]")
+        lines.append(f"[dim]PREV TOTAL{' ' * max(1, node_width - 10)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
 
     return "\n".join(lines)
 
@@ -591,7 +592,7 @@ class TuiApp(App):
 
         self._refresh_resources()
         # The right rail has no final width until the first layout pass.
-        self.call_after_refresh(self._refresh_models_panel)
+        self.call_after_refresh(self._refresh_right_rail)
         # Focus input immediately so the cursor blinks before startup completes
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
         self.run_worker(self._startup(), exclusive=False, name="startup")
@@ -662,22 +663,35 @@ class TuiApp(App):
 
     def _refresh_resources(self) -> None:
         try:
-            self.query_one("#resource-panel", Static).update(_resource_markup(compact=True))
+            self.query_one("#resource-panel", Static).update(
+                _resource_markup(
+                    compact=True,
+                    bar_width=self._right_panel_content_width(),
+                )
+            )
         except Exception:
             pass
+
+    def _right_panel_content_width(self) -> int:
+        """Return usable cells inside the right rail after its horizontal padding."""
+        return max(12, self.query_one("#right-panel").size.width - 4)
+
+    def _refresh_right_rail(self) -> None:
+        self._refresh_models_panel()
+        self._refresh_resources()
+        self._refresh_subway()
 
     def _refresh_models_panel(self) -> None:
         """Use the right rail's full width without allowing model rows to wrap."""
         try:
-            panel_width = self.query_one("#right-panel").size.width
-            # Right-panel padding consumes four cells; model labels consume eleven.
-            value_width = max(6, panel_width - 15)
+            # Model labels consume eleven cells; the remaining cells hold the value.
+            value_width = max(6, self._right_panel_content_width() - 11)
             self.query_one("#models-panel", Static).update(_models_markup(value_width))
         except Exception:
             pass
 
     def on_resize(self) -> None:
-        self._refresh_models_panel()
+        self._refresh_right_rail()
 
     # ── subway refresh ────────────────────────────────────────────────────────
 
@@ -687,7 +701,8 @@ class TuiApp(App):
         try:
             self.query_one("#subway-panel", Static).update(
                 _subway_markup(s.current, s.label, s.completed, s.error,
-                               s.node_times, s.total_time)
+                               s.node_times, s.total_time,
+                               self._right_panel_content_width())
             )
         except Exception:
             pass
