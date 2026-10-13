@@ -114,6 +114,12 @@ class ChatInput(Input):
 
     BINDINGS = [*Input.BINDINGS, Binding("tab", "accept_suggestion", show=False)]
 
+    def on_key(self, event) -> None:
+        # Intercept quit keys here so Input's ctrl+c copy handler doesn't win.
+        if event.key in ("ctrl+c", "ctrl+q"):
+            self.app.run_worker(self.app._graceful_quit(), exclusive=True, name="quit")
+            event.stop()
+
     def action_accept_suggestion(self) -> None:
         if self._suggestion:
             self.action_cursor_right()
@@ -355,13 +361,9 @@ class TuiApp(App):
         color: #a78bfa;
         background: #1b1d2a;
     }
-    TabbedContent > Tabs ContentTab.-active {
-        color: #ffffff;
-        background: #7c3aed;
-        border-bottom: tall #7c3aed;
-        text-style: bold;
-    }
 
+    /* ID-based selectors beat Textual 8's Tabs:focus .-active rule (0,2,1)
+       which would otherwise override background with $block-cursor-background. */
     #main-tabs > Tabs {
         height: 3;
         padding: 0 2;
@@ -370,6 +372,13 @@ class TuiApp(App):
         min-width: 18;
         height: 3;
         padding: 1 5;
+        color: #a78bfa;
+        background: #1b1d2a;
+    }
+    #main-tabs ContentTab.-active {
+        color: #ffffff;
+        background: #7c3aed;
+        text-style: bold;
     }
 
     /* ── dashboard ── */
@@ -434,6 +443,10 @@ class TuiApp(App):
         background: #7c3aed;
         color: white;
         border: none;
+        border-top: none;
+        border-right: none;
+        border-bottom: none;
+        border-left: none;
     }
     #btn-send:hover {
         background: #6d28d9;
@@ -853,7 +866,13 @@ class TuiApp(App):
             if user_text in ("/quit", "/exit"):
                 await self._graceful_quit()
                 return
-            await self._run_command(user_text)
+            # Run in a worker so commands that block (tiktoken, prompt_toolkit
+            # pickers, network calls) don't freeze the Textual event loop.
+            self.run_worker(
+                self._run_command(user_text),
+                exclusive=False,
+                name="command",
+            )
             return
 
         self._write_user(user_text)
@@ -869,13 +888,26 @@ class TuiApp(App):
 
     async def _run_command(self, cmd: str) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
+        parts = cmd.strip().split(None, 1)
+        command = parts[0].lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
+
+        # Intercept commands that use prompt_toolkit interactive pickers —
+        # those pickers corrupt Textual's terminal state and freeze the TUI.
+        if command == "/persona":
+            await self._cmd_persona_tui(args, chat_log)
+            return
+        if command == "/voice" and not args:
+            await self._cmd_show_voices(chat_log)
+            return
+        if command in ("/change-model", "/connect") and not args:
+            await self._cmd_show_picker_options(command, chat_log)
+            return
+
         try:
             from commands import handle_command
             from utils import logger
 
-            # Commands report their results through the shared logger in the
-            # CLI. Capture that output here so it reaches the chat instead of
-            # printing below the Textual application.
             with logger.capture_messages() as messages:
                 await handle_command(cmd)
             if messages:
@@ -891,6 +923,105 @@ class TuiApp(App):
                 self._write_jean("[dim]Command completed.[/dim]")
         except Exception as exc:
             chat_log.write(f"[bold red]Command error:[/bold red] {exc}")
+
+    def _write_cmd_output(self, chat_log: RichLog, messages: list) -> None:
+        for level, message in messages:
+            style = LEVEL_STYLE.get(level, "dim")
+            chat_log.write(
+                f"[dim]{self._ts()}[/dim]  [bold #4ade80]Jean:[/bold #4ade80] "
+                f"[{style}]{escape(message)}[/{style}]"
+            )
+        if messages:
+            chat_log.scroll_end(animate=False)
+
+    async def _cmd_persona_tui(self, args: str, chat_log: RichLog) -> None:
+        try:
+            from agents.persona import PERSONAS
+        except Exception as exc:
+            chat_log.write(f"[bold red]Error:[/bold red] {exc}")
+            return
+
+        persona_ids = list(PERSONAS.keys())
+        arg_parts = args.strip().split()
+
+        if not arg_parts:
+            lines = ["[bold #22d3ee]Personas[/bold #22d3ee]  [dim]usage: /persona <id> [voice][/dim]"]
+            for pid in persona_ids:
+                info = PERSONAS[pid]
+                default_voice = info.get("voice_id") or "—"
+                lines.append(
+                    f"  [bold #22d3ee]{pid}[/bold #22d3ee]"
+                    f"  [dim]{escape(info.get('name', pid))}  voice={default_voice}[/dim]"
+                )
+            chat_log.write("\n".join(lines))
+            chat_log.scroll_end(animate=False)
+            return
+
+        persona_id = arg_parts[0]
+        if persona_id not in persona_ids:
+            chat_log.write(
+                f"[bold red]Unknown persona '{escape(persona_id)}'.[/bold red]"
+                f"  Available: {', '.join(persona_ids)}"
+            )
+            return
+
+        voice_arg = (
+            arg_parts[1] if len(arg_parts) > 1
+            else PERSONAS[persona_id].get("voice_id") or "thomas"
+        )
+
+        try:
+            from commands import handle_command
+            from utils import logger
+            with logger.capture_messages() as messages:
+                await handle_command(f"/persona {persona_id} {voice_arg}")
+            self._write_cmd_output(chat_log, messages)
+            if not messages:
+                self._write_jean(f"Persona → {PERSONAS[persona_id].get('name', persona_id)}  |  Voice → {voice_arg}")
+        except Exception as exc:
+            chat_log.write(f"[bold red]Command error:[/bold red] {exc}")
+
+    async def _cmd_show_voices(self, chat_log: RichLog) -> None:
+        try:
+            from tts.tts import voice_ids
+            ids = list(voice_ids)
+        except Exception:
+            ids = []
+        body = ("  " + "  ".join(f"[#22d3ee]{escape(v)}[/#22d3ee]" for v in ids)) if ids else "  [dim](none)[/dim]"
+        chat_log.write(
+            "[bold #22d3ee]Voices[/bold #22d3ee]  [dim]usage: /voice <id>[/dim]\n" + body
+        )
+        chat_log.scroll_end(animate=False)
+
+    async def _cmd_show_picker_options(self, command: str, chat_log: RichLog) -> None:
+        if command == "/change-model":
+            try:
+                from commands import _MODEL_PURPOSES
+            except Exception as exc:
+                chat_log.write(f"[bold red]Error:[/bold red] {exc}")
+                return
+            lines = ["[bold #22d3ee]Model purposes[/bold #22d3ee]  [dim]usage: /change-model <purpose>[/dim]"]
+            for key, (desc, env_key) in _MODEL_PURPOSES.items():
+                current = os.getenv(env_key, "—")
+                lines.append(
+                    f"  [#22d3ee]{key:<10}[/#22d3ee]"
+                    f"  [dim]{escape(desc)}  current: {escape(current)}[/dim]"
+                )
+            chat_log.write("\n".join(lines))
+        elif command == "/connect":
+            try:
+                from connectors.registry import connector_ids
+                ids = list(connector_ids())
+            except Exception:
+                ids = []
+            if not ids:
+                chat_log.write("[dim]No connectors registered.[/dim]")
+            else:
+                body = "  " + "  ".join(f"[#22d3ee]{escape(cid)}[/#22d3ee]" for cid in ids)
+                chat_log.write(
+                    "[bold #22d3ee]Connectors[/bold #22d3ee]  [dim]usage: /connect <service>[/dim]\n" + body
+                )
+        chat_log.scroll_end(animate=False)
 
     # ── pipeline worker ───────────────────────────────────────────────────────
 
