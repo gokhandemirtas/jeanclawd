@@ -69,6 +69,8 @@ PIPELINE_NODES: list[tuple[str, str]] = [
     ("respond",  "RESPOND"),
 ]
 
+_SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
+
 
 def _models_markup(value_width: int = 18) -> str:
     """Markup for the models panel sized to its available terminal column."""
@@ -123,8 +125,8 @@ def _subway_markup(
             icon, style, conn = "◎", "bold #f87171", "#f87171"
             suffix = " ✗"
         elif node_id == current and current != "idle":
-            icon, style, conn = "◎", "bold #facc15", "#facc15"
-            suffix = " ◄"
+            icon = _SPINNER_FRAMES[int(time.monotonic() * 5) % len(_SPINNER_FRAMES)]
+            style, conn, suffix = "bold #facc15", "#facc15", ""
         elif node_id in completed:
             icon, style, conn = "●", "#4ade80", "#4ade80"
             suffix = ""
