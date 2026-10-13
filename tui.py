@@ -312,17 +312,38 @@ class TuiApp(App):
         background: $surface;
         color: $text;
     }
-    #chat-input {
+    #chat-input-bar {
         height: 3;
-        border-top: tall #7c3aed;
-        border-bottom: none;
-        border-left: none;
-        border-right: none;
         background: $background;
-        padding: 0 2;
+        border-top: tall #7c3aed;
+        padding: 0 1;
+    }
+    #chat-prompt {
+        width: 3;
+        height: 3;
+        padding: 1 0 1 1;
+        background: $background;
+    }
+    #chat-input {
+        width: 1fr;
+        height: 1;
+        border: none;
+        background: $background;
+        padding: 0 1;
     }
     #chat-input:focus {
-        border-top: tall #7c3aed;
+        border: none;
+    }
+    #btn-send {
+        height: 1;
+        min-width: 9;
+        margin: 1 0 1 1;
+        background: #7c3aed;
+        color: white;
+        border: none;
+    }
+    #btn-send:hover {
+        background: #6d28d9;
     }
 
     /* right info panel */
@@ -459,7 +480,10 @@ class TuiApp(App):
                             wrap=True,
                         )
                         yield Label("", id="streaming-label", markup=True)
-                        yield Input(placeholder="❯  message…", id="chat-input")
+                        with Horizontal(id="chat-input-bar"):
+                            yield Label("[bold #22d3ee]>[/bold #22d3ee]", id="chat-prompt", markup=True)
+                            yield Input(placeholder="Send prompt or /help for commands…", id="chat-input")
+                            yield Button("SEND ⏎", id="btn-send")
                     with Vertical(id="right-panel"):
                         yield Static(_models_markup(), id="models-panel", markup=True)
                         yield Static("", id="resource-panel", markup=True)
@@ -995,6 +1019,9 @@ class TuiApp(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
+        if btn_id == "btn-send":
+            self.query_one("#chat-input", Input).action_submit()
+            return
         if btn_id == "btn-copy":
             self.action_copy_log()
             return
