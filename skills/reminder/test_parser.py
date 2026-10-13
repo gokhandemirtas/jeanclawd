@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
 
-from skills.reminder.parser import parse_reminder_date
+from skills.reminder.parser import parse_reminder_date, parse_time
 
 
 class ReminderParserTests(unittest.TestCase):
@@ -25,3 +25,13 @@ class ReminderParserTests(unittest.TestCase):
     self.assertIsNotNone(parsed)
     assert parsed is not None
     self.assertEqual(parsed.hour, 15)
+
+  def test_explicit_duration_is_exact(self) -> None:
+    self.assertEqual(parse_time("5 minutes"), 300)
+
+  def test_compact_duration_is_exact(self) -> None:
+    self.assertEqual(parse_time("10 secs"), 10)
+
+
+if __name__ == "__main__":
+  unittest.main()

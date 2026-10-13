@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 
 from pydantic import BaseModel
@@ -120,6 +121,14 @@ class _RouteDecision(BaseModel):
 	confidence: float = 1.0
 
 
+_DECLARATIVE_ASSISTANT_STATEMENT = re.compile(r"^\s*you\s+(?:are|were)\b", re.IGNORECASE)
+
+
+def _is_declarative_assistant_statement(query: str) -> bool:
+	"""Recognise the unambiguous statement form before model classification."""
+	return "?" not in query and bool(_DECLARATIVE_ASSISTANT_STATEMENT.match(query))
+
+
 def _route_sync(
 	query: str, history: list[tuple[str, str]]
 ) -> tuple[IntentLiteral, float]:
@@ -164,6 +173,12 @@ async def generalist_route(
 	if shortcut:
 		logger.debug(f"[router] {shortcut} (keyword match)")
 		return shortcut, 1.0
+	# "You are ..." without a question is a correction or observation, never an
+	# implementation question. This narrow grammatical boundary avoids a recent
+	# INTROSPECTION answer in history biasing the model toward that skill.
+	if _is_declarative_assistant_statement(query):
+		logger.debug("[router] CHAT (declarative assistant statement)")
+		return "CHAT", 1.0
 
 	t = time.time()
 	try:

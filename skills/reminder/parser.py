@@ -19,6 +19,19 @@ _DAY_PARTS = {
   "night": 21,
 }
 
+_DURATION = re.compile(
+  r"^\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\s*$",
+  re.IGNORECASE,
+)
+_DURATION_SECONDS = {
+  "second": 1,
+  "sec": 1,
+  "minute": 60,
+  "min": 60,
+  "hour": 3600,
+  "hr": 3600,
+}
+
 
 def _parse(date_input: str) -> datetime | None:
   """Parse dates, including dateparser-unrecognised day-part phrases."""
@@ -43,6 +56,13 @@ def _parse(date_input: str) -> datetime | None:
 def parse_time(date_input: str) -> int | None:
   """Parse a natural-language duration/date into seconds from now (for timers)."""
   try:
+    # Date parsers resolve "5 minutes" relative to the current instant. That
+    # can lose a second before the response is formatted, so parse explicit
+    # countdown durations exactly.
+    match = _DURATION.match(date_input)
+    if match:
+      unit = match.group(2).lower().rstrip("s")
+      return int(float(match.group(1)) * _DURATION_SECONDS[unit])
     parsed_dt = _parse(date_input)
     if parsed_dt:
       delta = (parsed_dt - datetime.now()).total_seconds()

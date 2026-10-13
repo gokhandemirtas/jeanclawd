@@ -41,6 +41,23 @@ class GeneralistRouterContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("question 3", routed_prompt)
         self.assertNotIn("question 0", routed_prompt)
 
+    async def test_declarative_assistant_statement_is_chat(self) -> None:
+        intent, confidence = await generalist_route(
+            "you are a local assistant running on my machine",
+            [("how does your intent routing work?", "Here is the architecture...")],
+        )
+
+        self.assertEqual((intent, confidence), ("CHAT", 1.0))
+
+    async def test_question_about_assistant_remains_model_routed(self) -> None:
+        provider = MagicMock()
+        provider.complete.return_value = _RouteDecision(intent="INTROSPECTION", confidence=0.99)
+
+        with patch("agents.generalist.router.get_intent_provider", return_value=provider):
+            intent, confidence = await generalist_route("are you a local assistant?", [])
+
+        self.assertEqual((intent, confidence), ("INTROSPECTION", 0.99))
+
 
 if __name__ == "__main__":
     unittest.main()

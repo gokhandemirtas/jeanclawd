@@ -47,10 +47,11 @@ Keep each memory concise — a short phrase or sentence.
 Record: name, location, occupation, relationships (family members, pets),
 interests, likes, dislikes, birth date, gender, and any other stable personal
 context the User explicitly provides.
-For facts about someone other than the User, always include that person's name
-and relationship to the User in the memory. For example, write "Wife name:
-Selin" or "Wife Selin occupation: cardiologist", never bare "Name: Selin" or
-"Occupation: cardiologist".
+THIRD-PARTY ATTRIBUTION IS REQUIRED: a fact about anyone other than the User
+must include that person's relationship and name. For "My wife Selin is a
+cardiologist", write exactly "Wife Selin occupation: cardiologist". Never
+write a bare third-party fact such as "Name: Selin" or "Occupation:
+cardiologist"; skip it if you cannot preserve its owner.
 
 Do NOT record:
 - Information about the Assistant or AI system

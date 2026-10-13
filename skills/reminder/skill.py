@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Optional
 
 from utils.log import logger
@@ -15,6 +16,17 @@ class ReminderIntentResponse(BaseModel):
   type: str
   datetime: Optional[str] = ""
   description: Optional[str] = ""
+
+
+_TIMER_DURATION = re.compile(
+  r"\b(?:for|in)\s+(\d+(?:\.\d+)?\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?))\b",
+  re.IGNORECASE,
+)
+
+
+def _duration_from_query(query: str) -> str:
+  match = _TIMER_DURATION.search(query)
+  return match.group(1) if match else ""
 
 
 def _classify_intent(query: str) -> dict:
@@ -55,12 +67,12 @@ async def handle_reminder(query: str) -> str:
         return await handle_list_reminders()
 
       case "TIMER":
-        if datetime_str and description:
-          logger.debug(f"Timer request: {description}")
-          return await handle_timer(datetime_str, description)
-        else:
-          logger.error("Date or description missing from TIMER request")
-          return "Date or description missing"
+        duration = datetime_str or _duration_from_query(query)
+        if not duration:
+          return "How long would you like the timer to run?"
+        timer_description = description or "timer"
+        logger.debug(f"Timer request: {timer_description}")
+        return await handle_timer(duration, timer_description)
 
       case "REMINDER":
         if datetime_str and description:

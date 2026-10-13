@@ -24,6 +24,7 @@ Examples - Creating reminders:
 - "Remind me next monday at 3pm to submit report" → {"type": "REMINDER", "datetime": "next monday 3pm", "description": "submit report"}
 
 Examples - Creating timers:
+- "Set a timer for 5 minutes" → {"type": "TIMER", "datetime": "5 minutes", "description": ""}
 - "Set a timer for 5 minutes for book club" → {"type": "TIMER", "datetime": "5 minutes", "description": "book club"}
 - "Set a timer in 10 seconds for cake" → {"type": "TIMER", "datetime": "15 seconds", "description": "dentist"}
 
