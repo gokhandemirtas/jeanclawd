@@ -223,6 +223,7 @@ class SplashPanel(Static):
 
     def on_mount(self) -> None:
         self._start = time.monotonic()
+        self._tick()  # paint first frame synchronously — no blank flash
         self.set_interval(1 / _SPLASH_FPS, self._tick)
 
     def _tick(self) -> None:
@@ -257,10 +258,11 @@ class TuiApp(App):
     /* ── splash ── */
     SplashPanel {
         overlay: screen;
+        width: 100%;
+        height: 100%;
         background: $background;
         align: center middle;
         content-align: center middle;
-        padding: 2 4;
     }
 
     /* ── shared ── */
