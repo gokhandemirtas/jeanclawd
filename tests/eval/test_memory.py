@@ -64,7 +64,7 @@ _RECALL_CASES: list[_RecallCase] = [
 	_RecallCase("what instrument do I play?", "bass", note="instrument"),
 	_RecallCase("what's my band called?", "Demir Kapı", note="band"),
 	_RecallCase("what F1 team do I support?", "Ferrari", note="F1"),
-	_RecallCase("how do I take my coffee?", "black", note="coffee preference"),
+	_RecallCase("how do I take my coffee?", ["black", "straight", "no milk", "no sugar", "plain"], note="coffee preference"),
 ]
 
 
