@@ -352,12 +352,12 @@ class TuiApp(App):
     }
     TabbedContent > Tabs ContentTab {
         padding: 0 3;
-        color: #64748b;
-        background: #12141f;
+        color: #a78bfa;
+        background: #1b1d2a;
     }
     TabbedContent > Tabs ContentTab.-active {
-        color: #f1f5f9;
-        background: #1b1d2a;
+        color: #ffffff;
+        background: #7c3aed;
         border-bottom: tall #7c3aed;
         text-style: bold;
     }
@@ -606,7 +606,7 @@ class TuiApp(App):
                                 suggester=SlashCommandSuggester(case_sensitive=False),
                                 id="chat-input",
                             )
-                            yield Button("SEND ⏎", id="btn-send")
+                            yield Button("SEND", id="btn-send")
                     with Vertical(id="right-panel"):
                         yield Static(_models_markup(), id="models-panel", markup=True)
                         yield Static("", id="resource-panel", markup=True)
