@@ -512,6 +512,9 @@ class TuiApp(App):
     # ── compose ───────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
+        # Overlay widgets retain their compose position in a vertical layout.
+        # Mount this first so `overlay: screen` starts at the screen origin.
+        yield SplashPanel(id="splash")
         yield Header(show_clock=True)
         with TabbedContent(id="main-tabs"):
             with TabPane("Dashboard", id="tab-dash"):
@@ -567,7 +570,6 @@ class TuiApp(App):
                                 markup=False,
                                 wrap=False,
                             )
-        yield SplashPanel(id="splash")
         yield Footer()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
