@@ -73,31 +73,40 @@ PIPELINE_NODES: list[tuple[str, str]] = [
 _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
 
 
+def _slash_command_matches(value: str) -> list[str]:
+    """Return every completion that should be shown for a slash prefix."""
+    if not value.startswith("/"):
+        return []
+
+    if value.startswith("/connect "):
+        from connectors.registry import connector_ids
+
+        prefix = value.removeprefix("/connect ").casefold()
+        return [
+            f"/connect {service_id}"
+            for service_id in sorted(connector_ids())
+            if service_id.casefold().startswith(prefix)
+        ]
+
+    if " " in value:
+        return []
+
+    from commands import _COMMANDS
+
+    prefix = value.casefold()
+    return [
+        command
+        for command in sorted((*_COMMANDS, "/quit", "/exit"))
+        if command.casefold().startswith(prefix)
+    ]
+
+
 class SlashCommandSuggester(Suggester):
     """Offer the same slash-command completions as the regular CLI."""
 
     async def get_suggestion(self, value: str) -> str | None:
-        if not value.startswith("/"):
-            return None
-
-        if value.startswith("/connect "):
-            from connectors.registry import connector_ids
-
-            prefix = value.removeprefix("/connect ")
-            for service_id in connector_ids():
-                if service_id.startswith(prefix):
-                    return f"/connect {service_id}"
-            return None
-
-        if " " in value:
-            return None
-
-        from commands import _COMMANDS
-
-        for command in sorted((*_COMMANDS, "/quit", "/exit")):
-            if command.startswith(value):
-                return command
-        return None
+        matches = _slash_command_matches(value)
+        return matches[0] if matches else None
 
 
 class ChatInput(Input):
@@ -394,6 +403,17 @@ class TuiApp(App):
         align: left middle;
     }
     #chat-input-bar:focus-within { border-top: tall #7c3aed; }
+    #command-menu {
+        display: none;
+        height: auto;
+        max-height: 18;
+        padding: 1 2;
+        background: #10121d;
+        border-top: solid #24283b;
+        color: #cbd5e1;
+        overflow-y: auto;
+    }
+    #command-menu.-visible { display: block; }
     #chat-input {
         width: 1fr;
         height: 3;
@@ -576,6 +596,7 @@ class TuiApp(App):
                             wrap=True,
                         )
                         yield Label("", id="streaming-label", markup=True)
+                        yield Static("", id="command-menu", markup=True)
                         with Horizontal(id="chat-input-bar"):
                             yield ChatInput(
                                 placeholder="Send prompt or /help for commands…",
@@ -794,11 +815,30 @@ class TuiApp(App):
 
     # ── chat input ────────────────────────────────────────────────────────────
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show all slash completions, rather than only the inline suggestion."""
+        if event.input.id != "chat-input":
+            return
+
+        value = event.value
+        matches = _slash_command_matches(value)
+        menu = self.query_one("#command-menu", Static)
+        if not matches or value.casefold() in {match.casefold() for match in matches}:
+            menu.remove_class("-visible")
+            return
+
+        menu.update(
+            "[dim]SLASH COMMANDS  ·  TAB or → accepts the first match[/dim]\n"
+            + "\n".join(f"[bold #22d3ee]{escape(match)}[/bold #22d3ee]" for match in matches)
+        )
+        menu.add_class("-visible")
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
         if not user_text:
             return
         event.input.clear()
+        self.query_one("#command-menu", Static).remove_class("-visible")
 
         if self._busy:
             chat_log = self.query_one("#chat-log", RichLog)
