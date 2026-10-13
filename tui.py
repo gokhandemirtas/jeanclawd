@@ -35,6 +35,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
+from textual.suggester import Suggester
 from textual.widgets import (
     Button,
     Footer,
@@ -70,6 +71,43 @@ PIPELINE_NODES: list[tuple[str, str]] = [
 ]
 
 _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
+
+
+class SlashCommandSuggester(Suggester):
+    """Offer the same slash-command completions as the regular CLI."""
+
+    async def get_suggestion(self, value: str) -> str | None:
+        if not value.startswith("/"):
+            return None
+
+        if value.startswith("/connect "):
+            from connectors.registry import connector_ids
+
+            prefix = value.removeprefix("/connect ")
+            for service_id in connector_ids():
+                if service_id.startswith(prefix):
+                    return f"/connect {service_id}"
+            return None
+
+        if " " in value:
+            return None
+
+        from commands import _COMMANDS
+
+        for command in sorted((*_COMMANDS, "/quit", "/exit")):
+            if command.startswith(value):
+                return command
+        return None
+
+
+class ChatInput(Input):
+    """Chat input with slash-command completion on Tab or Right Arrow."""
+
+    BINDINGS = [*Input.BINDINGS, Binding("tab", "accept_suggestion", show=False)]
+
+    def action_accept_suggestion(self) -> None:
+        if self._suggestion:
+            self.action_cursor_right()
 
 
 def _models_markup(value_width: int = 18) -> str:
@@ -531,7 +569,11 @@ class TuiApp(App):
                         )
                         yield Label("", id="streaming-label", markup=True)
                         with Horizontal(id="chat-input-bar"):
-                            yield Input(placeholder="Send prompt or /help for commands…", id="chat-input")
+                            yield ChatInput(
+                                placeholder="Send prompt or /help for commands…",
+                                suggester=SlashCommandSuggester(case_sensitive=False),
+                                id="chat-input",
+                            )
                             yield Button("SEND ⏎", id="btn-send")
                     with Vertical(id="right-panel"):
                         yield Static(_models_markup(), id="models-panel", markup=True)
