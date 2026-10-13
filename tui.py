@@ -47,15 +47,13 @@ load_dotenv()
 # ── constants ──────────────────────────────────────────────────────────────────
 
 LOG_FILE = Path(__file__).parent / "logs" / "app.log"
-from utils.resource_monitor import CONTEXT_FILE  # noqa: E402
 
-LEVEL_STYLE = {
-    "DEBUG": "dim white",
-    "INFO": "bold cyan",
-    "WARN": "bold yellow",
-    "ERROR": "bold red",
-}
-ALL_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
+from utils.monitor_helpers import (  # noqa: E402
+    ALL_LEVELS,
+    LEVEL_STYLE,
+    performance_text as _performance_text,
+    resource_markup as _resource_markup,
+)
 
 # Subway pipeline node definitions (id, display label)
 PIPELINE_NODES: list[tuple[str, str]] = [
@@ -64,122 +62,6 @@ PIPELINE_NODES: list[tuple[str, str]] = [
     ("skill",    "SKILL"),
     ("respond",  "RESPOND"),
 ]
-
-# ── resource helpers (shared with monitor.py) ──────────────────────────────────
-
-
-def _rbar(used: float, total: float, width: int = 16) -> str:
-    pct = used / total if total else 0
-    filled = int(width * pct)
-    return "█" * filled + "░" * (width - filled)
-
-
-def _fmt_mb(mb: float) -> str:
-    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
-
-
-def _fmt_metric(value, suffix: str = "") -> str:
-    if value is None:
-        return "—"
-    if isinstance(value, float):
-        return f"{value:.2f}{suffix}"
-    return f"{value}{suffix}"
-
-
-def _resource_markup() -> str:
-    lines: list[str] = []
-
-    # CPU
-    pct = psutil.cpu_percent(interval=None)
-    bar = _rbar(pct, 100)
-    lines.append("[bold cyan]CPU[/bold cyan]")
-    lines.append(f"[dim]{bar}[/dim] [bold]{pct:.1f}%[/bold]")
-    lines.append("")
-
-    # RAM
-    vm = psutil.virtual_memory()
-    used_mb = vm.used / 1024 ** 2
-    total_mb = vm.total / 1024 ** 2
-    bar = _rbar(used_mb, total_mb)
-    lines.append("[bold cyan]RAM[/bold cyan]")
-    lines.append(f"[dim]{bar}[/dim]")
-    lines.append(f"[bold]{_fmt_mb(used_mb)}[/bold] / {_fmt_mb(total_mb)}")
-    lines.append("")
-
-    # Swap
-    try:
-        sw = psutil.swap_memory()
-        if sw.total > 0:
-            sw_used = sw.used / 1024 ** 2
-            sw_total = sw.total / 1024 ** 2
-            bar = _rbar(sw_used, sw_total)
-            lines.append("[bold cyan]Swap[/bold cyan]")
-            lines.append(f"[dim]{bar}[/dim]")
-            lines.append(f"[bold]{_fmt_mb(sw_used)}[/bold] / {_fmt_mb(sw_total)}")
-            lines.append("")
-    except OSError:
-        pass
-
-    # Disk
-    try:
-        du = psutil.disk_usage("/")
-        free_gb = du.free / 1024 ** 3
-        total_gb = du.total / 1024 ** 3
-        used_gb = du.used / 1024 ** 3
-        bar = _rbar(du.used, du.total)
-        lines.append("[bold cyan]Disk[/bold cyan]")
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{free_gb:.1f} GB[/bold] free / {total_gb:.0f} GB")
-        lines.append("")
-    except Exception:
-        pass
-
-    # NVIDIA VRAM
-    try:
-        from pynvml import (
-            nvmlDeviceGetHandleByIndex,
-            nvmlDeviceGetMemoryInfo,
-            nvmlDeviceGetName,
-            nvmlInit,
-        )
-        nvmlInit()
-        h = nvmlDeviceGetHandleByIndex(0)
-        info = nvmlDeviceGetMemoryInfo(h)
-        name = nvmlDeviceGetName(h)
-        vram_used = info.used / 1024 ** 2
-        vram_total = info.total / 1024 ** 2
-        bar = _rbar(vram_used, vram_total)
-        lines.append(f"[bold cyan]VRAM[/bold cyan] [dim]{name}[/dim]")
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{_fmt_mb(vram_used)}[/bold] / {_fmt_mb(vram_total)}")
-        lines.append("")
-    except Exception:
-        pass
-
-    # LLM context window
-    used_ctx, max_ctx = 0, 0
-    has_ctx = False
-    try:
-        if CONTEXT_FILE.exists():
-            ctx = json.loads(CONTEXT_FILE.read_text())
-            used_ctx = int(ctx.get("used", 0))
-            max_ctx = int(ctx.get("max", 0)) or 0
-            has_ctx = True
-    except Exception:
-        pass
-
-    lines.append("[bold cyan]Context[/bold cyan] [dim]window[/dim]")
-    if not has_ctx or max_ctx <= 0:
-        bar = _rbar(0, 1)
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append("[dim]— waiting for first request[/dim]")
-    else:
-        bar = _rbar(used_ctx, max_ctx)
-        pct_ctx = used_ctx / max_ctx * 100
-        lines.append(f"[dim]{bar}[/dim]")
-        lines.append(f"[bold]{used_ctx:,}[/bold] / {max_ctx:,} ({pct_ctx:.0f}%)")
-
-    return "\n".join(lines)
 
 
 def _models_markup() -> str:
@@ -258,23 +140,6 @@ def _subway_markup(
 # ── log helpers (from monitor.py) ─────────────────────────────────────────────
 
 
-def _performance_text(entry: dict) -> str:
-    model = escape(str(entry.get("model", "unknown")))
-    prompt = _fmt_metric(entry.get("prompt_tokens"))
-    completion = _fmt_metric(entry.get("completion_tokens"))
-    server_tps = _fmt_metric(entry.get("server_tokens_per_second"), " tok/s")
-    measured_tps = _fmt_metric(entry.get("measured_tokens_per_second"), " tok/s")
-    server_ttft = _fmt_metric(entry.get("server_ttft_ms"), " ms")
-    client_ttft = _fmt_metric(entry.get("client_ttft_ms"), " ms")
-    return (
-        f"[dim]{entry.get('ts', '')}[/dim] [bold yellow]LLM PERF[/bold yellow] "
-        f"[bold]{model}[/bold]\n"
-        f"  tokens: prompt={prompt}, completion={completion}  "
-        f"throughput: server={server_tps}, measured={measured_tps}  "
-        f"TTFT: server={server_ttft}, client={client_ttft}"
-    )
-
-
 # ── TUI app ────────────────────────────────────────────────────────────────────
 
 
@@ -285,6 +150,14 @@ class TuiApp(App):
     CSS = """
     /* ── shared ── */
     Header { height: 1; }
+
+    /* extra breathing room on both tab bars */
+    TabbedContent > Tabs {
+        padding-top: 1;
+    }
+    TabbedContent > Tabs > Tab {
+        padding: 0 2;
+    }
 
     /* ── dashboard tab ── */
     #dash-layout {

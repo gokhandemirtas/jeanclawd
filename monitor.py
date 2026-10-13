@@ -27,154 +27,19 @@ from textual.widgets import (
 	TabPane,
 )
 
+from utils.monitor_helpers import (  # noqa: E402
+	ALL_LEVELS,
+	LEVEL_STYLE,
+	fmt_mb as _fmt_mb,
+	fmt_metric as _fmt_metric,
+	performance_text as _performance_text,
+	rbar as _rbar,
+	resource_markup as _resource_markup,
+)
+
 LOG_FILE_DEFAULT = Path(__file__).parent / "logs" / "app.log"
-# Imported from utils.resource_monitor so the writer (chat process) and reader
-# (this monitor) always agree on the path, regardless of CWD.
-from utils.resource_monitor import CONTEXT_FILE  # noqa: E402
 
-# ------------------------------------------------------------------ resource helpers
-
-
-def _rbar(used: float, total: float, width: int = 18) -> str:
-	pct = used / total if total else 0
-	filled = int(width * pct)
-	return "█" * filled + "░" * (width - filled)
-
-
-def _fmt_mb(mb: float) -> str:
-	return f"{mb / 1024:.2f} GB" if mb >= 1024 else f"{mb:.0f} MB"
-
-
-def _fmt_metric(value, suffix: str = "") -> str:
-	"""Format an optional metric without making missing values look like zero."""
-	if value is None:
-		return "—"
-	if isinstance(value, float):
-		return f"{value:.2f}{suffix}"
-	return f"{value}{suffix}"
-
-
-def _performance_text(entry: dict) -> str:
-	"""Return the compact, human-readable view for an LLM performance event."""
-	model = escape(str(entry.get("model", "unknown model")))
-	prompt = _fmt_metric(entry.get("prompt_tokens"))
-	completion = _fmt_metric(entry.get("completion_tokens"))
-	server_tps = _fmt_metric(entry.get("server_tokens_per_second"), " tok/s")
-	measured_tps = _fmt_metric(entry.get("measured_tokens_per_second"), " tok/s")
-	end_to_end_tps = _fmt_metric(entry.get("end_to_end_tokens_per_second"), " tok/s")
-	server_ttft = _fmt_metric(entry.get("server_ttft_ms"), " ms")
-	client_ttft = _fmt_metric(entry.get("client_ttft_ms"), " ms")
-	return (
-		f"[dim]{entry.get('ts', '')}[/dim] [bold yellow]LLM PERF[/bold yellow] "
-		f"[bold]{model}[/bold]\n"
-		f"  tokens: prompt={prompt}, completion={completion}  "
-		f"throughput: server={server_tps}, measured={measured_tps}, "
-		f"end-to-end={end_to_end_tps}  "
-		f"TTFT: server={server_ttft}, client={client_ttft}"
-	)
-
-
-def _resource_markup() -> str:
-	lines: list[str] = []
-
-	# CPU
-	pct = psutil.cpu_percent(interval=None)
-	bar = _rbar(pct, 100)
-	lines.append("[bold cyan]CPU[/bold cyan]")
-	lines.append(f"[{bar}] [bold]{pct:.1f}%[/bold]")
-	lines.append("")
-
-	# RAM
-	vm = psutil.virtual_memory()
-	used_mb = vm.used / 1024**2
-	total_mb = vm.total / 1024**2
-	bar = _rbar(used_mb, total_mb)
-	lines.append("[bold cyan]Memory[/bold cyan]")
-	lines.append(f"[{bar}]")
-	lines.append(f"[bold]{_fmt_mb(used_mb)}[/bold] / {_fmt_mb(total_mb)}")
-	lines.append("")
-
-	# Swap
-	try:
-		sw = psutil.swap_memory()
-		if sw.total > 0:
-			sw_used = sw.used / 1024**2
-			sw_total = sw.total / 1024**2
-			bar = _rbar(sw_used, sw_total)
-			lines.append("[bold cyan]Swap[/bold cyan]")
-			lines.append(f"[{bar}]")
-			lines.append(f"[bold]{_fmt_mb(sw_used)}[/bold] / {_fmt_mb(sw_total)}")
-			lines.append("")
-	except OSError:
-		# macOS can reject the swap query when virtual memory statistics are
-		# temporarily unavailable. The rest of the monitor remains useful.
-		pass
-
-	# NVIDIA VRAM
-	try:
-		from pynvml import (
-			nvmlDeviceGetHandleByIndex,
-			nvmlDeviceGetMemoryInfo,
-			nvmlDeviceGetName,
-			nvmlInit,
-		)
-
-		nvmlInit()
-		h = nvmlDeviceGetHandleByIndex(0)
-		info = nvmlDeviceGetMemoryInfo(h)
-		name = nvmlDeviceGetName(h)
-		vram_used = info.used / 1024**2
-		vram_total = info.total / 1024**2
-		bar = _rbar(vram_used, vram_total)
-		lines.append(f"[bold cyan]VRAM[/bold cyan] [dim]{name}[/dim]")
-		lines.append(f"[{bar}]")
-		lines.append(f"[bold]{_fmt_mb(vram_used)}[/bold] / {_fmt_mb(vram_total)}")
-		lines.append("")
-	except Exception:
-		pass
-
-	# LLM context — written by utils/resource_monitor.py:push_context_to_file
-	# from the chat process. ALWAYS rendered so the meter has a stable position
-	# in the layout. Shows last-known values (even if stale); only shows a
-	# placeholder when the file has never been written.
-	used, max_ = 0, 0
-	has_data = False
-	try:
-		if CONTEXT_FILE.exists():
-			with open(CONTEXT_FILE) as f:
-				ctx = json.loads(f.read())
-			used = int(ctx.get("used", 0))
-			max_ = int(ctx.get("max", 0)) or 0
-			has_data = True
-	except Exception:
-		pass
-
-	lines.append("[bold cyan]Context[/bold cyan] [dim]LLM[/dim]")
-	if not has_data or max_ <= 0:
-		# Never written yet, or max unknown — empty bar with dim placeholder
-		bar = _rbar(0, 1)
-		lines.append(f"[{bar}]")
-		lines.append("[dim]— / — (waiting for chat)[/dim]")
-	else:
-		bar = _rbar(used, max_)
-		pct = used / max_ * 100
-		lines.append(f"[{bar}]")
-		lines.append(f"[bold]{used:,}[/bold] / {max_:,} ({pct:.0f}%)")
-	lines.append("")
-
-	return "\n".join(lines)
-
-
-# ------------------------------------------------------------------ log helpers
-
-LEVEL_STYLE = {
-	"DEBUG": "dim white",
-	"INFO": "bold cyan",
-	"WARN": "bold yellow",
-	"ERROR": "bold red",
-}
-
-ALL_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
+# ------------------------------------------------------------------ MonitorApp
 
 
 class MonitorApp(App):
