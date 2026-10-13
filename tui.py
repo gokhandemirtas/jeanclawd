@@ -341,16 +341,24 @@ class TuiApp(App):
         background: #12141f;
         border-bottom: solid #24283b;
     }
-    TabbedContent > Tabs > Tab {
+    TabbedContent > Tabs ContentTab {
         padding: 0 3;
         color: #64748b;
         background: #12141f;
     }
-    TabbedContent > Tabs > Tab.-active {
+    TabbedContent > Tabs ContentTab.-active {
         color: #f1f5f9;
         background: #1b1d2a;
         border-bottom: tall #7c3aed;
         text-style: bold;
+    }
+
+    #main-tabs > Tabs {
+        height: 2;
+        padding-left: 2;
+    }
+    #main-tabs ContentTab {
+        min-width: 12;
     }
 
     /* ── dashboard ── */
@@ -483,12 +491,12 @@ class TuiApp(App):
         background: #131522;
         border-bottom: solid #24283b;
     }
-    #monitor-log-tabs > Tabs > Tab {
+    #monitor-log-tabs > Tabs ContentTab {
         padding: 0 2;
         color: #94a3b8;
         background: #1e2233;
     }
-    #monitor-log-tabs > Tabs > Tab.-active {
+    #monitor-log-tabs > Tabs ContentTab.-active {
         color: white;
         background: #7c3aed;
         border: none;
