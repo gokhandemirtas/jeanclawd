@@ -21,11 +21,10 @@ async def apply_preferences() -> None:
 	try:
 		settings = await _get_settings()
 		from agents.persona import set_active_persona
-		from tts.tts import active_voice_id, set_active_voice_id, voice_ids
+		from voicebox.client import active_voice_id, set_active_voice_id, voice_ids
 
 		set_active_persona(settings.agent_persona)
 		set_active_voice_id(settings.agent_voice_id)
-		# Migrate settings saved with the former local voice IDs.
 		if settings.agent_voice_id not in voice_ids:
 			settings.agent_voice_id = active_voice_id
 			await settings.save()

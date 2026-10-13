@@ -169,17 +169,13 @@ async def main(
 		logger.debug("Emote mode enabled")
 
 	if speak:
-		from tts.tts import enable_tts
+		from voicebox.client import enable_tts
 
 		enable_tts()
-		logger.debug("TTS enabled")
+		logger.debug("TTS enabled (voicebox)")
 
 	if listen:
-		from stt import get_stt_provider
-		from stt.wakeword import preload as preload_wakeword
-		await asyncio.to_thread(get_stt_provider)
-		await asyncio.to_thread(preload_wakeword)
-		logger.debug("STT voice input enabled (wake word: hey jarvis)")
+		logger.warning("[main] --listen mode requires local mic recording which has been removed; ignoring flag")
 
 	from agents.persona import set_io_capabilities
 	set_io_capabilities(speak=speak, listen=listen)
@@ -234,46 +230,7 @@ async def main(
 
 	while True:
 		try:
-			if listen:
-				from stt import get_stt_provider
-				from stt.wakeword import listen_for_wakeword
-				from stt.recorder import record_until_silence
-				if conversation_active:
-					console.print(
-						f"[dim]Conversation mode… speak within {conversation_idle_timeout:g}s "
-						"(say 'stop listening' to exit)[/dim]"
-					)
-				else:
-					console.print("[dim]Listening… (say 'hey jarvis')[/dim]")
-					await asyncio.to_thread(listen_for_wakeword)
-				console.print("[dim]🎙  Recording…[/dim]", end="\r")
-				audio_path, too_short = await asyncio.to_thread(
-					record_until_silence,
-					wait_for_speech=conversation_active,
-					initial_silence_seconds=conversation_idle_timeout,
-				)
-				if too_short:
-					os.unlink(audio_path)
-					conversation_active = False
-					continue
-				console.print("[dim]Transcribing…[/dim]", end="\r")
-				try:
-					user_input = await asyncio.to_thread(get_stt_provider().transcribe, audio_path)
-				finally:
-					os.unlink(audio_path)
-				if not user_input:
-					continue
-				if user_input.casefold().strip().rstrip(".!?") in exit_phrases:
-					conversation_active = False
-					console.print("[dim]Conversation mode ended. Say 'hey jarvis' to start again.[/dim]")
-					continue
-				# Guard against Whisper hallucinations (single word repeated many times)
-				words = user_input.split()
-				if len(words) > 6 and len(set(w.lower() for w in words)) <= 2:
-					continue
-				console.print(f"[cyan]You:[/cyan] {user_input}")
-				conversation_active = True
-			elif _prompt_session is not None:
+			if _prompt_session is not None:
 				user_input = (await _prompt_session.prompt_async("❯ ")).strip()
 			else:
 				user_input = (await asyncio.to_thread(console.input, "❯ ")).strip()
@@ -404,44 +361,16 @@ async def main(
 			await _record_interaction(user_input, response, intent=resolved_intent)
 
 			if speak:
-				from tts.expressions import decorate_for_speech
-				from tts.tts import speak as tts_speak, active_voice_id
+				from voicebox.client import speak as vb_speak, active_voice_id
 				from agents.persona import get_active_voice_id
-				from stt.recorder import monitor_for_speech
 
 				tts_stop_event = threading.Event()
-				barge_in_event = threading.Event()
-				monitor_stop_event = threading.Event()
-				monitor_thread = None
-				if listen:
-					monitor_thread = threading.Thread(
-						target=monitor_for_speech,
-						args=(monitor_stop_event, barge_in_event),
-						kwargs={"cancel_event": tts_stop_event},
-						daemon=True,
-					)
-					monitor_thread.start()
-				try:
-					# News is already formatted by its dedicated skill. Read the exact
-					# displayed briefing rather than sending it through persona decoration.
-					if resolved_intent == "NEWSFEED":
-						spoken_response = response
-						logger.debug("[tts] NEWSFEED: speaking displayed response verbatim")
-					else:
-						spoken_response = await asyncio.to_thread(decorate_for_speech, response)
-					await asyncio.to_thread(
-						tts_speak,
-						spoken_response,
-						get_active_voice_id() or active_voice_id,
-						tts_stop_event,
-					)
-				finally:
-					monitor_stop_event.set()
-					if monitor_thread:
-						monitor_thread.join(timeout=1.0)
-				if barge_in_event.is_set():
-					console.print("[dim]Barge-in detected — listening…[/dim]")
-					conversation_active = True
+				await asyncio.to_thread(
+					vb_speak,
+					response,
+					get_active_voice_id() or active_voice_id,
+					tts_stop_event,
+				)
 
 			logger.timing(_elapsed)
 

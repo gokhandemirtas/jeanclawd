@@ -30,7 +30,6 @@ from concurrent.futures import ThreadPoolExecutor
 from aiohttp import WSMsgType, web
 from dotenv import load_dotenv
 
-from tts.pipeline import process_voice_job, process_voice_ws
 from utils import logger
 
 load_dotenv()
@@ -42,6 +41,109 @@ load_dotenv()
 _voice_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice")
 _voice_jobs: dict[str, dict] = {}  # job_id → {status, result}
 
+
+def _process_voice_job(
+    job: dict,
+    audio_in: str,
+    loop: asyncio.AbstractEventLoop,
+    voice_id: str,
+) -> None:
+    """Blocking pipeline: voicebox STT → intent classifier → voicebox TTS."""
+    import base64
+    import tempfile
+
+    from voicebox.client import transcribe, synthesize
+
+    cancel_event: threading.Event = job["cancel_event"]
+    audio_out = None
+    try:
+        if cancel_event.is_set():
+            job.update({"status": "cancelled"})
+            return
+
+        transcript = transcribe(audio_in)
+        logger.debug(f"[api/voice] transcript='{transcript}'")
+        job["transcription"] = transcript
+
+        if cancel_event.is_set():
+            job.update({"status": "cancelled"})
+            return
+
+        from agents.intent_classifier import run_intent_classifier
+
+        response_text = asyncio.run_coroutine_threadsafe(
+            run_intent_classifier(transcript, voice_mode=True), loop
+        ).result()
+        job["text"] = response_text
+
+        if cancel_event.is_set():
+            job.update({"status": "cancelled"})
+            return
+
+        wav_bytes = synthesize(response_text, voice_id=voice_id, stream=False)
+
+        if cancel_event.is_set():
+            job.update({"status": "cancelled"})
+            return
+
+        audio_b64 = base64.b64encode(wav_bytes).decode()
+        job.update({"status": "done", "transcription": transcript, "text": response_text, "audio": audio_b64})
+
+    except Exception as exc:
+        logger.error(f"[api/voice] pipeline failed: {exc}")
+        job.update({"status": "error", "error": "Something went wrong. Please try again."})
+    finally:
+        if audio_in and os.path.exists(audio_in):
+            os.remove(audio_in)
+
+
+def _process_voice_ws(
+    audio_in: str,
+    loop: asyncio.AbstractEventLoop,
+    voice_id: str,
+    cancel_event: threading.Event,
+    send_event,
+    on_token,
+) -> None:
+    """Blocking pipeline for the WebSocket path."""
+    import base64
+
+    from voicebox.client import transcribe, synthesize
+
+    try:
+        if cancel_event.is_set():
+            return
+
+        transcript = transcribe(audio_in)
+        logger.debug(f"[api/voice/ws] transcript='{transcript}'")
+        send_event({"stage": "transcribed", "text": transcript})
+
+        if cancel_event.is_set():
+            return
+
+        from agents.intent_classifier import run_intent_classifier
+
+        response_text = asyncio.run_coroutine_threadsafe(
+            run_intent_classifier(transcript, on_token=on_token, voice_mode=True), loop
+        ).result()
+
+        if cancel_event.is_set():
+            return
+
+        wav_bytes = synthesize(response_text, voice_id=voice_id, stream=False)
+
+        if cancel_event.is_set():
+            return
+
+        audio_b64 = base64.b64encode(wav_bytes).decode()
+        send_event({"stage": "done", "text": response_text, "audio": audio_b64})
+
+    except Exception as exc:
+        logger.error(f"[api/voice/ws] pipeline failed: {exc}")
+        send_event({"stage": "error", "error": "Something went wrong. Please try again."})
+    finally:
+        if audio_in and os.path.exists(audio_in):
+            os.remove(audio_in)
 
 
 def _decode_image(value: str) -> bytes:
@@ -187,7 +289,7 @@ async def handle_query_ws(request: web.Request) -> web.WebSocketResponse:
 
 
 async def handle_voice(request: web.Request) -> web.Response:
-	from tts.tts import active_voice_id, voice_ids
+	from voicebox.client import active_voice_id, voice_ids
 	from agents.persona import get_active_voice_id
 
 	voice_id = (
@@ -219,14 +321,14 @@ async def handle_voice(request: web.Request) -> web.Response:
 
 	loop = asyncio.get_running_loop()
 	loop.run_in_executor(
-		_voice_executor, process_voice_job, _voice_jobs[job_id], audio_in, loop, voice_id
+		_voice_executor, _process_voice_job, _voice_jobs[job_id], audio_in, loop, voice_id
 	)
 
 	return web.json_response({"job_id": job_id, "status": "pending"}, status=202)
 
 
 async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
-	from tts.tts import active_voice_id, voice_ids
+	from voicebox.client import active_voice_id, voice_ids
 	from agents.persona import get_active_voice_id
 
 	voice_id = (
@@ -274,7 +376,7 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
 
 	loop.run_in_executor(
 		_voice_executor,
-		process_voice_ws,
+		_process_voice_ws,
 		audio_in,
 		loop,
 		voice_id,
@@ -522,14 +624,14 @@ async def handle_reminders(request: web.Request) -> web.Response:
 
 
 async def handle_tts_voices(request: web.Request) -> web.Response:
-	from tts.tts import active_voice_id, voice_ids
+	from voicebox.client import active_voice_id, voice_ids
 
 	return web.json_response({"voices": voice_ids, "default": active_voice_id})
 
 
 async def handle_personas(request: web.Request) -> web.Response:
 	from agents.persona import PERSONAS
-	from tts.tts import active_voice_id
+	from voicebox.client import active_voice_id
 
 	return web.json_response(
 		{
@@ -543,7 +645,7 @@ async def handle_personas(request: web.Request) -> web.Response:
 
 async def handle_get_persona(request: web.Request) -> web.Response:
 	from agents.persona import PERSONAS, get_active_persona_id
-	from tts.tts import active_voice_id
+	from voicebox.client import active_voice_id
 
 	persona_id = get_active_persona_id()
 	persona = PERSONAS[persona_id]
@@ -558,7 +660,7 @@ async def handle_get_persona(request: web.Request) -> web.Response:
 
 async def handle_set_persona(request: web.Request) -> web.Response:
 	from agents.persona import PERSONAS, set_active_persona
-	from tts.tts import active_voice_id, set_active_voice_id
+	from voicebox.client import active_voice_id, set_active_voice_id
 	from db.preferences import update_preferences
 
 	data = await request.json()
@@ -586,7 +688,7 @@ async def handle_set_persona(request: web.Request) -> web.Response:
 
 
 async def handle_set_voice(request: web.Request) -> web.Response:
-	from tts.tts import voice_ids, set_active_voice_id
+	from voicebox.client import voice_ids, set_active_voice_id
 	from db.preferences import update_preferences
 
 	data = await request.json()

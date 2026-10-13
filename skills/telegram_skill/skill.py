@@ -42,7 +42,7 @@ async def _transcribe_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Download and transcribe a voice or audio message. Returns transcribed text or None on failure."""
     import asyncio
 
-    from stt.stt import transcribe
+    from voicebox.client import transcribe
 
     file = await (update.message.voice or update.message.audio).get_file()
 
@@ -164,24 +164,16 @@ async def _handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def _reply_audio(update: Update, text: str) -> None:
-    from tts.expressions import decorate_for_speech
-    from tts.tts import synthesise
     import asyncio
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp_path = f.name
+    from voicebox.client import synthesize
 
     try:
-        spoken_text = await asyncio.to_thread(decorate_for_speech, text)
-        await asyncio.to_thread(synthesise, spoken_text, tmp_path)
-        with open(tmp_path, "rb") as audio_file:
-            await update.message.reply_audio(audio=audio_file, title="Response")
+        wav_bytes = await asyncio.to_thread(synthesize, text, None, False)
+        await update.message.reply_audio(audio=wav_bytes, title="Response")
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
         await update.message.reply_text(await _fit_response(text))
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
 
 
 async def start_telegram_bot() -> None:

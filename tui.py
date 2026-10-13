@@ -457,8 +457,12 @@ class TuiApp(App):
         width: 25%;
         height: 1fr;
         border-left: tall #24283b;
-        padding: 1 2;
         background: #141624;
+    }
+    #right-info {
+        width: 1fr;
+        height: 1fr;
+        padding: 1 2;
         overflow-y: auto;
     }
     #models-panel, #resource-panel, #subway-panel {
@@ -477,6 +481,40 @@ class TuiApp(App):
     #subway-panel {
         height: auto;
         padding: 1 0 0 0;
+    }
+
+    /* slash-command terminal */
+    #slash-terminal {
+        width: 1fr;
+        height: 14;
+        border-top: tall #24283b;
+        background: #0d0f1a;
+    }
+    #slash-terminal-title {
+        height: 1;
+        padding: 0 2;
+        background: #12141f;
+        color: #4a5568;
+        text-style: bold;
+    }
+    #slash-log {
+        height: 1fr;
+        border: none;
+        padding: 0 1;
+        background: #0d0f1a;
+        scrollbar-gutter: stable;
+    }
+    #slash-input {
+        width: 1fr;
+        height: 3;
+        border: tall #1e2235;
+        background: #10121d;
+        color: #f1f5f9;
+        padding: 0 1;
+        margin: 0;
+    }
+    #slash-input:focus {
+        border: tall #7c3aed;
     }
 
     /* ── monitor tab ── */
@@ -621,13 +659,31 @@ class TuiApp(App):
                             )
                             yield Button("SEND", id="btn-send")
                     with Vertical(id="right-panel"):
-                        yield Static(_models_markup(), id="models-panel", markup=True)
-                        yield Static("", id="resource-panel", markup=True)
-                        yield Static(
-                            _subway_markup("idle", "", set(), False, {}, 0.0),
-                            id="subway-panel",
-                            markup=True,
-                        )
+                        with Vertical(id="right-info"):
+                            yield Static(_models_markup(), id="models-panel", markup=True)
+                            yield Static("", id="resource-panel", markup=True)
+                            yield Static(
+                                _subway_markup("idle", "", set(), False, {}, 0.0),
+                                id="subway-panel",
+                                markup=True,
+                            )
+                        with Vertical(id="slash-terminal"):
+                            yield Static(
+                                "[dim]/ COMMANDS[/dim]",
+                                id="slash-terminal-title",
+                                markup=True,
+                            )
+                            yield RichLog(
+                                id="slash-log",
+                                highlight=False,
+                                markup=True,
+                                wrap=True,
+                            )
+                            yield Input(
+                                placeholder="/help",
+                                suggester=SlashCommandSuggester(case_sensitive=False),
+                                id="slash-input",
+                            )
             with TabPane("Monitor", id="tab-monitor"):
                 with Vertical(id="log-pane"):
                     with TabbedContent(initial="tab-logs", id="monitor-log-tabs"):
@@ -703,7 +759,7 @@ class TuiApp(App):
             enable_emote()
 
         if self._speak:
-            from tts.tts import enable_tts
+            from voicebox.client import enable_tts
             enable_tts()
 
         chat_log = self.query_one("#chat-log", RichLog)
@@ -854,6 +910,20 @@ class TuiApp(App):
         if not user_text:
             return
         event.input.clear()
+
+        # Slash terminal — always runs as a command
+        if event.input.id == "slash-input":
+            cmd = user_text if user_text.startswith("/") else f"/{user_text}"
+            if cmd in ("/quit", "/exit"):
+                await self._graceful_quit()
+                return
+            self.run_worker(
+                self._run_command(cmd, log_id="slash-log"),
+                exclusive=False,
+                name="slash-command",
+            )
+            return
+
         self.query_one("#command-menu", Static).remove_class("-visible")
 
         if self._busy:
@@ -861,7 +931,7 @@ class TuiApp(App):
             chat_log.write("[dim]Still processing previous request…[/dim]")
             return
 
-        # Handle slash commands
+        # Handle slash commands from main chat input
         if user_text.startswith("/"):
             if user_text in ("/quit", "/exit"):
                 await self._graceful_quit()
@@ -886,8 +956,8 @@ class TuiApp(App):
             name="pipeline",
         )
 
-    async def _run_command(self, cmd: str) -> None:
-        chat_log = self.query_one("#chat-log", RichLog)
+    async def _run_command(self, cmd: str, log_id: str = "chat-log") -> None:
+        log = self.query_one(f"#{log_id}", RichLog)
         parts = cmd.strip().split(None, 1)
         command = parts[0].lower()
         args = parts[1].strip() if len(parts) > 1 else ""
@@ -895,13 +965,13 @@ class TuiApp(App):
         # Intercept commands that use prompt_toolkit interactive pickers —
         # those pickers corrupt Textual's terminal state and freeze the TUI.
         if command == "/persona":
-            await self._cmd_persona_tui(args, chat_log)
+            await self._cmd_persona_tui(args, log)
             return
         if command == "/voice" and not args:
-            await self._cmd_show_voices(chat_log)
+            await self._cmd_show_voices(log)
             return
         if command in ("/change-model", "/connect") and not args:
-            await self._cmd_show_picker_options(command, chat_log)
+            await self._cmd_show_picker_options(command, log)
             return
 
         try:
@@ -913,16 +983,16 @@ class TuiApp(App):
             if messages:
                 for level, message in messages:
                     style = LEVEL_STYLE.get(level, "dim")
-                    chat_log.write(
+                    log.write(
                         f"[dim]{self._ts()}[/dim]  "
                         f"[bold #4ade80]Jean:[/bold #4ade80] "
                         f"[{style}]{escape(message)}[/{style}]"
                     )
-                chat_log.scroll_end(animate=False)
+                log.scroll_end(animate=False)
             else:
-                self._write_jean("[dim]Command completed.[/dim]")
+                log.write(f"[dim]{self._ts()}[/dim]  [bold #4ade80]Jean:[/bold #4ade80] [dim]Command completed.[/dim]")
         except Exception as exc:
-            chat_log.write(f"[bold red]Command error:[/bold red] {exc}")
+            log.write(f"[bold red]Command error:[/bold red] {escape(str(exc))}")
 
     def _write_cmd_output(self, chat_log: RichLog, messages: list) -> None:
         for level, message in messages:
@@ -983,7 +1053,7 @@ class TuiApp(App):
 
     async def _cmd_show_voices(self, chat_log: RichLog) -> None:
         try:
-            from tts.tts import voice_ids
+            from voicebox.client import voice_ids
             ids = list(voice_ids)
         except Exception:
             ids = []

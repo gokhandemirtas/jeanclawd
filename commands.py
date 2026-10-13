@@ -372,7 +372,7 @@ async def cmd_voice(args: str) -> None:
 	from prompt_toolkit import PromptSession
 	from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
-	from tts.tts import voice_ids, set_active_voice_id
+	from voicebox.client import voice_ids, set_active_voice_id
 	from db.preferences import update_preferences
 	from agents.persona import get_active_persona_id
 
@@ -429,7 +429,7 @@ async def cmd_persona(args: str) -> None:
 	from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
 
 	from agents.persona import PERSONAS, set_active_persona, get_active_voice_id
-	from tts.tts import voice_ids, set_active_voice_id
+	from voicebox.client import voice_ids, set_active_voice_id
 	from db.preferences import update_preferences
 
 	persona_ids = list(PERSONAS.keys())
