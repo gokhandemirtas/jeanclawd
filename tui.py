@@ -532,7 +532,8 @@ class TuiApp(App):
     """
 
     BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("ctrl+c", "exit_tui", "Quit", priority=True),
+        Binding("ctrl+q", "exit_tui", "Quit", priority=True),
         Binding("ctrl+l", "clear_chat", "Clear chat"),
         Binding("a", "toggle_autoscroll", "Auto-scroll", show=False),
         Binding("y", "copy_log", "Copy log", show=False),
@@ -1035,8 +1036,9 @@ class TuiApp(App):
             await asyncio.sleep(0.5)
         self.exit()
 
-    async def action_quit(self) -> None:
-        await self._graceful_quit()
+    def action_exit_tui(self) -> None:
+        """Exit immediately from a global shortcut, even while input is focused."""
+        self.exit()
 
     # ── monitor log polling (adapted from monitor.py) ─────────────────────────
 
