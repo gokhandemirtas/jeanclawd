@@ -67,8 +67,8 @@ def performance_text(entry: dict) -> str:
 # ── system resource markup ────────────────────────────────────────────────────
 
 
-def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_color: str, subtitle: str = "") -> list[str]:
-    """Render a 3-line resource meter card."""
+def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_color: str) -> list[str]:
+    """Render a two-line resource meter with a consistent value and bar."""
     filled = min(bar_filled, bar_total)
     empty = bar_total - filled
     bar_line = f"[{bar_color}]{'█' * filled}[/{bar_color}][dim]{'░' * empty}[/dim]"
@@ -76,8 +76,6 @@ def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_colo
         f"[bold {bar_color}]{label}[/bold {bar_color}]  [bold]{value_str}[/bold]",
         bar_line,
     ]
-    if subtitle:
-        lines.append(f"[dim]{subtitle}[/dim]")
     lines.append("")
     return lines
 
@@ -91,22 +89,22 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
         "",
     ]
 
-    def usage(used: float, total: float) -> str:
+    def usage(used: float, total: float, percent: float) -> str:
         if compact:
-            return f"{used / 1024:.1f}/{total / 1024:.1f}G"
-        return f"{fmt_mb(used)} / {fmt_mb(total)}"
+            return f"{used / 1024:.1f}/{total / 1024:.1f} GB {percent:.0f}%"
+        return f"{fmt_mb(used)} / {fmt_mb(total)} ({percent:.0f}%)"
 
     # CPU
     pct = psutil.cpu_percent(interval=None)
     filled = int(bar_width * pct / 100)
     lines += _meter("CPU", f"{pct:.1f}%", filled, bar_width, "#22d3ee")
 
-    # RAM
+    # RAM: derive the used value from `available` so it agrees with psutil.percent.
     vm = psutil.virtual_memory()
-    used_mb  = vm.used  / 1024 ** 2
+    used_mb  = (vm.total - vm.available) / 1024 ** 2
     total_mb = vm.total / 1024 ** 2
     filled = int(bar_width * vm.percent / 100)
-    lines += _meter("RAM", usage(used_mb, total_mb), filled, bar_width, "#7c3aed", f"{vm.percent:.0f}%")
+    lines += _meter("RAM", usage(used_mb, total_mb, vm.percent), filled, bar_width, "#7c3aed")
 
     # Swap
     try:
@@ -116,7 +114,7 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
             sw_total = sw.total / 1024 ** 2
             sw_pct   = sw.percent
             filled   = int(bar_width * sw_pct / 100)
-            lines += _meter("Swap", usage(sw_used, sw_total), filled, bar_width, "#22d3ee", f"{sw_pct:.0f}%")
+            lines += _meter("Swap", usage(sw_used, sw_total, sw_pct), filled, bar_width, "#22d3ee")
     except OSError:
         pass
 
@@ -125,8 +123,16 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
         du = psutil.disk_usage("/")
         free_gb  = du.free  / 1024 ** 3
         total_gb = du.total / 1024 ** 3
-        filled   = int(bar_width * du.percent / 100)
-        lines += _meter("Disk", f"{free_gb:.0f} GB free", filled, bar_width, "#22d3ee", f"{total_gb:.0f} GB total  {du.percent:.0f}%")
+        # On APFS, `used` can be small while free space reflects the shared volume.
+        # Show available capacity and use the matching available-space percentage.
+        free_pct = du.free / du.total * 100 if du.total else 0
+        filled   = int(bar_width * free_pct / 100)
+        disk_value = (
+            f"{free_gb:.0f}/{total_gb:.0f} GB {free_pct:.0f}%"
+            if compact
+            else f"{free_gb:.0f} GB free / {total_gb:.0f} GB ({free_pct:.0f}%)"
+        )
+        lines += _meter("Disk", disk_value, filled, bar_width, "#22d3ee")
     except Exception:
         pass
 
@@ -145,7 +151,7 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
         vram_total = info.total / 1024 ** 2
         vram_pct   = vram_used / vram_total * 100 if vram_total else 0
         filled     = int(bar_width * vram_pct / 100)
-        lines += _meter("VRAM", usage(vram_used, vram_total), filled, bar_width, "#facc15", f"{vram_pct:.0f}%")
+        lines += _meter("VRAM", usage(vram_used, vram_total, vram_pct), filled, bar_width, "#facc15")
     except Exception:
         pass
 
@@ -162,11 +168,16 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
         pass
 
     if not has_ctx or max_ctx <= 0:
-        lines += _meter("CTX", "— waiting", 0, bar_width, "#4ade80")
+        lines += _meter("CONTEXT", "— waiting", 0, bar_width, "#4ade80")
     else:
         pct_ctx = used_ctx / max_ctx * 100
-        filled  = int(bar_width * pct_ctx / 100)
-        ctx_value = f"{used_ctx / 1000:.0f}k/{max_ctx / 1000:.0f}" if compact else f"{used_ctx:,} / {max_ctx:,}"
-        lines += _meter("CTX", ctx_value, filled, bar_width, "#4ade80", f"{pct_ctx:.0f}%")
+        display_pct = max(1, round(pct_ctx)) if used_ctx else 0
+        filled = max(1, int(bar_width * pct_ctx / 100)) if display_pct else 0
+        ctx_value = (
+            f"{used_ctx / 1000:.0f}k/{max_ctx / 1000:.0f}k {display_pct}%"
+            if compact
+            else f"{used_ctx:,} / {max_ctx:,} tokens ({display_pct}%)"
+        )
+        lines += _meter("CONTEXT", ctx_value, filled, bar_width, "#4ade80")
 
     return "\n".join(lines)
