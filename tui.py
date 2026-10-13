@@ -261,6 +261,11 @@ class TuiApp(App):
     SUB_TITLE = "personal AI"
 
     CSS = """
+    Screen {
+        background: #0f111a;
+        color: #f1f5f9;
+    }
+
     /* ── splash ── */
     SplashPanel {
         overlay: screen;
@@ -272,18 +277,34 @@ class TuiApp(App):
     }
 
     /* ── shared ── */
-    Header { height: 1; }
+    Header {
+        height: 1;
+        background: #141622;
+        color: #f1f5f9;
+        border-bottom: solid #24283b;
+    }
+
+    Footer {
+        height: 1;
+        background: #141622;
+        color: #94a3b8;
+        border-top: solid #24283b;
+    }
 
     TabbedContent > Tabs {
         padding-top: 1;
-        background: $background;
+        background: #12141f;
+        border-bottom: solid #24283b;
     }
     TabbedContent > Tabs > Tab {
         padding: 0 3;
-        color: $text-muted;
+        color: #64748b;
+        background: #12141f;
     }
     TabbedContent > Tabs > Tab.-active {
-        color: $text;
+        color: #f1f5f9;
+        background: #1b1d2a;
+        border-bottom: tall #7c3aed;
         text-style: bold;
     }
 
@@ -302,42 +323,45 @@ class TuiApp(App):
         border: none;
         padding: 0 2;
         scrollbar-gutter: stable;
-        background: $background;
+        background: #0f111a;
     }
     #streaming-label {
         height: auto;
         min-height: 2;
         padding: 0 2 1 2;
-        border-top: tall $panel;
-        background: $surface;
-        color: $text;
+        border-top: tall #23273a;
+        background: #0a0c12;
+        color: #cbd5e1;
     }
     #chat-input-bar {
-        height: 3;
-        background: $background;
-        border-top: tall #7c3aed;
-        padding: 0 1;
+        height: 5;
+        background: #12141f;
+        border-top: tall #24283b;
+        padding: 1 1;
     }
+    #chat-input-bar:focus-within { border-top: tall #7c3aed; }
     #chat-prompt {
         width: 3;
         height: 3;
-        padding: 1 0 1 1;
-        background: $background;
+        padding: 1 0;
+        background: #171a28;
+        color: #22d3ee;
     }
     #chat-input {
         width: 1fr;
-        height: 1;
-        border: none;
-        background: $background;
+        height: 3;
+        border: round #2b3046;
+        background: #171a28;
+        color: #f1f5f9;
         padding: 0 1;
     }
     #chat-input:focus {
-        border: none;
+        border: round #7c3aed;
     }
     #btn-send {
-        height: 1;
+        height: 3;
         min-width: 9;
-        margin: 1 0 1 1;
+        margin: 0 0 0 1;
         background: #7c3aed;
         color: white;
         border: none;
@@ -348,26 +372,26 @@ class TuiApp(App):
 
     /* right info panel */
     #right-panel {
-        width: 36;
+        width: 25%;
         height: 1fr;
-        border-left: tall $panel;
-        padding: 0;
-        background: $surface;
+        border-left: tall #24283b;
+        padding: 1 2;
+        background: #141624;
         overflow-y: auto;
     }
     #models-panel {
         height: auto;
-        padding: 1 2 1 2;
-        border-bottom: solid $panel;
+        padding: 0 0 1 0;
+        border-bottom: solid #262b40;
     }
     #resource-panel {
         height: auto;
-        padding: 1 2 1 2;
-        border-bottom: solid $panel;
+        padding: 1 0;
+        border-bottom: solid #262b40;
     }
     #subway-panel {
         height: auto;
-        padding: 1 2 1 2;
+        padding: 1 0 0 0;
     }
 
     /* ── monitor tab ── */
@@ -377,9 +401,9 @@ class TuiApp(App):
     }
     #monitor-filter-bar {
         height: 3;
-        background: $surface;
+        background: #141624;
         padding: 1 1 0 1;
-        border-bottom: solid $panel;
+        border-bottom: solid #24283b;
     }
     #monitor-filter-bar Button {
         margin: 0 1;
@@ -388,31 +412,50 @@ class TuiApp(App):
         min-height: 1;
         padding: 0 1;
         border: none;
-        background: $panel;
-        color: $text-muted;
+        background: #1e2235;
+        color: #94a3b8;
     }
     #monitor-filter-bar Button:hover {
-        background: $boost;
-        color: $text;
+        background: #282e47;
+        color: #cbd5e1;
     }
     #monitor-filter-bar Button.-active {
         background: #7c3aed;
-        color: $text;
+        color: white;
         text-style: bold;
     }
     #monitor-stats {
         height: 1;
         padding: 0 2;
-        background: $panel;
-        color: $text-muted;
+        background: #10121d;
+        color: #64748b;
+        border-bottom: solid #202436;
     }
     #monitor-log-tabs {
         height: 1fr;
+        background: #0b0d14;
+    }
+    #monitor-log-tabs > Tabs {
+        padding-top: 1;
+        padding-left: 2;
+        background: #131522;
+        border-bottom: solid #24283b;
+    }
+    #monitor-log-tabs > Tabs > Tab {
+        padding: 0 2;
+        color: #94a3b8;
+        background: #1e2233;
+    }
+    #monitor-log-tabs > Tabs > Tab.-active {
+        color: white;
+        background: #7c3aed;
+        border: none;
     }
     #monitor-log-view, #monitor-event-view, #monitor-sear-view {
         height: 1fr;
         border: none;
         padding: 0 1;
+        background: #0b0d14;
     }
     """
 
@@ -495,7 +538,7 @@ class TuiApp(App):
             with TabPane("Monitor", id="tab-monitor"):
                 with Vertical(id="log-pane"):
                     with TabbedContent(initial="tab-logs", id="monitor-log-tabs"):
-                        with TabPane("Logs", id="tab-logs"):
+                        with TabPane("Logs (Main)", id="tab-logs"):
                             with Horizontal(id="monitor-filter-bar"):
                                 yield Button("ALL", id="btn-ALL", classes="-active")
                                 for lvl in ALL_LEVELS:
@@ -510,14 +553,14 @@ class TuiApp(App):
                                 markup=True,
                                 wrap=True,
                             )
-                        with TabPane("Events", id="tab-events"):
+                        with TabPane("Events (Dispatcher)", id="tab-events"):
                             yield RichLog(
                                 id="monitor-event-view",
                                 highlight=False,
                                 markup=True,
                                 wrap=True,
                             )
-                        with TabPane("SearXNG", id="tab-sear"):
+                        with TabPane("SearXNG Bridge", id="tab-sear"):
                             yield RichLog(
                                 id="monitor-sear-view",
                                 highlight=False,
@@ -914,8 +957,14 @@ class TuiApp(App):
         ts = entry.get("ts", "")
         level = entry.get("level", "INFO")
         msg = entry.get("msg", "")
+        logger = entry.get("logger")
         style = LEVEL_STYLE.get(level, "")
-        log_view.write(f"[dim]{ts}[/dim] [{style}]{level:<5}[/{style}] {escape(msg)}")
+        source_prefix = f" [dim]{escape(str(logger))}:[/dim]" if logger else ""
+        level_token = escape(f"[{level}]")
+        log_view.write(
+            f"[dim]{escape(str(ts))}[/dim] "
+            f"[{style}]{level_token}[/{style}]{source_prefix} {escape(str(msg))}"
+        )
         if self._log_autoscroll:
             log_view.scroll_end(animate=False)
 
