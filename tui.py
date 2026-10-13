@@ -268,18 +268,25 @@ class TuiApp(App):
     /* ── shared ── */
     Header { height: 1; }
 
-    /* extra breathing room on both tab bars */
     TabbedContent > Tabs {
         padding-top: 1;
+        background: $background;
     }
     TabbedContent > Tabs > Tab {
-        padding: 0 2;
+        padding: 0 3;
+        color: $text-muted;
+    }
+    TabbedContent > Tabs > Tab.-active {
+        color: $text;
+        text-style: bold;
     }
 
-    /* ── dashboard tab ── */
+    /* ── dashboard ── */
     #dash-layout {
         height: 1fr;
     }
+
+    /* chat panel */
     #chat-panel {
         width: 3fr;
         height: 1fr;
@@ -287,58 +294,65 @@ class TuiApp(App):
     #chat-log {
         height: 1fr;
         border: none;
-        padding: 0 1;
+        padding: 0 2;
         scrollbar-gutter: stable;
+        background: $background;
     }
     #streaming-label {
         height: auto;
-        min-height: 1;
-        padding: 0 1 1 1;
-        border-top: solid $panel;
+        min-height: 2;
+        padding: 0 2 1 2;
+        border-top: tall $panel;
         background: $surface;
         color: $text;
     }
     #chat-input {
         height: 3;
-        border-top: solid $primary;
+        border-top: tall $primary;
         border-bottom: none;
         border-left: none;
         border-right: none;
+        background: $background;
+        padding: 0 2;
     }
     #chat-input:focus {
-        border-top: solid $accent;
+        border-top: tall $accent;
     }
+
+    /* right info panel */
     #right-panel {
         width: 36;
-        border-left: solid $panel;
-        padding: 1 1;
+        height: 1fr;
+        border-left: tall $panel;
+        padding: 0;
         background: $surface;
         overflow-y: auto;
     }
     #models-panel {
         height: auto;
-        padding-bottom: 1;
+        padding: 1 2 1 2;
+        border-bottom: solid $panel;
     }
     #resource-panel {
         height: auto;
-        padding-bottom: 1;
+        padding: 1 2 1 2;
+        border-bottom: solid $panel;
     }
     #subway-panel {
         height: auto;
+        padding: 1 2 1 2;
     }
 
     /* ── monitor tab ── */
-    #monitor-layout {
-        height: 1fr;
-    }
     #log-pane {
         width: 1fr;
         height: 1fr;
     }
     #monitor-filter-bar {
-        height: 2;
+        height: 3;
         background: $surface;
-        padding: 0 1;
+        padding: 1 1 0 1;
+        border-bottom: solid $panel;
     }
     #monitor-filter-bar Button {
         margin: 0 1;
@@ -347,10 +361,17 @@ class TuiApp(App):
         min-height: 1;
         padding: 0 1;
         border: none;
+        background: $panel;
+        color: $text-muted;
+    }
+    #monitor-filter-bar Button:hover {
+        background: $boost;
+        color: $text;
     }
     #monitor-filter-bar Button.-active {
         background: $accent;
         color: $text;
+        text-style: bold;
     }
     #monitor-stats {
         height: 1;
@@ -364,6 +385,7 @@ class TuiApp(App):
     #monitor-log-view, #monitor-event-view, #monitor-sear-view {
         height: 1fr;
         border: none;
+        padding: 0 1;
     }
     """
 
