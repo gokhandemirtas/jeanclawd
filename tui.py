@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime
 import json
 import os
 import sys
@@ -199,10 +200,26 @@ def _models_markup() -> str:
     return "\n".join(lines)
 
 
-def _subway_markup(current: str, label: str, completed: set[str], error: bool) -> str:
+def _fmt_dur(secs: float) -> str:
+    if secs < 10:
+        return f"{secs:.1f}s"
+    return f"{secs:.0f}s"
+
+
+def _subway_markup(
+    current: str,
+    label: str,
+    completed: set[str],
+    error: bool,
+    node_times: dict[str, float] | None = None,
+    total_time: float = 0.0,
+) -> str:
+    node_times = node_times or {}
+    NODE_W = 18  # chars reserved for "icon label suffix"
+
     lines: list[str] = [
         "[bold cyan]Pipeline[/bold cyan]",
-        "[dim]─────────────────────[/dim]",
+        "[dim]──────────────────────────[/dim]",
     ]
     for i, (node_id, default_label) in enumerate(PIPELINE_NODES):
         display = label.upper() if node_id == "skill" and label else default_label
@@ -216,10 +233,24 @@ def _subway_markup(current: str, label: str, completed: set[str], error: bool) -
         else:
             icon, style, suffix = "○", "dim", ""
 
-        lines.append(f"[{style}]{icon} {display}{suffix}[/{style}]")
+        node_text = f"{icon} {display}{suffix}"
+        pad = max(1, NODE_W - len(node_text))
+
+        if node_id in node_times:
+            time_part = f"[dim]{' ' * pad}{_fmt_dur(node_times[node_id])}[/dim]"
+        elif node_id == current and current != "idle":
+            time_part = f"[dim]{' ' * pad}…[/dim]"
+        else:
+            time_part = ""
+
+        lines.append(f"[{style}]{node_text}[/{style}]{time_part}")
         if i < len(PIPELINE_NODES) - 1:
             connector_style = "dim green" if node_id in completed else "dim"
             lines.append(f"[{connector_style}]│[/{connector_style}]")
+
+    if total_time > 0:
+        lines.append("[dim]──────────────────────────[/dim]")
+        lines.append(f"[dim]Total{' ' * (NODE_W - 5)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
 
     return "\n".join(lines)
 
@@ -284,8 +315,11 @@ class TuiApp(App):
         border-left: none;
         border-right: none;
     }
+    #chat-input:focus {
+        border-top: solid $accent;
+    }
     #right-panel {
-        width: 32;
+        width: 36;
         border-left: solid $panel;
         padding: 1 1;
         background: $surface;
@@ -389,6 +423,9 @@ class TuiApp(App):
         # Whether the pipeline worker is busy
         self._busy = False
 
+        # Suppress leading blank line before the very first message
+        self._first_message = True
+
     # ── compose ───────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
@@ -409,7 +446,7 @@ class TuiApp(App):
                         yield Static(_models_markup(), id="models-panel", markup=True)
                         yield Static("", id="resource-panel", markup=True)
                         yield Static(
-                            _subway_markup("idle", "", set(), False),
+                            _subway_markup("idle", "", set(), False, {}, 0.0),
                             id="subway-panel",
                             markup=True,
                         )
@@ -460,6 +497,8 @@ class TuiApp(App):
         self.set_interval(0.2, self._refresh_subway)
 
         self._refresh_resources()
+        # Focus input immediately so the cursor blinks before startup completes
+        self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
         self.run_worker(self._startup(), exclusive=False, name="startup")
 
     async def _startup(self) -> None:
@@ -520,8 +559,7 @@ class TuiApp(App):
 
         from skills.conversation.skill import generate_greeting
         greeting = await generate_greeting()
-        chat_log.write(f"[bold green]Jean[/bold green]  {greeting}")
-        chat_log.write("")
+        self._write_jean(greeting)
 
         self.query_one("#chat-input", Input).focus()
 
@@ -540,10 +578,29 @@ class TuiApp(App):
         s = snapshot()
         try:
             self.query_one("#subway-panel", Static).update(
-                _subway_markup(s.current, s.label, s.completed, s.error)
+                _subway_markup(s.current, s.label, s.completed, s.error,
+                               s.node_times, s.total_time)
             )
         except Exception:
             pass
+
+    # ── chat message helpers ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _ts() -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _write_user(self, text: str) -> None:
+        chat_log = self.query_one("#chat-log", RichLog)
+        if not self._first_message:
+            chat_log.write("")
+        self._first_message = False
+        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold cyan]You[/bold cyan]  {escape(text)}")
+
+    def _write_jean(self, text: str) -> None:
+        chat_log = self.query_one("#chat-log", RichLog)
+        chat_log.write(f"[dim]{self._ts()}[/dim]  [bold green]Jean[/bold green]  {text}")
+        chat_log.scroll_end(animate=False)
 
     # ── streaming ─────────────────────────────────────────────────────────────
 
@@ -552,7 +609,9 @@ class TuiApp(App):
             return
         text = "".join(self._stream_tokens)
         label = self.query_one("#streaming-label", Label)
-        label.update(f"[bold green]Jean[/bold green]  {text}[dim]▌[/dim]")
+        label.update(
+            f"[dim]{self._ts()}[/dim]  [bold green]Jean[/bold green]  {text}[dim]▌[/dim]"
+        )
 
     def _on_token(self, token: str) -> None:
         self._stream_tokens.append(token)
@@ -560,12 +619,8 @@ class TuiApp(App):
     def _finalize_stream(self, response: str) -> None:
         self._stream_tokens.clear()
         self._streaming = False
-        label = self.query_one("#streaming-label", Label)
-        label.update("")
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"[bold green]Jean[/bold green]  {response}")
-        chat_log.write("")
-        chat_log.scroll_end(animate=False)
+        self.query_one("#streaming-label", Label).update("")
+        self._write_jean(response)
 
     # ── chat input ────────────────────────────────────────────────────────────
 
@@ -588,8 +643,7 @@ class TuiApp(App):
             await self._run_command(user_text)
             return
 
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"[bold cyan]You[/bold cyan]  {escape(user_text)}")
+        self._write_user(user_text)
         self._stream_tokens.clear()
         self._streaming = True
         self._busy = True
