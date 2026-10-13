@@ -345,13 +345,6 @@ class TuiApp(App):
         align: left middle;
     }
     #chat-input-bar:focus-within { border-top: tall #7c3aed; }
-    #chat-prompt {
-        width: 3;
-        height: 3;
-        padding: 1 0;
-        background: #171a28;
-        color: #22d3ee;
-    }
     #chat-input {
         width: 1fr;
         height: 3;
@@ -532,7 +525,6 @@ class TuiApp(App):
                         )
                         yield Label("", id="streaming-label", markup=True)
                         with Horizontal(id="chat-input-bar"):
-                            yield Label("[bold #22d3ee]>[/bold #22d3ee]", id="chat-prompt", markup=True)
                             yield Input(placeholder="Send prompt or /help for commands…", id="chat-input")
                             yield Button("SEND ⏎", id="btn-send")
                     with Vertical(id="right-panel"):
