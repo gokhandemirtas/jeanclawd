@@ -83,7 +83,7 @@ def _models_markup(value_width: int = 18) -> str:
     value_width = max(6, value_width)
     lines: list[str] = [
         "[bold #22d3ee]MODELS[/bold #22d3ee]  [dim]ACTIVE CLUSTER[/dim]",
-        "[dim]─────────────────────[/dim]",
+        f"[dim]{'─' * (11 + value_width)}[/dim]",
     ]
     for label, val in rows:
         val_display = val if len(val) <= value_width else val[:value_width - 1] + "…"
@@ -383,6 +383,9 @@ class TuiApp(App):
         background: #141624;
         overflow-y: auto;
     }
+    #models-panel, #resource-panel, #subway-panel {
+        width: 100%;
+    }
     #models-panel {
         height: auto;
         padding: 0 0 1 0;
@@ -587,7 +590,8 @@ class TuiApp(App):
         self.set_interval(0.2, self._refresh_subway)
 
         self._refresh_resources()
-        self._refresh_models_panel()
+        # The right rail has no final width until the first layout pass.
+        self.call_after_refresh(self._refresh_models_panel)
         # Focus input immediately so the cursor blinks before startup completes
         self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
         self.run_worker(self._startup(), exclusive=False, name="startup")
