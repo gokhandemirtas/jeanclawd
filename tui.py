@@ -69,6 +69,7 @@ PIPELINE_NODES: list[tuple[str, str]] = [
     ("skill",    "SKILL"),
     ("respond",  "RESPOND"),
 ]
+TTS_PIPELINE_NODE = ("tts", "TTS")
 
 _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
 
@@ -87,6 +88,23 @@ def _slash_command_matches(value: str) -> list[str]:
             for service_id in sorted(connector_ids())
             if service_id.casefold().startswith(prefix)
         ]
+
+    if value.startswith("/persona "):
+        try:
+            from agents.persona import list_personas
+            prefix = value.removeprefix("/persona ").casefold()
+            return [
+                f"/persona {p.id}"
+                for p in list_personas()
+                if p.id.casefold().startswith(prefix)
+            ]
+        except Exception:
+            return []
+
+    if value.startswith("/voice "):
+        from voicebox.client import voice_ids
+        prefix = value.removeprefix("/voice ").casefold()
+        return [f"/voice {v}" for v in voice_ids if v.casefold().startswith(prefix)]
 
     if " " in value:
         return []
@@ -119,9 +137,45 @@ class ChatInput(Input):
         if event.key in ("ctrl+c", "ctrl+q"):
             self.app.run_worker(self.app._graceful_quit(), exclusive=True, name="quit")
             event.stop()
+            return
+
+        app = self.app
+        matches = app._menu_matches
+        if not matches:
+            return
+
+        if event.key == "down":
+            app._menu_idx = (app._menu_idx + 1) % len(matches)
+            app._update_command_menu_highlight()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "up":
+            app._menu_idx = (app._menu_idx - 1) % len(matches)
+            app._update_command_menu_highlight()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "escape":
+            app._menu_matches = []
+            app._menu_idx = -1
+            try:
+                app.query_one("#command-menu", Static).remove_class("-visible")
+            except Exception:
+                pass
+            event.stop()
 
     def action_accept_suggestion(self) -> None:
-        if self._suggestion:
+        app = self.app
+        if app._menu_idx >= 0 and app._menu_matches:
+            selected = app._menu_matches[app._menu_idx]
+            self.value = selected + " "
+            self.cursor_position = len(self.value)
+            app._menu_idx = -1
+            app._menu_matches = []
+            try:
+                app.query_one("#command-menu", Static).remove_class("-visible")
+            except Exception:
+                pass
+        elif self._suggestion:
             self.action_cursor_right()
 
 
@@ -162,16 +216,18 @@ def _subway_markup(
     node_times: dict[str, float] | None = None,
     total_time: float = 0.0,
     width: int = 26,
+    include_tts: bool = False,
 ) -> str:
     node_times = node_times or {}
     node_width = max(12, width)
+    nodes = [*PIPELINE_NODES, *([TTS_PIPELINE_NODE] if include_tts else [])]
 
     exec_indicator = f"  [bold #facc15]● EXEC[/bold #facc15]" if current != "idle" else ""
     lines: list[str] = [
         f"[bold #22d3ee]PIPELINE[/bold #22d3ee]{exec_indicator}",
         f"[dim]{'─' * node_width}[/dim]",
     ]
-    for i, (node_id, default_label) in enumerate(PIPELINE_NODES):
+    for i, (node_id, default_label) in enumerate(nodes):
         display = label.upper() if node_id == "skill" and label else default_label
 
         if node_id == current and error:
@@ -199,7 +255,7 @@ def _subway_markup(
             time_part = f"[dim]{' ' * max(1, pad - 1)}—[/dim]" if node_id not in completed else ""
 
         lines.append(f"[{style}]{node_text}[/{style}]{time_part}")
-        if i < len(PIPELINE_NODES) - 1:
+        if i < len(nodes) - 1:
             lines.append(f"[{conn}]│[/{conn}]")
 
     if total_time > 0:
@@ -425,6 +481,15 @@ class TuiApp(App):
         overflow-y: auto;
     }
     #command-menu.-visible { display: block; }
+    #research-log {
+        display: none;
+        height: auto;
+        max-height: 12;
+        padding: 1 0 0 0;
+        border-top: solid #262b40;
+        color: #94a3b8;
+    }
+    #research-log.-visible { display: block; }
     #chat-input {
         width: 1fr;
         height: 3;
@@ -629,6 +694,13 @@ class TuiApp(App):
         # Whether the pipeline worker is busy
         self._busy = False
 
+        # Slash-command dropdown navigation
+        self._menu_matches: list[str] = []
+        self._menu_idx: int = -1
+
+        # Queued chat requests (max 3) — processed one after another
+        self._request_queue: list[str] = []
+
         # Suppress leading blank line before the very first message
         self._first_message = True
 
@@ -663,10 +735,14 @@ class TuiApp(App):
                             yield Static(_models_markup(), id="models-panel", markup=True)
                             yield Static("", id="resource-panel", markup=True)
                             yield Static(
-                                _subway_markup("idle", "", set(), False, {}, 0.0),
+                                _subway_markup(
+                                    "idle", "", set(), False, {}, 0.0,
+                                    include_tts=self._speak,
+                                ),
                                 id="subway-panel",
                                 markup=True,
                             )
+                            yield Static("", id="research-log", markup=True)
                         with Vertical(id="slash-terminal"):
                             yield Static(
                                 "[dim]/ COMMANDS[/dim]",
@@ -729,6 +805,7 @@ class TuiApp(App):
         self.set_interval(0.5, self._poll_logs)
         self.set_interval(0.1, self._flush_stream)
         self.set_interval(0.2, self._refresh_subway)
+        self.set_interval(0.2, self._refresh_research_log)
 
         self._refresh_resources()
         # The right rail has no final width until the first layout pass.
@@ -842,10 +919,46 @@ class TuiApp(App):
             self.query_one("#subway-panel", Static).update(
                 _subway_markup(s.current, s.label, s.completed, s.error,
                                s.node_times, s.total_time,
-                               self._right_panel_content_width())
+                               self._right_panel_content_width(),
+                               include_tts=self._speak)
             )
         except Exception:
             pass
+
+    def _refresh_research_log(self) -> None:
+        try:
+            from utils.agent_state import snapshot
+            steps = snapshot().step_log
+            widget = self.query_one("#research-log", Static)
+            if not steps:
+                widget.remove_class("-visible")
+                return
+            lines = ["[dim bold]RESEARCH[/dim bold]"]
+            for msg in steps[-8:]:  # show last 8 steps to fit in the panel
+                lines.append(f"[dim]○ {escape(msg)}[/dim]")
+            widget.update("\n".join(lines))
+            widget.add_class("-visible")
+        except Exception:
+            pass
+
+    def _update_command_menu_highlight(self) -> None:
+        matches = self._menu_matches
+        idx = self._menu_idx
+        try:
+            menu = self.query_one("#command-menu", Static)
+        except Exception:
+            return
+        if not matches:
+            menu.remove_class("-visible")
+            return
+        lines = ["[dim]↑↓ navigate  ·  TAB accepts  ·  ESC dismiss[/dim]"]
+        for i, match in enumerate(matches):
+            if i == idx:
+                lines.append(f"[bold white on #7c3aed] {escape(match)} [/bold white on #7c3aed]")
+            else:
+                lines.append(f"[bold #22d3ee]{escape(match)}[/bold #22d3ee]")
+        menu.update("\n".join(lines))
+        menu.add_class("-visible")
 
     # ── chat message helpers ──────────────────────────────────────────────────
 
@@ -888,22 +1001,23 @@ class TuiApp(App):
     # ── chat input ────────────────────────────────────────────────────────────
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Show all slash completions, rather than only the inline suggestion."""
+        """Show all slash completions with keyboard-navigable highlight."""
         if event.input.id != "chat-input":
             return
 
         value = event.value
         matches = _slash_command_matches(value)
+
+        # Reset navigation state whenever the typed value changes
+        self._menu_matches = matches
+        self._menu_idx = -1
+
         menu = self.query_one("#command-menu", Static)
-        if not matches or value.casefold() in {match.casefold() for match in matches}:
+        if not matches or value.casefold() in {m.casefold() for m in matches}:
             menu.remove_class("-visible")
             return
 
-        menu.update(
-            "[dim]SLASH COMMANDS  ·  TAB or → accepts the first match[/dim]\n"
-            + "\n".join(f"[bold #22d3ee]{escape(match)}[/bold #22d3ee]" for match in matches)
-        )
-        menu.add_class("-visible")
+        self._update_command_menu_highlight()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
@@ -924,11 +1038,18 @@ class TuiApp(App):
             )
             return
 
+        self._menu_matches = []
+        self._menu_idx = -1
         self.query_one("#command-menu", Static).remove_class("-visible")
 
         if self._busy:
             chat_log = self.query_one("#chat-log", RichLog)
-            chat_log.write("[dim]Still processing previous request…[/dim]")
+            if len(self._request_queue) >= 3:
+                chat_log.write("[dim]Queue full (3/3) — please wait before sending more.[/dim]")
+            else:
+                self._request_queue.append(user_text)
+                n = len(self._request_queue)
+                chat_log.write(f"[dim]Queued ({n}/3) — I'll get to it right after.[/dim]")
             return
 
         # Handle slash commands from main chat input
@@ -1191,8 +1312,6 @@ class TuiApp(App):
                         )
                         _as.set_node("respond")
 
-            _as.set_node("idle")
-
         except Exception as exc:
             from utils.agent_state import set_error
             set_error()
@@ -1202,7 +1321,37 @@ class TuiApp(App):
         finally:
             elapsed = time.time() - start
             self._finalize_stream(response)
+
+            if self._speak and response:
+                _as.set_node("tts")
+                from voicebox.client import active_voice_id, speak as vb_speak
+                from agents.persona import get_active_voice_id
+
+                await asyncio.to_thread(
+                    vb_speak,
+                    response,
+                    get_active_voice_id() or active_voice_id,
+                )
+
+            _as.set_node("idle")
             self._busy = False
+
+            # Process the next queued request if any
+            if self._request_queue:
+                next_query = self._request_queue.pop(0)
+                chat_log = self.query_one("#chat-log", RichLog)
+                remaining = len(self._request_queue)
+                if remaining:
+                    chat_log.write(f"[dim]Processing queued request ({remaining} still waiting)…[/dim]")
+                self._write_user(next_query)
+                self._stream_tokens.clear()
+                self._streaming = True
+                self._busy = True
+                self.run_worker(
+                    self._process_message(next_query),
+                    exclusive=False,
+                    name="pipeline",
+                )
 
             from utils.observability import emit
             from utils.langmem_service import record_interaction

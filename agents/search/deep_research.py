@@ -323,6 +323,11 @@ async def _synthesize(
 
 def _status(msg: str) -> None:
 	print(f"  ○ {msg}", flush=True)
+	try:
+		from utils.agent_state import add_step
+		add_step(msg)
+	except Exception:
+		pass
 
 
 async def deep_research(original_query: str, topic: str) -> tuple[str, list[str]]:

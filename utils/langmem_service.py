@@ -107,8 +107,109 @@ def _store():
 	return _STORE
 
 
+_TOOL_CALL_RE = __import__("re").compile(
+	r"```(?:json|python|)?\s*(\[.*?\])\s*```",
+	__import__("re").DOTALL,
+)
+
+
+def _parse_text_tool_calls(content: str) -> list[dict] | None:
+	"""Parse tool calls that a model returned as text instead of function call JSON.
+
+	Some smaller LM Studio models acknowledge the tool schema but emit their
+	response as a code block rather than a proper OpenAI tool_calls object.
+	Example model output::
+
+	    ```
+	    [{'name': 'Memory', 'arguments': {'content': 'Name: Gokhan'}}]
+	    ```
+
+	Returns a list of OpenAI-style tool-call dicts, or None if no match.
+	"""
+	import ast
+	import json
+	import uuid
+
+	m = _TOOL_CALL_RE.search(content)
+	if not m:
+		return None
+	raw = m.group(1).strip()
+	try:
+		calls = ast.literal_eval(raw)
+	except Exception:
+		try:
+			calls = json.loads(raw)
+		except Exception:
+			return None
+	if not isinstance(calls, list):
+		return None
+	result = []
+	for call in calls:
+		if not isinstance(call, dict) or "name" not in call:
+			continue
+		args = call.get("arguments", call.get("args", {}))
+		if not isinstance(args, dict):
+			continue
+		result.append(
+			{
+				"id": f"call_{uuid.uuid4().hex[:8]}",
+				"type": "function",
+				"function": {
+					"name": call["name"],
+					"arguments": __import__("json").dumps(args),
+				},
+			}
+		)
+	return result or None
+
+
 def _model():
 	from langchain_openai import ChatOpenAI
+
+	class _LMStudioChat(ChatOpenAI):
+		"""ChatOpenAI adapter for LM Studio's OpenAI-compatible endpoint.
+
+		Two quirks handled:
+		1. LM Studio rejects tool schemas where function.description is null.
+		2. Some local models emit tool calls as a text code block instead of
+		   a proper function-call response; we parse and promote them here.
+		"""
+
+		def _get_request_payload(self, input_: Any, *, stop: Any = None, **kwargs: Any) -> dict:
+			payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+			for tool in payload.get("tools") or []:
+				fn = tool.get("function") or {}
+				if fn.get("description") is None:
+					fn["description"] = ""
+			return payload
+
+		def _create_chat_result(self, response: Any, generation_info: Any = None) -> Any:
+			result = super()._create_chat_result(response, generation_info)
+			for gen in result.generations:
+				msg = gen.message
+				if getattr(msg, "tool_calls", None):
+					continue
+				content = msg.content or ""
+				if not isinstance(content, str):
+					continue
+				tool_calls = _parse_text_tool_calls(content)
+				if tool_calls is None:
+					continue
+				# Promote the parsed calls so trustcall / LangMem can use them.
+				msg.tool_calls = [
+					{
+						"name": tc["function"]["name"],
+						"args": __import__("json").loads(tc["function"]["arguments"]),
+						"id": tc["id"],
+						"type": "tool_call",
+					}
+					for tc in tool_calls
+				]
+				msg.additional_kwargs["tool_calls"] = tool_calls
+				msg.content = ""
+				gen.generation_info = gen.generation_info or {}
+				gen.generation_info["finish_reason"] = "tool_calls"
+			return result
 
 	kwargs: dict[str, Any] = {
 		"model": os.environ.get("MODEL_EXTRACTION") or os.environ["MODEL_GENERALIST"],
@@ -117,7 +218,7 @@ def _model():
 	}
 	if os.getenv("INFERENCE_PROVIDER", "lmstudio").lower() != "openai":
 		kwargs["base_url"] = os.environ.get("MODEL_HOST", "http://localhost:1234/v1")
-	return ChatOpenAI(**kwargs)
+	return _LMStudioChat(**kwargs)
 
 
 def _embeddings():

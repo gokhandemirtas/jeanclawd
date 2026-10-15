@@ -97,14 +97,14 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
     # CPU
     pct = psutil.cpu_percent(interval=None)
     filled = int(bar_width * pct / 100)
-    lines += _meter("CPU", f"{pct:.1f}%", filled, bar_width, "#22d3ee")
+    lines += _meter("CPU", f"{pct:.1f}%", filled, bar_width, "#ff00ff")
 
     # RAM: derive the used value from `available` so it agrees with psutil.percent.
     vm = psutil.virtual_memory()
     used_mb  = (vm.total - vm.available) / 1024 ** 2
     total_mb = vm.total / 1024 ** 2
     filled = int(bar_width * vm.percent / 100)
-    lines += _meter("RAM", usage(used_mb, total_mb, vm.percent), filled, bar_width, "#7c3aed")
+    lines += _meter("RAM", usage(used_mb, total_mb, vm.percent), filled, bar_width, "#ff0090")
 
     # Swap
     try:
@@ -114,7 +114,7 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
             sw_total = sw.total / 1024 ** 2
             sw_pct   = sw.percent
             filled   = int(bar_width * sw_pct / 100)
-            lines += _meter("Swap", usage(sw_used, sw_total, sw_pct), filled, bar_width, "#22d3ee")
+            lines += _meter("Swap", usage(sw_used, sw_total, sw_pct), filled, bar_width, "#7dd3fc")
     except OSError:
         pass
 
@@ -132,7 +132,7 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
             if compact
             else f"{free_gb:.0f} GB free / {total_gb:.0f} GB ({free_pct:.0f}%)"
         )
-        lines += _meter("Disk", disk_value, filled, bar_width, "#22d3ee")
+        lines += _meter("Disk", disk_value, filled, bar_width, "#fef08a")
     except Exception:
         pass
 

@@ -114,11 +114,10 @@ def transcribe(audio_path: str) -> str:
 
 def synthesize(text: str, voice_id: str | None = None, stream: bool = False) -> bytes:
     """POST to voicebox /synthesize and return WAV bytes (stream=False) or raw PCM."""
-    speaker = _resolve_speaker(voice_id or active_voice_id)
     url = f"{VOICEBOX_HOST}/synthesize"
     payload = {
         "text": text,
-        "speaker": speaker,
+        "persona": "overclocked_ai",
         "stream": stream,
     }
     resp = requests.post(url, json=payload, timeout=VOICEBOX_TIMEOUT)
