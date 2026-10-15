@@ -564,6 +564,8 @@ def restore_session_context(
 	_memory_turn = 0
 	_recent_memory_turns.clear()
 	_history.clear()
+	from agents.generalist.router import reset_introspection_state
+	reset_introspection_state()
 	for interaction in interactions:
 		append_to_history(interaction.user_message, interaction.assistant_message)
 

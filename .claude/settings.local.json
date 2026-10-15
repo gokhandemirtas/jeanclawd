@@ -22,7 +22,8 @@
       "Bash(python3 *)",
       "Bash(xargs ls -t)",
       "WebSearch",
-      "Bash(.venv/bin/python *)"
+      "Bash(.venv/bin/python *)",
+      "Bash(python *)"
     ]
   }
 }

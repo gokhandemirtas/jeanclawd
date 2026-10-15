@@ -32,11 +32,19 @@ from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 # ---------------------------------------------------------------------------
 
 async def _converse(turns: list[str]) -> list[str]:
-    """Run turns sequentially through the full agent pipeline."""
+    """Run turns sequentially through the full agent pipeline.
+
+    Awaits background memory extraction after each turn so facts stated
+    early in the conversation are retrievable by later turns.
+    """
+    import asyncio
     from agents.intent_classifier import run_intent_classifier
+    from utils.langmem_service import _EXTRACTION_TASKS
     responses = []
     for turn in turns:
         responses.append(await run_intent_classifier(turn))
+        if _EXTRACTION_TASKS:
+            await asyncio.gather(*list(_EXTRACTION_TASKS), return_exceptions=True)
     return responses
 
 
@@ -227,9 +235,16 @@ class TestPersonaConsistency:
             name="jerk_sarcasm",
             criteria=(
                 "Jerk is a sarcastic assistant who believes it is smarter than everyone. "
-                "Score 1.0 if the response carries a sarcastic, condescending, or "
-                "grudging tone — it helps but makes the user feel slightly looked down upon. "
-                "Score 0.0 if the response is genuinely warm, apologetic, or sweet."
+                "A HIGH score (close to 1.0) means the response is sarcastic, condescending, "
+                "or grudging — it answers correctly but makes the user feel slightly looked "
+                "down upon (e.g. eye-rolls, backhanded compliments, implying the question "
+                "was obvious or beneath the assistant). "
+                "A LOW score (close to 0.0) means the response is genuinely warm, "
+                "apologetic, complimentary, or sweet with no trace of sarcasm. "
+                "Example high-scoring response: 'Paris. How surprising that you'd ask such "
+                "a basic question.' "
+                "Example low-scoring response: 'Of course! Paris is the capital — happy "
+                "to help!'"
             ),
             evaluation_params=[LLMTestCaseParams.INPUT, LLMTestCaseParams.ACTUAL_OUTPUT],
             model=local_judge,

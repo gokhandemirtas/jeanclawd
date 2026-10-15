@@ -8,6 +8,18 @@ from agents.intent_classifier.intent_classifier import IntentLiteral
 from providers import get_intent_provider
 from utils.log import logger
 
+_introspection_ran: bool = False
+
+
+def mark_introspection_ran() -> None:
+	global _introspection_ran
+	_introspection_ran = True
+
+
+def reset_introspection_state() -> None:
+	global _introspection_ran
+	_introspection_ran = False
+
 _ROUTER_PROMPT = """You are a query router. Given a conversation history and the user's latest message, return the single best intent.
 
 Intents:
@@ -41,12 +53,14 @@ Critical rules — apply in order, stop at first match:
 4. recipe/calories/nutrition/ingredients/how to cook/how to make [dish] → NUTRITION. Do NOT route these to CHAT even though the model knows recipes.
 5. Explicit research triggers ("research", "deep dive", "deep research", "tell me everything about", "find everything about", "in depth") → SEARCH. This overrides rule 6 even for topics the model knows.
 6. General knowledge: history, background, explanations, how something works, founding stories, science → CHAT. The model already knows these things. NOTE: current date/time/day is NOT general knowledge — the model cannot know it, route to INFORMATION_QUERY.
+6c. Recommendation requests phrased conversationally ("any recommendations?", "what should I read/watch?", "suggest something", "what would you recommend?") → CHAT, even when a topic (e.g. "science fiction") is mentioned. The model uses its knowledge and durable user memories to personalise the answer. No search trigger is present, so SEARCH must NOT fire.
 6b. Explicit corrections or redirects ("no I mean", "I meant", "not that", "I want X not Y") → CHAT.
 7. Reactions, opinions, follow-ups on something just said → CHAT. EXCEPTION: a follow-up that contains an explicit imperative action command (verb + object, e.g. "turn them off", "skip it", "stop that") is NOT a reaction — it's a new action and must be routed to the relevant domain intent.
 7a. Declarative feedback, agreement, explanation, or meta-commentary about the assistant's previous answer → CHAT. This includes statements about reliability, sources, limitations, accuracy, or what the assistant can/cannot do. Do not route such commentary to INFORMATION_QUERY or SEARCH merely because it mentions online sources, facts, or retrieval.
 7b. Questions about the user's own identity, remembered profile, relationships, personal facts, or preferences (for example, "remember me?", "what's my name?", "when is my birthday?", "where do I live?", "where am I from?", "what city do I live in?", "what F1 team do I support?", or "what do you know about me?") → CHAT. These are conversational memory questions, not NOTES, INFORMATION_QUERY, or SEARCH, unless the user explicitly asks to save or retrieve a note.
 7c. Use the meaning of the whole utterance and its conversational context to resolve perspective. Personal-memory and rapport questions about the relationship (for example, "what did I tell you yesterday?", "do you remember me?", or "how do you know my name?") → CHAT. Questions about the source or confidence of a personal fact previously stated are also CHAT. Pronouns such as "you", "your", "me", "us", and "our" are relationship cues, not keyword triggers.
-7d. Questions about this application's internals — how requests are routed, how skills work, where conversations are stored, how sessions or memory are persisted, or what the codebase can do — → INTROSPECTION. This is for implementation questions about the Assistant, not generic questions about AI agents. Use INTROSPECTION even when the question is phrased conversationally (for example, "how do you decide whether to search?" or "where do our conversations live?"). Ordinary questions about what the user previously said remain CHAT. Declarative corrections or descriptions of the assistant ("you are X", "your codebase does Y", "you were built by me") are CHAT even if they mention implementation keywords — INTROSPECTION requires an interrogative asking for information.
+7d. Questions about this application's internals — how requests are routed, how skills work, where conversations are stored, how sessions or memory are persisted, or what the codebase can do — → INTROSPECTION only if introspection has NOT already run this session. If the conversation history already contains an INTROSPECTION answer, all follow-up questions about the assistant's internals are CHAT (the model synthesises from what is already in history). Ordinary questions about what the user previously said remain CHAT. Declarative corrections or descriptions of the assistant ("you are X", "your codebase does Y", "you were built by me") are CHAT even if they mention implementation keywords — INTROSPECTION requires an interrogative asking for information.
+   IMPORTANT: Generic programming-language concepts (GIL, asyncio, threads, event loops, garbage collection) are general knowledge → CHAT even when the codebase uses those features. Only route to INTROSPECTION when the question is specifically about *this assistant's* implementation ("how do YOU handle concurrency?", "does YOUR codebase use asyncio?").
 8. Only use a domain intent when the user clearly needs NEW live data or a NEW action that isn't in the history.
 9. A temporal qualifier such as "current", "latest", "today", "now", "present", "serving", or "incumbent" means the answer may have changed since training. Route it to the appropriate live-data intent, usually INFORMATION_QUERY or SEARCH. Never route such a question to CHAT merely because the underlying subject is general knowledge.
 	For broad current-events requests ("what's happening in the world", "today's news", "latest headlines"), the appropriate intent is NEWSFEED.
@@ -110,6 +124,17 @@ Examples:
   "note: I will cook tiramisu for my friends" → NOTES  ("note:" prefix wins over "cook tiramisu" content, rule 15)
   "save a note about my flight on Friday" → NOTES  (explicit "save a note about" trigger, rule 15)
   "jot down: buy milk" → NOTES  (note trigger, rule 15)
+
+  "I prefer science fiction — any recommendations?" → CHAT  (conversational recommendation, rule 6c; memory personalises the answer)
+  "what's a good book to read this week?" → CHAT  (suggestion request, no explicit search trigger)
+  "suggest something to watch tonight" → CHAT  (recommendation request, rule 6c)
+
+  "what is the GIL and why does it matter for concurrency?" → CHAT  (general Python knowledge, not about this assistant)
+  "explain how asyncio works" → CHAT  (generic programming concept, rule 6)
+  "how do YOU handle concurrency in your codebase?" → INTROSPECTION  (specifically about this assistant's implementation)
+
+  history: [INTROSPECTION answer about routing already in history]
+  "what about memory persistence?" → CHAT  (introspection already ran; synthesise from history, rule 7d)
 
 Respond with JSON only: {"intent": "<INTENT>", "confidence": <0.0-1.0>}
 
@@ -179,6 +204,18 @@ async def generalist_route(
 	if _is_declarative_assistant_statement(query):
 		logger.debug("[router] CHAT (declarative assistant statement)")
 		return "CHAT", 1.0
+	# Introspection is expensive — run it at most once per session. Any follow-up
+	# about the assistant's internals uses the cached output already in history.
+	if _introspection_ran:
+		logger.debug("[router] introspection already ran this session — skipping re-run")
+		# We still let the model route the query normally; the prompt instructs it
+		# to use CHAT when introspection output is in history. But we clamp any
+		# INTROSPECTION decision to CHAT here as a hard backstop.
+		intent, confidence = await asyncio.to_thread(_route_sync, query, history)
+		if intent == "INTROSPECTION":
+			logger.debug("[router] INTROSPECTION → CHAT (session cache hit)")
+			return "CHAT", 1.0
+		return intent, confidence
 
 	t = time.time()
 	try:

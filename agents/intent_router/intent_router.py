@@ -73,6 +73,9 @@ async def route(
 				result = await skill.handle(user_input, **kwargs)
 			else:
 				result = await asyncio.to_thread(skill.handle, user_input, **kwargs)
+			if intent == "INTROSPECTION":
+				from agents.generalist.router import mark_introspection_ran
+				mark_introspection_ran()
 		except Exception as exc:
 			logger.exception(f"[router] skill {intent} raised unexpectedly: {exc}")
 			result = _SKILL_ERROR_MESSAGES.get(

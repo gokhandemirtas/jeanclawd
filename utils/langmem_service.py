@@ -44,12 +44,19 @@ _INSTRUCTIONS = """Record individual durable facts about the human User as separ
 Each memory must capture exactly ONE piece of explicitly stated information.
 Keep each memory concise — a short phrase or sentence.
 
-Record: name, location, occupation, relationships (family members, pets),
-interests, likes, dislikes, birth date, gender, and any other stable personal
-context the User explicitly provides.
+Record: name, location, occupation, years of experience / career seniority,
+relationships (family members, pets), interests, likes, dislikes, birth date,
+gender, and any other stable personal context the User explicitly provides.
+
+EXPERIENCE IS SEPARATE FROM OCCUPATION: "I've been doing X for N years" creates
+TWO records — one for occupation and one for experience/seniority. Never merge
+years-of-experience into the occupation entry. Example: "I've been a backend
+developer for 12 years" → record "Occupation: backend developer" AND
+"Experience: 12 years of backend development" as separate entries.
+
 THIRD-PARTY ATTRIBUTION IS REQUIRED: a fact about anyone other than the User
-must include that person's relationship and name. For "My wife Selin is a
-cardiologist", write exactly "Wife Selin occupation: cardiologist". Never
+must name that person as the grammatical subject. For "My wife Selin is a
+cardiologist", write "Selin's occupation: cardiologist (wife)". Never
 write a bare third-party fact such as "Name: Selin" or "Occupation:
 cardiologist"; skip it if you cannot preserve its owner.
 
