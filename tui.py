@@ -138,8 +138,36 @@ class ChatInput(Input):
             event.stop()
 
 
+def _sub_options(cmd: str) -> list[str] | None:
+    """Return sub-option strings for commands that take a fixed argument, or None."""
+    if cmd == "/news-length":
+        return ["short", "medium", "long"]
+    if cmd == "/change-model":
+        return ["generalist", "intent", "vision", "embedding", "planning", "research"]
+    if cmd == "/connect":
+        try:
+            from connectors.registry import connector_ids
+            return sorted(connector_ids())
+        except Exception:
+            return []
+    if cmd == "/voice":
+        try:
+            from voicebox.client import voice_ids
+            return list(voice_ids)
+        except Exception:
+            return []
+    if cmd == "/persona":
+        try:
+            from agents.persona import PERSONAS
+            return sorted(PERSONAS.keys())
+        except Exception:
+            return []
+    return None
+
+
 class CommandMenu(OptionList):
     can_focus = False
+    _parent_cmd: str | None = None  # set when showing sub-options
 
 
 def _models_markup(value_width: int = 18) -> str:
@@ -439,7 +467,7 @@ class TuiApp(App):
     #chat-input-bar:focus-within { border-top: tall #7c3aed; }
     #command-menu {
         width: 1fr;
-        height: 8;
+        height: 1fr;
         background: #0d0f1a;
         border: none;
         padding: 0;
@@ -502,20 +530,19 @@ class TuiApp(App):
     }
     #right-info {
         width: 1fr;
-        height: 1fr;
+        height: 4fr;
         padding: 1 2;
-        overflow-y: auto;
     }
     #models-panel, #resource-panel, #subway-panel {
         width: 100%;
     }
     #models-panel {
-        height: auto;
+        height: 1fr;
         padding: 0 0 1 0;
         border-bottom: solid #262b40;
     }
     #resource-panel {
-        height: auto;
+        height: 3fr;
         padding: 1 0;
         border-bottom: solid #262b40;
     }
@@ -527,12 +554,12 @@ class TuiApp(App):
     /* slash-command terminal */
     #slash-terminal {
         width: 1fr;
-        height: 14;
+        height: 1fr;
         border-top: tall #24283b;
         background: #0d0f1a;
     }
     #slash-log {
-        height: 1fr;
+        height: auto;
         border: none;
         padding: 0 1;
         background: #0d0f1a;
@@ -910,6 +937,8 @@ class TuiApp(App):
             ol = self.query_one("#command-menu", CommandMenu)
         except Exception:
             return
+        if ol._parent_cmd is not None:
+            return  # sub-menu is active; don't interfere
         if not value.startswith("/"):
             ol.clear_options()
             ol.remove_class("-visible")
@@ -965,11 +994,38 @@ class TuiApp(App):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id != "command-menu":
             return
+        ol = self.query_one("#command-menu", CommandMenu)
         selected = str(event.option.prompt)
-        slash_input = self.query_one("#slash-input", Input)
-        slash_input.value = selected + " "
-        slash_input.cursor_position = len(slash_input.value)
-        slash_input.focus()
+
+        if ol._parent_cmd is not None:
+            # Sub-option selected — execute the full command
+            full_cmd = f"{ol._parent_cmd} {selected}"
+            ol._parent_cmd = None
+            ol.clear_options()
+            ol.remove_class("-visible")
+            self.run_worker(
+                self._run_command(full_cmd, log_id="slash-log"),
+                exclusive=False,
+                name="slash-command",
+            )
+            return
+
+        sub = _sub_options(selected)
+        if sub:
+            # Show sub-menu in place — don't touch slash_input to avoid re-triggering on_input_changed
+            ol._parent_cmd = selected
+            ol.clear_options()
+            for opt in sub:
+                ol.add_option(Option(opt))
+            ol.add_class("-visible")
+        else:
+            # No sub-options — fill input ready to run
+            ol.clear_options()
+            ol.remove_class("-visible")
+            slash_input = self.query_one("#slash-input", Input)
+            slash_input.value = selected + " "
+            slash_input.cursor_position = len(slash_input.value)
+            slash_input.focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "slash-input":
@@ -983,13 +1039,28 @@ class TuiApp(App):
 
         # Slash terminal — always runs as a command
         if event.input.id == "slash-input":
+            parts = user_text.split(None, 1)
+            cmd = parts[0] if user_text.startswith("/") else f"/{parts[0]}"
+            args = parts[1] if len(parts) > 1 else ""
+
+            # If command has sub-options and no arg yet, show sub-menu instead of executing
+            if not args:
+                sub = _sub_options(cmd)
+                if sub:
+                    ol = self.query_one("#command-menu", CommandMenu)
+                    ol._parent_cmd = cmd
+                    ol.clear_options()
+                    for opt in sub:
+                        ol.add_option(Option(opt))
+                    ol.add_class("-visible")
+                    return
+
             self._update_command_menu("")
-            cmd = user_text if user_text.startswith("/") else f"/{user_text}"
             if cmd in ("/quit", "/exit"):
                 await self._graceful_quit()
                 return
             self.run_worker(
-                self._run_command(cmd, log_id="slash-log"),
+                self._run_command(user_text if user_text.startswith("/") else f"/{user_text}", log_id="slash-log"),
                 exclusive=False,
                 name="slash-command",
             )
