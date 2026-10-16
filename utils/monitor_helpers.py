@@ -68,16 +68,32 @@ def performance_text(entry: dict) -> str:
 
 
 def _meter(label: str, value_str: str, bar_filled: int, bar_total: int, bar_color: str) -> list[str]:
-    """Render a two-line resource meter with a consistent value and bar."""
-    filled = min(bar_filled, bar_total)
-    empty = bar_total - filled
-    bar_line = f"[{bar_color}]{'█' * filled}[/{bar_color}][dim]{'░' * empty}[/dim]"
-    lines = [
-        f"[bold {bar_color}]{label}[/bold {bar_color}]  [bold]{value_str}[/bold]",
-        bar_line,
+    """Render a bordered resource box: label/value row + segmented bar row."""
+    box_width = bar_total
+    inner = max(4, box_width - 4)  # content width between │ padding │
+
+    # Scale bar fill to inner width
+    scale_filled = int(inner * bar_filled / bar_total) if bar_total else 0
+    scale_filled = min(scale_filled, inner)
+    scale_empty = inner - scale_filled
+
+    # Truncate value if it doesn't fit alongside the label
+    gap = inner - len(label) - len(value_str)
+    if gap < 1:
+        value_str = value_str[:max(0, inner - len(label) - 1)]
+        gap = max(0, inner - len(label) - len(value_str))
+
+    b = "#2d3748"
+    header = f"[bold {bar_color}]{label}[/bold {bar_color}]{' ' * gap}[bold]{value_str}[/bold]"
+    bar = f"[{bar_color}]{'█' * scale_filled}[/{bar_color}][dim]{'░' * scale_empty}[/dim]"
+
+    return [
+        f"[{b}]┌{'─' * (inner + 2)}┐[/{b}]",
+        f"[{b}]│[/{b}] {header} [{b}]│[/{b}]",
+        f"[{b}]│[/{b}] {bar} [{b}]│[/{b}]",
+        f"[{b}]└{'─' * (inner + 2)}┘[/{b}]",
+        "",
     ]
-    lines.append("")
-    return lines
 
 
 def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:

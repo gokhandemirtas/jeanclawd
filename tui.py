@@ -42,11 +42,13 @@ from textual.widgets import (
     Header,
     Input,
     Label,
+    OptionList,
     RichLog,
     Static,
     TabbedContent,
     TabPane,
 )
+from textual.widgets.option_list import Option
 from textual.worker import Worker
 
 load_dotenv()
@@ -130,53 +132,14 @@ class SlashCommandSuggester(Suggester):
 class ChatInput(Input):
     """Chat input with slash-command completion on Tab or Right Arrow."""
 
-    BINDINGS = [*Input.BINDINGS, Binding("tab", "accept_suggestion", show=False)]
-
     def on_key(self, event) -> None:
-        # Intercept quit keys here so Input's ctrl+c copy handler doesn't win.
         if event.key in ("ctrl+c", "ctrl+q"):
             self.app.run_worker(self.app._graceful_quit(), exclusive=True, name="quit")
             event.stop()
-            return
 
-        app = self.app
-        matches = app._menu_matches
-        if not matches:
-            return
 
-        if event.key == "down":
-            app._menu_idx = (app._menu_idx + 1) % len(matches)
-            app._update_command_menu_highlight()
-            event.stop()
-            event.prevent_default()
-        elif event.key == "up":
-            app._menu_idx = (app._menu_idx - 1) % len(matches)
-            app._update_command_menu_highlight()
-            event.stop()
-            event.prevent_default()
-        elif event.key == "escape":
-            app._menu_matches = []
-            app._menu_idx = -1
-            try:
-                app.query_one("#command-menu", Static).remove_class("-visible")
-            except Exception:
-                pass
-            event.stop()
-
-    def action_accept_suggestion(self) -> None:
-        app = self.app
-        if app._menu_idx >= 0 and app._menu_matches:
-            selected = app._menu_matches[app._menu_idx]
-            self.value = selected + " "
-            self.cursor_position = len(self.value)
-            app._menu_idx = -1
-            app._menu_matches = []
-            try:
-                app.query_one("#command-menu", Static).remove_class("-visible")
-            except Exception:
-                pass
-        elif self._suggestion:
-            self.action_cursor_right()
+class CommandMenu(OptionList):
+    can_focus = False
 
 
 def _models_markup(value_width: int = 18) -> str:
@@ -424,10 +387,14 @@ class TuiApp(App):
         height: 3;
         padding: 0 2;
     }
+    #main-tabs #tabs-list {
+        height: 3;
+        align: left middle;
+    }
     #main-tabs ContentTab {
         min-width: 18;
-        height: 3;
-        padding: 1 5;
+        height: 1;
+        padding: 0 5;
         color: #a78bfa;
         background: #1b1d2a;
     }
@@ -471,16 +438,25 @@ class TuiApp(App):
     }
     #chat-input-bar:focus-within { border-top: tall #7c3aed; }
     #command-menu {
+        width: 1fr;
+        height: 8;
+        background: #0d0f1a;
+        border: none;
+        padding: 0;
+        scrollbar-size: 1 1;
         display: none;
-        height: auto;
-        max-height: 18;
-        padding: 1 2;
-        background: #10121d;
-        border-top: solid #24283b;
-        color: #cbd5e1;
-        overflow-y: auto;
     }
-    #command-menu.-visible { display: block; }
+    #command-menu.-visible {
+        display: block;
+    }
+    #command-menu > .option-list--option {
+        color: #22d3ee;
+        padding: 0 2;
+    }
+    #command-menu > .option-list--option-highlighted {
+        background: #7c3aed;
+        color: white;
+    }
     #research-log {
         display: none;
         height: auto;
@@ -554,13 +530,6 @@ class TuiApp(App):
         height: 14;
         border-top: tall #24283b;
         background: #0d0f1a;
-    }
-    #slash-terminal-title {
-        height: 1;
-        padding: 0 2;
-        background: #12141f;
-        color: #4a5568;
-        text-style: bold;
     }
     #slash-log {
         height: 1fr;
@@ -694,10 +663,6 @@ class TuiApp(App):
         # Whether the pipeline worker is busy
         self._busy = False
 
-        # Slash-command dropdown navigation
-        self._menu_matches: list[str] = []
-        self._menu_idx: int = -1
-
         # Queued chat requests (max 3) — processed one after another
         self._request_queue: list[str] = []
 
@@ -722,7 +687,6 @@ class TuiApp(App):
                             wrap=True,
                         )
                         yield Label("", id="streaming-label", markup=True)
-                        yield Static("", id="command-menu", markup=True)
                         with Horizontal(id="chat-input-bar"):
                             yield ChatInput(
                                 placeholder="Send prompt or /help for commands…",
@@ -744,11 +708,7 @@ class TuiApp(App):
                             )
                             yield Static("", id="research-log", markup=True)
                         with Vertical(id="slash-terminal"):
-                            yield Static(
-                                "[dim]/ COMMANDS[/dim]",
-                                id="slash-terminal-title",
-                                markup=True,
-                            )
+                            yield CommandMenu(id="command-menu")
                             yield RichLog(
                                 id="slash-log",
                                 highlight=False,
@@ -870,6 +830,10 @@ class TuiApp(App):
             )
             return
 
+        from utils.resource_monitor import push_context_to_file, set_context_used
+        set_context_used(0)
+        push_context_to_file()
+
         from skills.conversation.skill import generate_greeting
         greeting = await generate_greeting()
         self._write_jean(greeting)
@@ -941,24 +905,22 @@ class TuiApp(App):
         except Exception:
             pass
 
-    def _update_command_menu_highlight(self) -> None:
-        matches = self._menu_matches
-        idx = self._menu_idx
+    def _update_command_menu(self, value: str) -> None:
         try:
-            menu = self.query_one("#command-menu", Static)
+            ol = self.query_one("#command-menu", CommandMenu)
         except Exception:
             return
-        if not matches:
-            menu.remove_class("-visible")
+        if not value.startswith("/"):
+            ol.clear_options()
+            ol.remove_class("-visible")
             return
-        lines = ["[dim]↑↓ navigate  ·  TAB accepts  ·  ESC dismiss[/dim]"]
-        for i, match in enumerate(matches):
-            if i == idx:
-                lines.append(f"[bold white on #7c3aed] {escape(match)} [/bold white on #7c3aed]")
-            else:
-                lines.append(f"[bold #22d3ee]{escape(match)}[/bold #22d3ee]")
-        menu.update("\n".join(lines))
-        menu.add_class("-visible")
+        from commands import _COMMANDS
+        all_cmds = sorted((*_COMMANDS, "/quit", "/exit"))
+        matches = [c for c in all_cmds if c.casefold().startswith(value.casefold())]
+        ol.clear_options()
+        for cmd in (matches if matches else all_cmds):
+            ol.add_option(Option(cmd))
+        ol.add_class("-visible")
 
     # ── chat message helpers ──────────────────────────────────────────────────
 
@@ -1000,24 +962,18 @@ class TuiApp(App):
 
     # ── chat input ────────────────────────────────────────────────────────────
 
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id != "command-menu":
+            return
+        selected = str(event.option.prompt)
+        slash_input = self.query_one("#slash-input", Input)
+        slash_input.value = selected + " "
+        slash_input.cursor_position = len(slash_input.value)
+        slash_input.focus()
+
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Show all slash completions with keyboard-navigable highlight."""
-        if event.input.id != "chat-input":
-            return
-
-        value = event.value
-        matches = _slash_command_matches(value)
-
-        # Reset navigation state whenever the typed value changes
-        self._menu_matches = matches
-        self._menu_idx = -1
-
-        menu = self.query_one("#command-menu", Static)
-        if not matches or value.casefold() in {m.casefold() for m in matches}:
-            menu.remove_class("-visible")
-            return
-
-        self._update_command_menu_highlight()
+        if event.input.id == "slash-input":
+            self._update_command_menu(event.value)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_text = event.value.strip()
@@ -1027,6 +983,7 @@ class TuiApp(App):
 
         # Slash terminal — always runs as a command
         if event.input.id == "slash-input":
+            self._update_command_menu("")
             cmd = user_text if user_text.startswith("/") else f"/{user_text}"
             if cmd in ("/quit", "/exit"):
                 await self._graceful_quit()
@@ -1037,10 +994,6 @@ class TuiApp(App):
                 name="slash-command",
             )
             return
-
-        self._menu_matches = []
-        self._menu_idx = -1
-        self.query_one("#command-menu", Static).remove_class("-visible")
 
         if self._busy:
             chat_log = self.query_one("#chat-log", RichLog)
