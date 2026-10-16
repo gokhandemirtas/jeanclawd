@@ -530,19 +530,19 @@ class TuiApp(App):
     }
     #right-info {
         width: 1fr;
-        height: 4fr;
+        height: auto;
         padding: 1 2;
     }
     #models-panel, #resource-panel, #subway-panel {
         width: 100%;
     }
     #models-panel {
-        height: 1fr;
+        height: auto;
         padding: 0 0 1 0;
         border-bottom: solid #262b40;
     }
     #resource-panel {
-        height: 3fr;
+        height: auto;
         padding: 1 0;
         border-bottom: solid #262b40;
     }
@@ -551,11 +551,11 @@ class TuiApp(App):
         padding: 1 0 0 0;
     }
 
-    /* slash-command terminal */
+    /* slash-command terminal — hidden until ctrl+k */
     #slash-terminal {
+        display: none;
         width: 1fr;
         height: 1fr;
-        border-top: tall #24283b;
         background: #0d0f1a;
     }
     #slash-log {
@@ -564,6 +564,7 @@ class TuiApp(App):
         padding: 0 1;
         background: #0d0f1a;
         scrollbar-gutter: stable;
+        overflow-x: hidden;
     }
     #slash-input {
         width: 1fr;
@@ -647,6 +648,7 @@ class TuiApp(App):
         Binding("ctrl+c", "exit_tui", "Quit", priority=True),
         Binding("ctrl+q", "exit_tui", "Quit", priority=True),
         Binding("ctrl+l", "clear_chat", "Clear chat"),
+        Binding("ctrl+k", "toggle_command_palette", "Commands", priority=True),
         Binding("a", "toggle_autoscroll", "Auto-scroll", show=False),
         Binding("y", "copy_log", "Copy log", show=False),
     ]
@@ -696,6 +698,9 @@ class TuiApp(App):
         # Suppress leading blank line before the very first message
         self._first_message = True
 
+        # Command palette visibility
+        self._palette_open = False
+
     # ── compose ───────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
@@ -735,17 +740,17 @@ class TuiApp(App):
                             )
                             yield Static("", id="research-log", markup=True)
                         with Vertical(id="slash-terminal"):
+                            yield Input(
+                                placeholder="/help",
+                                suggester=SlashCommandSuggester(case_sensitive=False),
+                                id="slash-input",
+                            )
                             yield CommandMenu(id="command-menu")
                             yield RichLog(
                                 id="slash-log",
                                 highlight=False,
                                 markup=True,
                                 wrap=True,
-                            )
-                            yield Input(
-                                placeholder="/help",
-                                suggester=SlashCommandSuggester(case_sensitive=False),
-                                id="slash-input",
                             )
             with TabPane("Monitor", id="tab-monitor"):
                 with Vertical(id="log-pane"):
@@ -924,9 +929,17 @@ class TuiApp(App):
             if not steps:
                 widget.remove_class("-visible")
                 return
-            lines = ["[dim bold]RESEARCH[/dim bold]"]
-            for msg in steps[-8:]:  # show last 8 steps to fit in the panel
-                lines.append(f"[dim]○ {escape(msg)}[/dim]")
+            research = [s for s in steps if not s.startswith("[memory]")]
+            memory = [s for s in steps if s.startswith("[memory]")]
+            lines: list[str] = []
+            if research:
+                lines.append("[dim bold]RESEARCH[/dim bold]")
+                for msg in research[-8:]:
+                    lines.append(f"[dim]○ {escape(msg)}[/dim]")
+            if memory:
+                lines.append("[dim bold]MEMORY[/dim bold]")
+                for msg in memory[-8:]:
+                    lines.append(f"[dim]○ {escape(msg.removeprefix('[memory] '))}[/dim]")
             widget.update("\n".join(lines))
             widget.add_class("-visible")
         except Exception:
@@ -998,8 +1011,9 @@ class TuiApp(App):
         selected = str(event.option.prompt)
 
         if ol._parent_cmd is not None:
-            # Sub-option selected — execute the full command
-            full_cmd = f"{ol._parent_cmd} {selected}"
+            # Use option id (e.g. session UUID) when set, else fall back to prompt text
+            value = event.option.id if event.option.id else selected
+            full_cmd = f"{ol._parent_cmd} {value}"
             ol._parent_cmd = None
             ol.clear_options()
             ol.remove_class("-visible")
@@ -1107,6 +1121,14 @@ class TuiApp(App):
         command = parts[0].lower()
         args = parts[1].strip() if len(parts) > 1 else ""
 
+        if command == "/clear":
+            log.clear()
+            return
+
+        if command == "/session" and not args:
+            await self._cmd_session_tui(log)
+            return
+
         # Intercept commands that use prompt_toolkit interactive pickers —
         # those pickers corrupt Textual's terminal state and freeze the TUI.
         if command == "/persona":
@@ -1195,6 +1217,28 @@ class TuiApp(App):
                 self._write_jean(f"Persona → {PERSONAS[persona_id].get('name', persona_id)}  |  Voice → {voice_arg}")
         except Exception as exc:
             chat_log.write(f"[bold red]Command error:[/bold red] {exc}")
+
+    async def _cmd_session_tui(self, log: RichLog) -> None:
+        try:
+            from utils.session_service import get_active_session_id, list_sessions
+            sessions = await list_sessions()
+        except Exception as exc:
+            log.write(f"[bold red]Error:[/bold red] {escape(str(exc))}")
+            return
+        if not sessions:
+            log.write("[dim]No sessions found.[/dim]")
+            return
+        active = get_active_session_id()
+        ol = self.query_one("#command-menu", CommandMenu)
+        ol._parent_cmd = "/session resume"
+        ol.clear_options()
+        for s in sessions:
+            marker = "● " if s.session_id == active else "○ "
+            label = s.title or "Untitled"
+            ts = str(s.created_at)[:16] if hasattr(s, "created_at") else ""
+            display = f"{marker}{label}  [{s.status}]  {ts}"
+            ol.add_option(Option(display, id=s.session_id))
+        ol.add_class("-visible")
 
     async def _cmd_show_voices(self, chat_log: RichLog) -> None:
         try:
@@ -1385,6 +1429,20 @@ class TuiApp(App):
             logger.timing(elapsed)
 
     # ── actions ───────────────────────────────────────────────────────────────
+
+    def action_toggle_command_palette(self) -> None:
+        self._palette_open = not self._palette_open
+        try:
+            right_info = self.query_one("#right-info")
+            slash_terminal = self.query_one("#slash-terminal")
+            right_info.display = not self._palette_open
+            slash_terminal.display = self._palette_open
+            if self._palette_open:
+                self.query_one("#slash-input", Input).focus()
+            else:
+                self.query_one("#chat-input", Input).focus()
+        except Exception:
+            pass
 
     def action_clear_chat(self) -> None:
         try:

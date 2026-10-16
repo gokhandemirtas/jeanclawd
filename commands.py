@@ -78,28 +78,6 @@ async def cmd_session(args: str) -> None:
 		logger.info("Sessions:\n" + "\n".join(lines))
 
 
-async def cmd_ctx() -> None:
-	import os
-
-	import tiktoken
-
-	try:
-		from providers import get_provider
-
-		n_ctx = get_provider().context_length()
-	except Exception:
-		n_ctx = int(os.environ.get("MODEL_CTX", 8192))
-	history_text = _format_history()
-	enc = tiktoken.get_encoding("cl100k_base")
-	used = len(enc.encode(history_text)) if history_text else 0
-	pct = used / n_ctx * 100
-
-	bar_width = 40
-	filled = int(bar_width * used / n_ctx)
-	bar = "█" * filled + "░" * (bar_width - filled)
-
-	logger.info(f"Context usage: {used:,} / {n_ctx:,} tokens ({pct:.1f}%)\n[{bar}]")
-
 
 async def cmd_memories(args: str) -> None:
 	"""List or search stored user memories.
@@ -832,8 +810,7 @@ async def cmd_help() -> None:
 		"  /memories [q]      — list/search LangMem profile fields\n"
 		"  /forget-memory <field> — clear one LangMem profile field\n"
 		"  /apocalypse        — wipe interactions and LangMem profile memory\n"
-		"  /ctx               — show context window usage for the current session\n"
-		"  /look <path> [q]   — describe an image via the VLM and inject into context\n"
+			"  /look <path> [q]   — describe an image via the VLM and inject into context\n"
 		"  /introspect        — inspect the safe codebase facade and save findings\n"
 		"  /introspection <q> — ask a developer question about saved introspections\n"
 		"  /help              — show this message"
@@ -851,7 +828,6 @@ _COMMANDS = {
 	"/memories": cmd_memories,
 	"/forget-memory": cmd_forget,
 	"/apocalypse": cmd_apocalypse,
-	"/ctx": cmd_ctx,
 	"/look": cmd_look,
 	"/introspect": cmd_introspect,
 	"/introspection": cmd_introspection,

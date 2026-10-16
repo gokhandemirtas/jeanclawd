@@ -312,11 +312,25 @@ async def _extract_turn(
 ) -> None:
 	try:
 		async with background_inference():
+			existing_keys = {
+				item.key
+				for item in await _store().asearch(("memories", user_id), limit=1000)
+			}
 			messages = [
 				{"role": "user", "content": question},
 				{"role": "assistant", "content": answer},
 			]
 			await _manager().ainvoke({"messages": messages}, config=_config(user_id))
+			after = await _store().asearch(("memories", user_id), limit=1000)
+			new_facts = [
+				_item_content(item.value)
+				for item in after
+				if item.key not in existing_keys
+			]
+		from utils.agent_state import add_step
+		for fact in new_facts:
+			if fact:
+				add_step(f"[memory] {fact}")
 		logger.debug(f"[langmem] processed interaction {interaction_id}")
 	except asyncio.CancelledError:
 		raise

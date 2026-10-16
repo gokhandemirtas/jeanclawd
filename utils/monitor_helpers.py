@@ -122,36 +122,6 @@ def resource_markup(*, compact: bool = False, bar_width: int = 16) -> str:
     filled = int(bar_width * vm.percent / 100)
     lines += _meter("RAM", usage(used_mb, total_mb, vm.percent), filled, bar_width, "#ff0090")
 
-    # Swap
-    try:
-        sw = psutil.swap_memory()
-        if sw.total > 0:
-            sw_used  = sw.used  / 1024 ** 2
-            sw_total = sw.total / 1024 ** 2
-            sw_pct   = sw.percent
-            filled   = int(bar_width * sw_pct / 100)
-            lines += _meter("Swap", usage(sw_used, sw_total, sw_pct), filled, bar_width, "#7dd3fc")
-    except OSError:
-        pass
-
-    # Disk
-    try:
-        du = psutil.disk_usage("/")
-        free_gb  = du.free  / 1024 ** 3
-        total_gb = du.total / 1024 ** 3
-        # On APFS, `used` can be small while free space reflects the shared volume.
-        # Show available capacity and use the matching available-space percentage.
-        free_pct = du.free / du.total * 100 if du.total else 0
-        filled   = int(bar_width * free_pct / 100)
-        disk_value = (
-            f"{free_gb:.0f}/{total_gb:.0f} GB {free_pct:.0f}%"
-            if compact
-            else f"{free_gb:.0f} GB free / {total_gb:.0f} GB ({free_pct:.0f}%)"
-        )
-        lines += _meter("Disk", disk_value, filled, bar_width, "#fef08a")
-    except Exception:
-        pass
-
     # NVIDIA VRAM
     try:
         from pynvml import (
