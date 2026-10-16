@@ -104,6 +104,9 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 		logger.warning(f"Telegram: rejected message from unauthorized chat_id={chat_id}")
 		return
 
+	from utils.agent_state import set_node
+	set_node("telegram")
+
 	try:
 		from skills.vision import handle_vision
 
@@ -141,6 +144,9 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.warning(f"Telegram: rejected message from unauthorized chat_id={chat_id}")
         return
 
+    from utils.agent_state import set_node
+    set_node("telegram")
+
     user_text = update.message.text
     logger.debug(f"Telegram [{chat_id}]: {user_text}")
     await _process_query(update, context, user_text)
@@ -153,6 +159,9 @@ async def _handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if allowed and chat_id not in allowed:
         logger.warning(f"Telegram: rejected message from unauthorized chat_id={chat_id}")
         return
+
+    from utils.agent_state import set_node
+    set_node("telegram")
 
     logger.debug(f"Telegram [{chat_id}]: received audio message")
     user_text = await _transcribe_message(update, context)

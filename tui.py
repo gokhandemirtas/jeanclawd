@@ -70,8 +70,9 @@ PIPELINE_NODES: list[tuple[str, str]] = [
     ("routing",  "ROUTING"),
     ("skill",    "SKILL"),
 ]
-STT_PIPELINE_NODE = ("stt", "STT")
-TTS_PIPELINE_NODE = ("tts", "TTS")
+STT_PIPELINE_NODE      = ("stt",      "STT")
+TTS_PIPELINE_NODE      = ("tts",      "TTS")
+TELEGRAM_PIPELINE_NODE = ("telegram", "TELEGRAM")
 
 _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
 
@@ -209,10 +210,12 @@ def _subway_markup(
     width: int = 26,
     include_tts: bool = False,
     include_stt: bool = False,
+    include_telegram: bool = False,
 ) -> str:
     node_times = node_times or {}
     node_width = max(12, width)
     nodes = [
+        *([TELEGRAM_PIPELINE_NODE] if include_telegram else []),
         *([STT_PIPELINE_NODE] if include_stt else []),
         *PIPELINE_NODES,
         *([TTS_PIPELINE_NODE] if include_tts else []),
@@ -1005,7 +1008,8 @@ class TuiApp(App):
                                s.node_times, s.total_time,
                                self._right_panel_content_width(),
                                include_tts=self._speak,
-                               include_stt=stt_active)
+                               include_stt=stt_active,
+                               include_telegram=self._telegram)
             )
         except Exception:
             pass
