@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,47 +40,18 @@ class MemoryRecord:
 	namespace: tuple[str, ...]
 
 
-_INSTRUCTIONS = """Record individual durable facts about the human User as separate memory entries.
+_INSTRUCTIONS = """Record durable facts about the human User as separate memory entries — one fact per entry.
 
-Each memory must capture exactly ONE piece of explicitly stated information.
-Keep each memory concise — a short phrase or sentence.
+ONLY record facts the User explicitly stated. If the User did not say it, do not record it. Never write a value of "not specified", "unknown", or any placeholder — if a value is missing, skip the entry entirely.
 
-Record: name, location, occupation, years of experience / career seniority,
-relationships (family members, pets), interests, likes, dislikes, birth date,
-gender, and any other stable personal context the User explicitly provides.
+What to record: name, location, occupation, years of experience, relationships (family, pets), interests, likes, dislikes, birth date, and any other stable personal detail the User volunteers.
 
-EXPERIENCE IS SEPARATE FROM OCCUPATION: "I've been doing X for N years" creates
-TWO records — one for occupation and one for experience/seniority. Never merge
-years-of-experience into the occupation entry. Example: "I've been a backend
-developer for 12 years" → record "Occupation: backend developer" AND
-"Experience: 12 years of backend development" as separate entries.
-
-THIRD-PARTY ATTRIBUTION IS REQUIRED: a fact about anyone other than the User
-must name that person as the grammatical subject. For "My wife Selin is a
-cardiologist", write "Selin's occupation: cardiologist (wife)". Never
-write a bare third-party fact such as "Name: Selin" or "Occupation:
-cardiologist"; skip it if you cannot preserve its owner.
-
-Do NOT record:
-- Information about the Assistant or AI system
-- Greetings, questions, jokes, or temporary plans
-- One-time events or session-specific context
-- Sensitive inferences (health conditions, politics, religion, sexuality)
-- Any fact that is unknown, unspecified, or not mentioned — never create a
-  memory whose value is "not specified", "unknown", "not mentioned", or any
-  equivalent placeholder. If the User did not state a value, create nothing.
-- A fact that is already captured by an existing memory with the same meaning.
-  Before inserting, check whether an equivalent fact already exists and skip
-  the insert if it does. Duplicates waste space and degrade retrieval quality.
-  For fields like occupation, location, and name there should be at most ONE
-  memory entry. If a new value refines an existing one (e.g. "backend developer"
-  when "software engineer" is already stored), update the existing entry rather
-  than adding a second one.
-
-Prefer the User's own wording. When the User explicitly corrects a fact,
-remove the old memory and insert the corrected one.
-Do not create a memory if the User has not explicitly shared durable personal
-information in this conversation turn.
+Rules:
+- One entry per fact. Keep each entry to a short phrase or sentence.
+- No duplicates. If an equivalent fact already exists, update it instead of inserting a new one. There must be at most ONE entry for name, occupation, and location.
+- Third-party facts must name their subject. "My wife is a lawyer" → "[wife's name]'s occupation: lawyer (wife)". If you do not know the person's name, skip the fact.
+- Do not record anything about the Assistant, greetings, jokes, questions, or one-time events.
+- When the User corrects a fact, delete the old entry and insert the corrected one.
 """
 
 

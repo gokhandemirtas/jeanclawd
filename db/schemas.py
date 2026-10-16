@@ -157,3 +157,17 @@ class ResearchChunk(Document):
 			[("user_id", 1), ("research_id", 1)],
 			[("user_id", 1), ("section", 1)],
 		]
+
+
+class IntrospectionEmbedding(Document):
+	"""Cached embedding for one introspection reflection file."""
+
+	filename: str
+	content_hash: str
+	embedding: list[float]
+
+	class Settings:
+		name = "IntrospectionEmbeddings"
+		indexes = [
+			[("filename", 1)],
+		]

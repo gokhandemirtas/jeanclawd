@@ -69,8 +69,8 @@ PIPELINE_NODES: list[tuple[str, str]] = [
     ("input",    "INPUT"),
     ("routing",  "ROUTING"),
     ("skill",    "SKILL"),
-    ("respond",  "RESPOND"),
 ]
+STT_PIPELINE_NODE = ("stt", "STT")
 TTS_PIPELINE_NODE = ("tts", "TTS")
 
 _SPINNER_FRAMES = ("◐", "◓", "◑", "◒")
@@ -208,10 +208,15 @@ def _subway_markup(
     total_time: float = 0.0,
     width: int = 26,
     include_tts: bool = False,
+    include_stt: bool = False,
 ) -> str:
     node_times = node_times or {}
     node_width = max(12, width)
-    nodes = [*PIPELINE_NODES, *([TTS_PIPELINE_NODE] if include_tts else [])]
+    nodes = [
+        *([STT_PIPELINE_NODE] if include_stt else []),
+        *PIPELINE_NODES,
+        *([TTS_PIPELINE_NODE] if include_tts else []),
+    ]
 
     exec_indicator = f"  [bold #facc15]● EXEC[/bold #facc15]" if current != "idle" else ""
     lines: list[str] = [
@@ -253,6 +258,30 @@ def _subway_markup(
         lines.append(f"[dim]{'─' * node_width}[/dim]")
         lines.append(f"[dim]PREV TOTAL{' ' * max(1, node_width - 10)}[/dim][bold]{_fmt_dur(total_time)}[/bold]")
 
+    return "\n".join(lines)
+
+
+def _mic_markup(state: str, level: float, width: int) -> str:
+    bar_width = max(8, width - 4)
+    inner = max(4, bar_width - 4)
+    filled = min(inner, int(inner * level))
+
+    if state == "idle":
+        return "[bold #22d3ee]MIC[/bold #22d3ee]  [dim]○ off  ctrl+r[/dim]"
+
+    _STATE = {
+        "waiting":     ("[bold #4ade80]● LISTENING[/bold #4ade80]",    "#4ade80"),
+        "speaking":    ("[bold #facc15]● SPEAKING[/bold #facc15]",     "#facc15"),
+        "transcribing":("[bold #a78bfa]◐ TRANSCRIBING[/bold #a78bfa]", "#a78bfa"),
+    }
+    label, color = _STATE.get(state, ("[dim]…[/dim]", "dim"))
+    b = "#2d3748"
+    bar = f"[{color}]{'█' * filled}[/{color}][dim]{'░' * (inner - filled)}[/dim]"
+    lines = [
+        f"[bold #22d3ee]MIC[/bold #22d3ee]  {label}",
+        f"[dim]{'─' * bar_width}[/dim]",
+        f"[{b}]│[/{b}] {bar} [{b}]│[/{b}]",
+    ]
     return "\n".join(lines)
 
 
@@ -302,8 +331,8 @@ _SPLASH_ART = r"""
 
 """
 
-_SPLASH_DURATION = 2.5
 _SPLASH_FPS = 20
+_SPLASH_GRADIENT_CYCLE = 4.0  # seconds per full hue rotation
 
 
 def _hue_rgb(hue: float) -> tuple[int, int, int]:
@@ -327,33 +356,39 @@ def _gradient_art(art: str, start_rgb: tuple[int, int, int], end_rgb: tuple[int,
 
 
 class SplashPanel(Static):
-    """Animated ASCII splash rendered as a full-screen overlay.
+    """Animated ASCII splash with live health-check status lines.
 
-    Uses ``overlay: screen`` so it sits above all other widgets without
-    affecting the layout underneath.  After _SPLASH_DURATION seconds (or on
-    any key press) it removes itself and refocuses the chat input.
+    Stays visible until _dismiss() is called explicitly by _startup().
+    Each status line is appended below the art; any key press skips early.
     """
 
     def on_mount(self) -> None:
         self._start = time.monotonic()
-        self._tick()  # paint first frame synchronously — no blank flash
+        self._status = ""
+        self._tick()
         self.set_interval(1 / _SPLASH_FPS, self._tick)
+
+    def set_status(self, message: str) -> None:
+        self._status = message
 
     def _tick(self) -> None:
         elapsed = time.monotonic() - self._start
-        if elapsed >= _SPLASH_DURATION:
-            self._dismiss()
-            return
-        t = elapsed / _SPLASH_DURATION
+        t = (elapsed % _SPLASH_GRADIENT_CYCLE) / _SPLASH_GRADIENT_CYCLE
         start_hue = 0.13 + 0.5 * math.sin(t * math.pi * 2)
-        self.update(_gradient_art(_SPLASH_ART, _hue_rgb(start_hue), _hue_rgb(start_hue + 0.15)))
+        art = _gradient_art(_SPLASH_ART, _hue_rgb(start_hue), _hue_rgb(start_hue + 0.15))
+        if self._status:
+            art.append("\n\n")
+            art.append(self._status, style=Style(color=Color.from_rgb(148, 163, 184)))
+        art.justify = "center"
+        self.update(art)
 
     def on_key(self) -> None:
-        if time.monotonic() - self._start > 0.3:  # avoid accidental skip
+        if time.monotonic() - self._start > 0.3:
             self._dismiss()
 
     def _dismiss(self) -> None:
         self.remove()
+        self.app.refresh(layout=True)
         try:
             self.app.query_one("#chat-input", Input).focus()
         except Exception:
@@ -533,20 +568,22 @@ class TuiApp(App):
         height: auto;
         padding: 1 2;
     }
-    #models-panel, #resource-panel, #subway-panel {
+    #models-panel, #resource-panel, #subway-panel, #mic-panel {
         width: 100%;
     }
     #models-panel {
         height: auto;
         padding: 0 0 1 0;
-        border-bottom: solid #262b40;
     }
     #resource-panel {
         height: auto;
-        padding: 1 0;
-        border-bottom: solid #262b40;
+        padding: 1 0 0 0;
     }
     #subway-panel {
+        height: auto;
+        padding: 1 0;
+    }
+    #mic-panel {
         height: auto;
         padding: 1 0 0 0;
     }
@@ -649,6 +686,7 @@ class TuiApp(App):
         Binding("ctrl+q", "exit_tui", "Quit", priority=True),
         Binding("ctrl+l", "clear_chat", "Clear chat"),
         Binding("ctrl+k", "toggle_command_palette", "Commands", priority=True),
+        Binding("ctrl+r", "toggle_listen", "Mic", priority=True),
         Binding("a", "toggle_autoscroll", "Auto-scroll", show=False),
         Binding("y", "copy_log", "Copy log", show=False),
     ]
@@ -701,6 +739,12 @@ class TuiApp(App):
         # Command palette visibility
         self._palette_open = False
 
+        # Continuous listen mode
+        self._listener = None
+        self._mic_level: float = 0.0
+        self._mic_state: str = "idle"
+        self._tts_cancel: "threading.Event | None" = None
+
     # ── compose ───────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
@@ -739,6 +783,7 @@ class TuiApp(App):
                                 markup=True,
                             )
                             yield Static("", id="research-log", markup=True)
+                            yield Static("", id="mic-panel", markup=True)
                         with Vertical(id="slash-terminal"):
                             yield Input(
                                 placeholder="/help",
@@ -798,12 +843,10 @@ class TuiApp(App):
         self.set_interval(0.1, self._flush_stream)
         self.set_interval(0.2, self._refresh_subway)
         self.set_interval(0.2, self._refresh_research_log)
+        self.set_interval(0.1, self._refresh_mic_panel)
 
         self._refresh_resources()
-        # The right rail has no final width until the first layout pass.
         self.call_after_refresh(self._refresh_right_rail)
-        # Focus input immediately so the cursor blinks before startup completes
-        self.call_after_refresh(lambda: self.query_one("#chat-input", Input).focus())
         self.run_worker(self._startup(), exclusive=False, name="startup")
 
     async def _startup(self) -> None:
@@ -816,10 +859,40 @@ class TuiApp(App):
         from utils import logger
         logger.init_file_logging("logs/app.log")
 
+        splash: SplashPanel | None = None
+        try:
+            splash = self.query_one("#splash", SplashPanel)
+        except Exception:
+            pass
+
+        _step_start = [0.0]
+
+        async def step(msg: str) -> None:
+            now = time.monotonic()
+            elapsed = now - _step_start[0]
+            if _step_start[0] and elapsed < 1.0:
+                await asyncio.sleep(1.0 - elapsed)
+            if splash is not None:
+                splash.set_status(msg)
+            _step_start[0] = time.monotonic()
+
+        await step("Establishing database connection…")
+
         from db.init import db_init
         from agents.persona import set_io_capabilities
         from utils.task_queue import worker
 
+        chat_log = self.query_one("#chat-log", RichLog)
+
+        try:
+            await db_init()
+        except Exception as exc:
+            chat_log.write(f"[bold red]Database error:[/bold red] {exc}")
+            if splash is not None:
+                splash._dismiss()
+            return
+
+        await step("Starting task queue…")
         asyncio.create_task(worker())
         set_io_capabilities(speak=self._speak, listen=self._listen)
 
@@ -828,28 +901,25 @@ class TuiApp(App):
             enable_emote()
 
         if self._speak:
+            await step("Loading voice models…")
             from voicebox.client import enable_tts
             enable_tts()
 
-        chat_log = self.query_one("#chat-log", RichLog)
-
-        try:
-            await db_init()
-        except Exception as exc:
-            chat_log.write(f"[bold red]Database error:[/bold red] {exc}")
-            return
+        await step("Applying preferences…")
+        from db.preferences import apply_preferences
+        await apply_preferences()
 
         if self._server:
+            await step("Starting API server…")
             from api.server import start_api_server
             await start_api_server(host="0.0.0.0", port=8000)
 
         if self._telegram:
+            await step("Connecting Telegram bot…")
             from skills.telegram_skill import start_telegram_bot
             await start_telegram_bot()
 
-        from db.preferences import apply_preferences
-        await apply_preferences()
-
+        await step("Loading session…")
         from utils.session_service import initialize_session, resume_session
         try:
             if self._session_id:
@@ -860,17 +930,33 @@ class TuiApp(App):
             chat_log.write(
                 f"[bold red]Could not resume session:[/bold red] {self._session_id}"
             )
+            if splash is not None:
+                splash._dismiss()
             return
 
         from utils.resource_monitor import push_context_to_file, set_context_used
         set_context_used(0)
         push_context_to_file()
 
+        await step("Generating greeting…")
         from skills.conversation.skill import generate_greeting
         greeting = await generate_greeting()
         self._write_jean(greeting)
 
-        self.query_one("#chat-input", Input).focus()
+        # Ensure last step is visible for at least 1s, then dwell 1s more
+        now = time.monotonic()
+        elapsed = now - _step_start[0]
+        if elapsed < 1.0:
+            await asyncio.sleep(1.0 - elapsed)
+        await asyncio.sleep(1.0)
+
+        if splash is not None:
+            splash._dismiss()
+        else:
+            self.query_one("#chat-input", Input).focus()
+
+        if self._listen:
+            self.action_toggle_listen()
 
     # ── resource refresh ──────────────────────────────────────────────────────
 
@@ -912,11 +998,22 @@ class TuiApp(App):
         from utils.agent_state import snapshot
         s = snapshot()
         try:
+            stt_active = self._listener is not None
+            current = "stt" if self._mic_state == "transcribing" else s.current
             self.query_one("#subway-panel", Static).update(
-                _subway_markup(s.current, s.label, s.completed, s.error,
+                _subway_markup(current, s.label, s.completed, s.error,
                                s.node_times, s.total_time,
                                self._right_panel_content_width(),
-                               include_tts=self._speak)
+                               include_tts=self._speak,
+                               include_stt=stt_active)
+            )
+        except Exception:
+            pass
+
+    def _refresh_mic_panel(self) -> None:
+        try:
+            self.query_one("#mic-panel", Static).update(
+                _mic_markup(self._mic_state, self._mic_level, self._right_panel_content_width())
             )
         except Exception:
             pass
@@ -1293,7 +1390,9 @@ class TuiApp(App):
         start = time.time()
 
         try:
-            _as.reset()
+            # Only reset if not coming from voice input (which already set up stt node)
+            if _as.snapshot().current not in ("stt", "routing"):
+                _as.reset()
 
             from skills.conversation.skill import get_recent_history, consume_pending_intent, resolve_query
             from agents.action_resolver.agent import resolve_action_query
@@ -1395,13 +1494,19 @@ class TuiApp(App):
                 from voicebox.client import active_voice_id, speak as vb_speak
                 from agents.persona import get_active_voice_id
 
-                await asyncio.to_thread(
-                    vb_speak,
-                    response,
-                    get_active_voice_id() or active_voice_id,
-                )
-
-            _as.set_node("idle")
+                self._tts_cancel = threading.Event()
+                try:
+                    await asyncio.to_thread(
+                        vb_speak,
+                        response,
+                        get_active_voice_id() or active_voice_id,
+                        self._tts_cancel,
+                        lambda: _as.set_node("idle"),
+                    )
+                finally:
+                    self._tts_cancel = None
+            else:
+                _as.set_node("idle")
             self._busy = False
 
             # Process the next queued request if any
@@ -1430,6 +1535,54 @@ class TuiApp(App):
 
     # ── actions ───────────────────────────────────────────────────────────────
 
+    def action_toggle_listen(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+            self._mic_state = "idle"
+            self._mic_level = 0.0
+            return
+
+        from voicebox.listener import ContinuousListener
+
+        def _on_transcript(text: str) -> None:
+            self.call_from_thread(self._handle_voice_input, text)
+
+        def _on_level(level: float) -> None:
+            self._mic_level = level
+
+        def _on_state(state: str) -> None:
+            self._mic_state = state
+            if state == "transcribing":
+                from utils import agent_state as _as
+                _as.reset()
+                _as.set_node("stt")
+
+        def _on_speech_detected() -> None:
+            if self._tts_cancel is not None:
+                self._tts_cancel.set()
+
+        self._listener = ContinuousListener(
+            on_transcript=_on_transcript,
+            on_level=_on_level,
+            on_state=_on_state,
+            on_speech_detected=_on_speech_detected,
+        )
+        self._listener.start()
+
+    def _handle_voice_input(self, text: str) -> None:
+        from utils import agent_state as _as
+        _as.set_node("routing")
+        self._write_user(text)
+        self._stream_tokens.clear()
+        self._streaming = True
+        self._busy = True
+        self.run_worker(
+            self._process_message(text),
+            exclusive=False,
+            name="pipeline",
+        )
+
     def action_toggle_command_palette(self) -> None:
         self._palette_open = not self._palette_open
         try:
@@ -1456,6 +1609,9 @@ class TuiApp(App):
         self._update_monitor_stats()
 
     async def _graceful_quit(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
         from utils.langmem_service import close_memory_store
         from utils.session_service import get_active_session_id
         session_id = get_active_session_id()

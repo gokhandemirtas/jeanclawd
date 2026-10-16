@@ -549,6 +549,16 @@ async def cmd_look(args: str) -> None:
 	logger.info(f"Image description:\n{description}")
 
 
+async def _index_reflection(path: str) -> None:
+	"""Embed and cache one reflection file immediately after it is written."""
+	try:
+		from utils.introspection_index import index_reflection
+		await index_reflection(path)
+	except Exception as exc:
+		from utils.log import logger as _log
+		_log.warning(f"[introspection_index] background indexing failed for {path}: {exc}")
+
+
 async def cmd_introspect() -> None:
 	"""Inspect the safe codebase in bounded batches and persist assessments."""
 	import os
@@ -690,6 +700,7 @@ async def cmd_introspect() -> None:
 				)
 				saved += 1
 				logger.event("introspection_batch_completed", batch=index, scope=scope, reflection_path=path)
+				asyncio.create_task(_index_reflection(path))
 			except Exception as exc:
 				logger.event("introspection_batch_failed", level="ERROR", batch=index, scope=scope, error_type=type(exc).__name__)
 		logger.event("introspection_completed", saved=saved, total_batches=len(batches))
@@ -702,9 +713,6 @@ async def cmd_introspection(args: str) -> None:
 	import os
 
 	from pydantic import BaseModel, Field
-	from rich.console import Console
-	from rich.live import Live
-	from rich.spinner import Spinner
 
 	from utils.self_inspector import list_reflections, read_reflection
 
@@ -722,77 +730,40 @@ async def cmd_introspection(args: str) -> None:
 			logger.info("No introspection records found. Run /introspect first.")
 			return
 
+		from utils.introspection_index import search_introspections
+		logger.info(f"[introspection] Searching {len(paths)} records via vector similarity…")
+		top_paths = await search_introspections(question, paths)
+
 		records = []
-		for path in paths:
+		for path in top_paths:
 			try:
 				records.append((path, read_reflection(path.rsplit("/", 1)[-1], max_bytes=64_000)))
 			except (OSError, ValueError, PermissionError) as exc:
 				logger.info(f"[introspection] Skipping {path}: {exc}")
 
-		batches: list[str] = []
-		current: list[str] = []
-		current_chars = 0
-		for path, record in records:
-			block = f"\n--- {path} ---\n{record}"
-			if current and current_chars + len(block) > 24_000:
-				batches.append("\n".join(current))
-				current = []
-				current_chars = 0
-			current.append(block)
-			current_chars += len(block)
-		if current:
-			batches.append("\n".join(current))
+		if not records:
+			logger.info("No readable introspection records found.")
+			return
 
-		logger.info(f"[introspection] Asking about {len(records)} records in {len(batches)} batches")
+		logger.info(f"[introspection] Querying top {len(records)} relevant records")
+		context = "\n".join(f"\n--- {p} ---\n{r}" for p, r in records)
+
 		from utils.llm_structured_output import generate_structured_output
-
-		batch_answers = []
-		for index, batch in enumerate(batches, 1):
-			logger.info(f"[introspection] Analyzing memory batch {index}/{len(batches)}")
-			with Live(
-				Spinner("dots", text=f"Reading introspection memory ({index}/{len(batches)})…"),
-				console=Console(stderr=True),
-				refresh_per_second=10,
-				transient=True,
-			):
-				result = await asyncio.to_thread(
-					generate_structured_output,
-					model_name=os.environ["MODEL_GENERALIST"],
-					user_prompt=(
-						f"Developer question: {question}\n\n"
-						"Answer using only the following persisted introspection records. "
-						"Separate evidence from uncertainty and do not invent capabilities.\n"
-						+ batch
-					),
-					system_prompt="You are reviewing the agent's private introspection memory for a developer.",
-					pydantic_model=_Answer,
-					max_tokens=1_024,
-					temperature=0.1,
-				)
-			batch_answers.append(result.answer)
-
-		logger.info("[introspection] Synthesizing the answer")
-		with Live(
-			Spinner("dots", text="Synthesizing introspection answer…"),
-			console=Console(stderr=True),
-			refresh_per_second=10,
-			transient=True,
-		):
-			final = await asyncio.to_thread(
-				generate_structured_output,
-				model_name=os.environ["MODEL_GENERALIST"],
-				user_prompt=(
-					f"Developer question: {question}\n\n"
-					"Synthesize a direct answer from these batch analyses. "
-					"Mention uncertainty where the records do not establish a fact.\n\n"
-					+ "\n\n".join(batch_answers)
-				),
-				system_prompt="You are the agent's introspection-memory question-answering layer.",
-				pydantic_model=_Answer,
-				max_tokens=1_024,
-				temperature=0.1,
-			)
-		logger.info(final.answer)
+		result = await asyncio.to_thread(
+			generate_structured_output,
+			model_name=os.environ["MODEL_GENERALIST"],
+			user_prompt=(
+				f"Developer question: {question}\n\n"
+				"Answer using only the following introspection records. "
+				"Separate evidence from uncertainty and do not invent capabilities.\n"
+				+ context
+			),
+			system_prompt="You are reviewing the agent's private introspection memory for a developer.",
+			pydantic_model=_Answer,
+			max_tokens=1_024,
+			temperature=0.1,
+		)
+		logger.info(result.answer)
 	except Exception as exc:
 		logger.error(f"Introspection query failed: {exc}")
 

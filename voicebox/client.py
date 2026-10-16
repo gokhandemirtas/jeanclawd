@@ -185,6 +185,7 @@ def speak(
     text: str,
     voice_id: str | None = None,
     cancel_event: threading.Event | None = None,
+    on_synthesized: "Callable[[], None] | None" = None,
 ) -> None:
     """Synthesize text via voicebox and play locally. Cancellable via cancel_event."""
     text = _sanitize(text)
@@ -209,6 +210,9 @@ def speak(
     except Exception as exc:
         logger.error(f"[voicebox] TTS synthesis failed: {exc}")
         return
+
+    if on_synthesized is not None:
+        on_synthesized()
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(wav_bytes)
