@@ -51,9 +51,31 @@ _SUPERTONIC_VOICE_MAP: dict[str, str] = {
 }
 
 
+_PERSONA_EMOTIONS: dict[str, str] = {
+    "jean":        "calm",
+    "jerk":        "neutral",
+    "beth":        "sad",
+    "kimi":        "happy",
+    "borg":        "neutral",
+    "fred":        "angry",
+    "ztyntchtch":  "excited",
+    "morrow":      "calm",
+    "riff":        "excited",
+    "mr_meowsky":  "neutral",
+}
+
+
 def _resolve_speaker(voice_id: str) -> str:
     table = _QWEN_VOICE_MAP if VOICEBOX_BACKEND == "qwen" else _SUPERTONIC_VOICE_MAP
     return table.get(voice_id.lower(), voice_id)
+
+
+def _persona_emotion() -> str:
+    try:
+        from agents.persona import get_active_persona_id
+        return _PERSONA_EMOTIONS.get(get_active_persona_id(), "neutral")
+    except Exception:
+        return "neutral"
 
 active_voice_id: str = DEFAULT_VOICE
 _tts_enabled: bool = False
@@ -115,9 +137,14 @@ def transcribe(audio_path: str) -> str:
 def synthesize(text: str, voice_id: str | None = None, stream: bool = False) -> bytes:
     """POST to voicebox /synthesize and return WAV bytes (stream=False) or raw PCM."""
     url = f"{VOICEBOX_HOST}/synthesize"
+    speaker = _resolve_speaker(voice_id or active_voice_id)
     payload = {
         "text": text,
+        "speaker": speaker,
+        "emotion": _persona_emotion(),
         "persona": "overclocked_ai",
+        "instruction": "Speak clearly with a friendly, conversational delivery.",
+        "language": "English",
         "stream": stream,
     }
     resp = requests.post(url, json=payload, timeout=VOICEBOX_TIMEOUT)
@@ -163,6 +190,17 @@ def speak(
     text = _sanitize(text)
     if not text:
         logger.warning("[voicebox] speak() called with empty text, skipping")
+        return
+
+    try:
+        from agents.persona import get_active_persona_id
+        from voicebox.speech_transforms import transform_for_persona
+        text = transform_for_persona(text, get_active_persona_id())
+    except Exception:
+        pass  # transform failures must never silence the response
+
+    if not text:
+        logger.warning("[voicebox] speak() transform produced empty text, skipping")
         return
 
     stop_event = cancel_event or threading.Event()

@@ -559,7 +559,7 @@ class TuiApp(App):
         background: #0d0f1a;
     }
     #slash-log {
-        height: auto;
+        height: 1fr;
         border: none;
         padding: 0 1;
         background: #0d0f1a;
